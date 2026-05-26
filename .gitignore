@@ -1,0 +1,30 @@
+node_modules
+dist
+dist-ssr
+*.local
+
+# Local assistant/tooling memory (keep on this machine, do not publish)
+.cunzhi-memory/
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Tauri / Rust
+/src-tauri/target
+/src-tauri/vendor/
+**/*.rs.bk
+
+# Logs
+*.log
+logs/
+
+# OS
+Thumbs.db

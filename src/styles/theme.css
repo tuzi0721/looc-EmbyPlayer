@@ -1,0 +1,185 @@
+:root {
+  /* iOS-like base palette (dark) */
+  --bg-base: #0a0a0c;
+  --bg-elevated: rgba(28, 28, 32, 0.7);
+  --bg-overlay: rgba(0, 0, 0, 0.25);
+
+  --fg-primary: rgba(255, 255, 255, 0.92);
+  --fg-secondary: rgba(255, 255, 255, 0.62);
+  --fg-tertiary: rgba(255, 255, 255, 0.42);
+  --fg-quaternary: rgba(255, 255, 255, 0.18);
+
+  --separator: rgba(255, 255, 255, 0.08);
+  --separator-strong: rgba(255, 255, 255, 0.14);
+
+  /* Hills Lite purple accent */
+  --accent: #a855f7;
+  --accent-hover: #c084fc;
+  --accent-pressed: #9333ea;
+  --accent-soft: rgba(168, 85, 247, 0.18);
+  --accent-grad: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%);
+  --danger: #ff453a;
+  --success: #30d158;
+  --warning: #ffd60a;
+
+  --line-healthy: #30d158;
+  --line-slow: #ffd60a;
+  --line-degraded: #ff9f0a;
+  --line-down: #ff453a;
+  --line-unknown: rgba(255, 255, 255, 0.35);
+
+  /* Glass tokens */
+  --glass-blur: 24px;
+  --glass-saturate: 180%;
+  --glass-bg: rgba(28, 28, 32, 0.55);
+  --glass-bg-strong: rgba(28, 28, 32, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.10);
+  --glass-border-strong: rgba(255, 255, 255, 0.18);
+  --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --glass-radius: 18px;
+  --glass-radius-lg: 28px;
+
+  --header-h: 52px;
+  --topbar-h: 44px;
+  --nav-h: 56px;
+  --content-pad: 24px;
+  --sidebar-w: 220px;
+
+  /* Reference player surfaces */
+  --surface-1: #121212;
+  --surface-2: #1a1a1a;
+  --surface-3: #252525;
+
+  --font-sans:
+    -apple-system, "SF Pro Display", "SF Pro Text", "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue",
+    Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --easing-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --easing-glide: cubic-bezier(0.4, 0, 0.2, 1);
+
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg-base: #f2f2f7;
+  --bg-elevated: rgba(255, 255, 255, 0.7);
+  --bg-overlay: rgba(255, 255, 255, 0.5);
+
+  --fg-primary: rgba(0, 0, 0, 0.92);
+  --fg-secondary: rgba(0, 0, 0, 0.6);
+  --fg-tertiary: rgba(0, 0, 0, 0.42);
+  --fg-quaternary: rgba(0, 0, 0, 0.18);
+
+  --separator: rgba(0, 0, 0, 0.08);
+  --separator-strong: rgba(0, 0, 0, 0.14);
+
+  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-bg-strong: rgba(255, 255, 255, 0.78);
+  --glass-border: rgba(0, 0, 0, 0.06);
+  --glass-border-strong: rgba(0, 0, 0, 0.10);
+
+  color-scheme: light;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--fg-primary);
+  background: var(--bg-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+  overflow: hidden;
+}
+
+/* When the embedded mpv child window is active we punch through the webview
+   so the native video shows through. */
+html.embedded-player,
+html.embedded-player body {
+  background: transparent !important;
+}
+html.embedded-player .app-backdrop {
+  display: none;
+}
+
+#app {
+  position: relative;
+  isolation: isolate;
+}
+
+button {
+  font-family: inherit;
+  color: inherit;
+}
+
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.app-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(1100px 800px at 12% -8%, rgba(10, 132, 255, 0.28), transparent 60%),
+    radial-gradient(900px 700px at 110% 110%, rgba(191, 90, 255, 0.22), transparent 60%),
+    radial-gradient(700px 500px at 75% 0%, rgba(50, 173, 230, 0.18), transparent 60%),
+    linear-gradient(180deg, #07070a 0%, #0a0a0c 100%);
+}
+
+.app-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 3px 3px;
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+/* WebView2 on Windows: backdrop-filter + window move causes severe UI freeze. */
+html.platform-windows .app-sidebar,
+html.platform-windows .topbar,
+html.platform-windows .navbar.glass-thin,
+html.platform-windows .glass,
+html.platform-windows .glass-thin {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html.platform-windows .app-sidebar {
+  background: rgba(22, 22, 26, 0.96);
+}
+html.platform-windows .topbar {
+  background: rgba(22, 22, 26, 0.92);
+}

@@ -1,0 +1,12 @@
+pub mod auth;
+pub mod danmaku;
+pub mod download;
+pub mod media;
+pub mod notifications;
+pub mod player;
+pub mod remote;
+pub mod server;
+pub mod settings;
+pub mod shortcuts;
+pub mod subtitle;
+pub mod system_media;

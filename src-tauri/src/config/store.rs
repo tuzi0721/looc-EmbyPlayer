@@ -1,0 +1,278 @@
+use std::sync::Arc;
+
+use parking_lot::RwLock;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+use serde_json::Value;
+use tauri::{AppHandle, Wry};
+use tauri_plugin_store::{Store, StoreExt};
+
+use crate::config::models::{Account, AppSettings, Server};
+use crate::download::DownloadTask;
+use crate::error::{AppError, AppResult};
+use crate::notifications::Notification;
+
+const STORE_FILE: &str = "config.json";
+
+const KEY_SERVERS: &str = "servers";
+const KEY_ACCOUNTS: &str = "accounts";
+const KEY_ACTIVE_ACCOUNT: &str = "active_account_id";
+const KEY_SETTINGS: &str = "settings";
+const KEY_DOWNLOADS: &str = "downloads";
+const KEY_NOTIFICATIONS: &str = "notifications";
+
+#[derive(Clone)]
+pub struct ConfigStore {
+    inner: Arc<RwLock<ConfigInner>>,
+    store: Arc<Store<Wry>>,
+}
+
+struct ConfigInner {
+    servers: Vec<Server>,
+    accounts: Vec<Account>,
+    active_account_id: Option<String>,
+    settings: AppSettings,
+    downloads: Vec<DownloadTask>,
+    notifications: Vec<Notification>,
+}
+
+impl ConfigStore {
+    pub fn load(handle: &AppHandle) -> AppResult<Self> {
+        let store = handle.store(STORE_FILE)?;
+
+        let servers: Vec<Server> = read_or_default(&store, KEY_SERVERS)?;
+        let accounts: Vec<Account> = read_or_default(&store, KEY_ACCOUNTS)?;
+        let active_account_id: Option<String> = read_optional(&store, KEY_ACTIVE_ACCOUNT)?;
+        let settings: AppSettings = read_or_default(&store, KEY_SETTINGS)?;
+        let downloads: Vec<DownloadTask> = read_or_default(&store, KEY_DOWNLOADS)?;
+        let notifications: Vec<Notification> = read_or_default(&store, KEY_NOTIFICATIONS)?;
+
+        Ok(Self {
+            inner: Arc::new(RwLock::new(ConfigInner {
+                servers,
+                accounts,
+                active_account_id,
+                settings,
+                downloads,
+                notifications,
+            })),
+            store,
+        })
+    }
+
+    pub fn servers(&self) -> Vec<Server> {
+        self.inner.read().servers.clone()
+    }
+
+    pub fn server(&self, id: &str) -> Option<Server> {
+        self.inner.read().servers.iter().find(|s| s.id == id).cloned()
+    }
+
+    pub fn upsert_server(&self, server: Server) -> AppResult<()> {
+        {
+            let mut g = self.inner.write();
+            if let Some(existing) = g.servers.iter_mut().find(|s| s.id == server.id) {
+                *existing = server;
+            } else {
+                g.servers.push(server);
+            }
+        }
+        self.persist_servers()
+    }
+
+    pub fn remove_server(&self, id: &str) -> AppResult<()> {
+        {
+            let mut g = self.inner.write();
+            g.servers.retain(|s| s.id != id);
+            g.accounts.retain(|a| a.server_id != id);
+            if let Some(active) = &g.active_account_id {
+                if !g.accounts.iter().any(|a| a.id == *active) {
+                    g.active_account_id = None;
+                }
+            }
+        }
+        self.persist_servers()?;
+        self.persist_accounts()?;
+        self.persist_active_account()?;
+        Ok(())
+    }
+
+    pub fn accounts(&self) -> Vec<Account> {
+        self.inner.read().accounts.clone()
+    }
+
+    pub fn account(&self, id: &str) -> Option<Account> {
+        self.inner.read().accounts.iter().find(|a| a.id == id).cloned()
+    }
+
+    pub fn upsert_account(&self, account: Account) -> AppResult<()> {
+        {
+            let mut g = self.inner.write();
+            if let Some(existing) = g.accounts.iter_mut().find(|a| a.id == account.id) {
+                *existing = account;
+            } else {
+                g.accounts.push(account);
+            }
+        }
+        self.persist_accounts()
+    }
+
+    pub fn remove_account(&self, id: &str) -> AppResult<()> {
+        {
+            let mut g = self.inner.write();
+            g.accounts.retain(|a| a.id != id);
+            if g.active_account_id.as_deref() == Some(id) {
+                g.active_account_id = None;
+            }
+        }
+        self.persist_accounts()?;
+        self.persist_active_account()?;
+        Ok(())
+    }
+
+    pub fn active_account(&self) -> Option<Account> {
+        let g = self.inner.read();
+        g.active_account_id
+            .as_ref()
+            .and_then(|id| g.accounts.iter().find(|a| a.id == *id).cloned())
+    }
+
+    pub fn set_active_account(&self, id: Option<String>) -> AppResult<()> {
+        {
+            let mut g = self.inner.write();
+            g.active_account_id = id;
+        }
+        self.persist_active_account()
+    }
+
+    pub fn settings(&self) -> AppSettings {
+        self.inner.read().settings.clone()
+    }
+
+    pub fn update_settings<F: FnOnce(&mut AppSettings)>(&self, f: F) -> AppResult<()> {
+        {
+            let mut g = self.inner.write();
+            f(&mut g.settings);
+        }
+        self.persist_settings()
+    }
+
+    pub fn downloads(&self) -> Vec<DownloadTask> {
+        self.inner.read().downloads.clone()
+    }
+
+    pub fn download(&self, id: &str) -> Option<DownloadTask> {
+        self.inner.read().downloads.iter().find(|d| d.id == id).cloned()
+    }
+
+    pub fn upsert_download(&self, task: DownloadTask) -> AppResult<()> {
+        {
+            let mut g = self.inner.write();
+            if let Some(existing) = g.downloads.iter_mut().find(|d| d.id == task.id) {
+                *existing = task;
+            } else {
+                g.downloads.push(task);
+            }
+        }
+        self.persist_downloads()
+    }
+
+    pub fn remove_download(&self, id: &str) -> AppResult<()> {
+        {
+            let mut g = self.inner.write();
+            g.downloads.retain(|d| d.id != id);
+        }
+        self.persist_downloads()
+    }
+
+    pub fn notifications(&self) -> Vec<Notification> {
+        self.inner.read().notifications.clone()
+    }
+
+    pub fn replace_notifications(&self, items: Vec<Notification>) -> AppResult<()> {
+        {
+            let mut g = self.inner.write();
+            g.notifications = items;
+        }
+        self.persist_notifications()
+    }
+
+    fn persist_servers(&self) -> AppResult<()> {
+        let v = serde_json::to_value(&self.inner.read().servers)?;
+        self.store.set(KEY_SERVERS, v);
+        self.store.save()?;
+        Ok(())
+    }
+
+    fn persist_accounts(&self) -> AppResult<()> {
+        let v = serde_json::to_value(&self.inner.read().accounts)?;
+        self.store.set(KEY_ACCOUNTS, v);
+        self.store.save()?;
+        Ok(())
+    }
+
+    fn persist_active_account(&self) -> AppResult<()> {
+        let v = serde_json::to_value(&self.inner.read().active_account_id)?;
+        self.store.set(KEY_ACTIVE_ACCOUNT, v);
+        self.store.save()?;
+        Ok(())
+    }
+
+    /// Read an arbitrary JSON value stored under `key`, or `None` if the key
+    /// is unset (or stored as `null`). Used by experimental subsystems that
+    /// don't yet warrant a dedicated typed slot.
+    pub fn get_raw(&self, key: &str) -> Option<Value> {
+        match self.store.get(key) {
+            Some(Value::Null) | None => None,
+            Some(v) => Some(v),
+        }
+    }
+
+    /// Persist an arbitrary JSON value under `key`.
+    pub fn set_raw(&self, key: &str, value: Value) -> AppResult<()> {
+        self.store.set(key, value);
+        self.store.save()?;
+        Ok(())
+    }
+
+    fn persist_settings(&self) -> AppResult<()> {
+        let v = serde_json::to_value(&self.inner.read().settings)?;
+        self.store.set(KEY_SETTINGS, v);
+        self.store.save()?;
+        Ok(())
+    }
+
+    fn persist_downloads(&self) -> AppResult<()> {
+        let v = serde_json::to_value(&self.inner.read().downloads)?;
+        self.store.set(KEY_DOWNLOADS, v);
+        self.store.save()?;
+        Ok(())
+    }
+
+    fn persist_notifications(&self) -> AppResult<()> {
+        let v = serde_json::to_value(&self.inner.read().notifications)?;
+        self.store.set(KEY_NOTIFICATIONS, v);
+        self.store.save()?;
+        Ok(())
+    }
+}
+
+fn read_or_default<T>(store: &Store<Wry>, key: &str) -> AppResult<T>
+where
+    T: DeserializeOwned + Default + Serialize,
+{
+    match store.get(key) {
+        Some(v) => serde_json::from_value::<T>(v).map_err(AppError::from),
+        None => Ok(T::default()),
+    }
+}
+
+fn read_optional<T>(store: &Store<Wry>, key: &str) -> AppResult<Option<T>>
+where
+    T: DeserializeOwned,
+{
+    match store.get(key) {
+        Some(Value::Null) | None => Ok(None),
+        Some(v) => serde_json::from_value(v).map_err(AppError::from),
+    }
+}
