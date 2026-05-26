@@ -2,6 +2,9 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 
 import { api } from "@/api";
+import { useAuthStore } from "@/stores/auth";
+import { useLibraryStore } from "@/stores/library";
+import { useServerStore } from "@/stores/server";
 import type { MpvSnapshot } from "@/types/models";
 
 export const usePlayerStore = defineStore("player", () => {
@@ -33,11 +36,6 @@ export const usePlayerStore = defineStore("player", () => {
   async function pushNowPlaying() {
     if (!itemId.value) return;
     try {
-      const [{ useLibraryStore }, { useAuthStore }, { useServerStore }] = await Promise.all([
-        import("@/stores/library"),
-        import("@/stores/auth"),
-        import("@/stores/server"),
-      ]);
       const lib = useLibraryStore();
       const auth = useAuthStore();
       const serverStore = useServerStore();

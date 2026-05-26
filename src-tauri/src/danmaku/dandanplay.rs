@@ -26,6 +26,7 @@ struct MatchResponse {
     matches: Option<Vec<MatchEntry>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MatchEntry {
@@ -36,6 +37,7 @@ struct MatchEntry {
     episode_title: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct CommentResponse {
     count: i64,

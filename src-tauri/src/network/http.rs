@@ -9,6 +9,7 @@ use crate::error::{AppError, AppResult};
 /// Per-request context: chosen line + the effective user agent and extra headers.
 #[derive(Debug, Clone)]
 pub struct RequestContext {
+    #[allow(dead_code)]
     pub line: Line,
     pub effective_ua: String,
     pub extra_headers: Vec<(String, String)>,

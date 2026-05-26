@@ -64,6 +64,10 @@ pub struct MediaItem {
     #[serde(default)]
     pub official_rating: Option<String>,
     #[serde(default)]
+    pub genres: Vec<String>,
+    #[serde(default)]
+    pub genre_items: Vec<NameIdPair>,
+    #[serde(default)]
     pub run_time_ticks: Option<i64>,
     #[serde(default)]
     pub series_name: Option<String>,
@@ -81,6 +85,14 @@ pub struct MediaItem {
     pub backdrop_image_tags: Option<Vec<String>>,
     #[serde(default)]
     pub user_data: Option<UserData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct NameIdPair {
+    pub name: String,
+    #[serde(default)]
+    pub id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

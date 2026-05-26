@@ -10,8 +10,10 @@ use crate::error::{AppError, AppResult};
 /// Result of a race: which contestant won and how long it took.
 #[derive(Debug)]
 pub struct RaceOutcome<T> {
+    #[allow(dead_code)]
     pub winner_id: String,
     pub value: T,
+    #[allow(dead_code)]
     pub elapsed_ms: u64,
 }
 

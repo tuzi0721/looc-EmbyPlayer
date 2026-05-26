@@ -51,6 +51,7 @@ pub fn sessions_self() -> &'static str {
     "Sessions"
 }
 
+#[allow(dead_code)]
 pub fn image(item_id: &str, image_type: &str) -> String {
     format!("Items/{item_id}/Images/{image_type}")
 }
@@ -63,14 +64,17 @@ pub fn show_episodes(series_id: &str) -> String {
     format!("Shows/{series_id}/Episodes")
 }
 
+#[allow(dead_code)]
 pub fn next_up() -> &'static str {
     "Shows/NextUp"
 }
 
+#[allow(dead_code)]
 pub fn latest(user_id: &str) -> String {
     format!("Users/{user_id}/Items/Latest")
 }
 
+#[allow(dead_code)]
 pub fn similar_items(item_id: &str) -> String {
     format!("Items/{item_id}/Similar")
 }

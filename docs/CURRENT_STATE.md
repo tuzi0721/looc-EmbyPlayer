@@ -1,8 +1,8 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-05-26（文档审计回写，对齐当前代码事实）  
+> **更新时间**：2026-05-27（构建与 warning 清理验证）  
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)  
-> **变更日志**：[`CHANGE_LOG/2026-05-26-2330-doc-audit-sync.md`](./CHANGE_LOG/2026-05-26-2330-doc-audit-sync.md)
+> **变更日志**：[`CHANGE_LOG/2026-05-27-0235-build-warning-cleanup.md`](./CHANGE_LOG/2026-05-27-0235-build-warning-cleanup.md)
 
 ---
 
@@ -45,6 +45,7 @@
 - error 123 已修复（`ServerOptions::create(&pipe_path)`）
 - **2026-05-25**：离开播放页时 `embedDetach` 完整 teardown（shutdown mpv + DestroyWindow）
 - **2026-05-25**：`ensure_started` 检测 mpv 进程存活，死亡自动重启
+- **2026-05-27**：清理 Rust `cargo check --all-targets` unused warning；前端播放器 store 改为静态导入，避免 Rollup 动态/静态混用 chunk 提示
 
 ---
 
@@ -52,6 +53,7 @@
 
 ```powershell
 npm run build
+cargo check --manifest-path src-tauri/Cargo.toml --all-targets
 npm run tauri:build
 ```
 

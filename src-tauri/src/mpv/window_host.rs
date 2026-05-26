@@ -11,7 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,7 +42,7 @@ impl HostWindow {
         #[cfg(not(target_os = "windows"))]
         {
             let _ = parent;
-            Err(AppError::Mpv(
+            Err(crate::error::AppError::Mpv(
                 "embedded MPV window currently only supported on Windows".into(),
             ))
         }

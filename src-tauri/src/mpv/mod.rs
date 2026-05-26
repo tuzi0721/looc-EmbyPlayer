@@ -6,6 +6,6 @@ pub mod window_host;
 #[cfg(feature = "mpv-embedded")]
 pub mod embedded;
 
-pub use backend::{MpvBackend, MpvCommand, MpvProperty, MpvSnapshot, MpvTrackInfo, TrackKind};
+pub use backend::{MpvCommand, MpvSnapshot};
 pub use manager::MpvManager;
-pub use window_host::{HostWindow, ParentHandle, PlayerRect};
+pub use window_host::{ParentHandle, PlayerRect};

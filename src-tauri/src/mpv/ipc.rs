@@ -316,7 +316,7 @@ fn next_id() -> u64 {
 }
 
 async fn run_io<R, W>(
-    mut reader: R,
+    reader: R,
     mut writer: W,
     mut cmd_rx: mpsc::Receiver<OutgoingCommand>,
     inner_ref: Arc<Mutex<Option<Inner>>>,
@@ -355,7 +355,7 @@ async fn run_io<R, W>(
             }
         }
         // mpv closed the IPC pipe — drop session so the next play respawns mpv.
-        let dead_child = inner_for_read.lock().take().map(|mut inner| inner.child);
+        let dead_child = inner_for_read.lock().take().map(|inner| inner.child);
         if let Some(mut child) = dead_child {
             let _ = child.kill().await;
         }
@@ -375,7 +375,7 @@ async fn run_io<R, W>(
     }
 
     read_task.abort();
-    let dead_child = inner_ref.lock().take().map(|mut inner| inner.child);
+    let dead_child = inner_ref.lock().take().map(|inner| inner.child);
     if let Some(mut child) = dead_child {
         let _ = child.kill().await;
     }

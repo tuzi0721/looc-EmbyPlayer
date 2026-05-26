@@ -86,6 +86,7 @@ pub enum MpvCommand {
     CycleSubtitle,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MpvProperty {
     Pause(bool),

@@ -92,6 +92,44 @@ const metaParts = computed(() => {
   return parts;
 });
 
+const itemTypeLabel = computed(() => {
+  switch (item.value?.Type) {
+    case "Movie":
+      return "电影";
+    case "Series":
+      return "剧集";
+    case "Episode":
+      return "单集";
+    case "Season":
+      return "季";
+    case "Audio":
+      return "音乐";
+    case "MusicAlbum":
+      return "专辑";
+    case "BoxSet":
+      return "合集";
+    case "Folder":
+      return "文件夹";
+    default:
+      return item.value?.Type ?? "";
+  }
+});
+
+const genreLabels = computed(() => {
+  const i = item.value;
+  if (!i) return [];
+  const names = [
+    ...(i.Genres ?? []),
+    ...((i.GenreItems ?? []).map((g) => g.Name).filter(Boolean)),
+  ];
+  return Array.from(new Set(names.map((name) => name.trim()).filter(Boolean))).slice(0, 6);
+});
+
+const heroTags = computed(() => {
+  const tags = [itemTypeLabel.value, ...genreLabels.value].filter(Boolean);
+  return Array.from(new Set(tags)).slice(0, 7);
+});
+
 const resumeMs = computed(() => {
   const target = continueEpisode.value ?? item.value;
   const ticks = target?.UserData?.PlaybackPositionTicks ?? 0;
@@ -212,6 +250,20 @@ function isCurrentEpisode(ep: MediaItem) {
   const c = continueEpisode.value;
   return c?.Id === ep.Id;
 }
+
+function episodeProgress(ep: MediaItem) {
+  const explicit = ep.UserData?.PlayedPercentage;
+  if (explicit != null) return Math.max(0, Math.min(100, explicit));
+  const position = ep.UserData?.PlaybackPositionTicks ?? 0;
+  const runtime = ep.RunTimeTicks ?? 0;
+  if (position <= 0 || runtime <= 0) return 0;
+  return Math.max(0, Math.min(100, (position / runtime) * 100));
+}
+
+function hasEpisodeProgress(ep: MediaItem) {
+  const progress = episodeProgress(ep);
+  return progress > 0 && progress < 100 && !ep.UserData?.Played;
+}
 </script>
 
 <template>
@@ -271,6 +323,10 @@ function isCurrentEpisode(ep: MediaItem) {
 
             <h1 class="hero__title">{{ item.SeriesName ?? item.Name }}</h1>
             <p v-if="episodeSubtitle" class="hero__ep">{{ episodeSubtitle }}</p>
+
+            <div v-if="heroTags.length" class="hero__tags">
+              <span v-for="tag in heroTags" :key="tag">{{ tag }}</span>
+            </div>
 
             <div v-if="metaParts.length" class="hero__meta">
               <span v-for="(p, i) in metaParts" :key="i">{{ p }}</span>
@@ -332,6 +388,9 @@ function isCurrentEpisode(ep: MediaItem) {
             <div class="ep-card__thumb">
               <img v-if="imageUrl(ep, 'Primary', 480)" :src="imageUrl(ep, 'Primary', 480)!" :alt="ep.Name" />
               <div v-else class="ep-card__placeholder">{{ ep.IndexNumber ?? "?" }}</div>
+              <div v-if="hasEpisodeProgress(ep)" class="ep-card__progress">
+                <span :style="{ width: episodeProgress(ep) + '%' }" />
+              </div>
             </div>
             <div class="ep-card__title">{{ ep.Name }}</div>
           </button>
@@ -496,6 +555,21 @@ function isCurrentEpisode(ep: MediaItem) {
   font-size: 14px;
   color: var(--fg-secondary);
 }
+.hero__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.hero__tags span {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--fg-secondary);
+  font-size: 12px;
+  line-height: 1;
+}
 .hero__meta {
   display: flex;
   flex-wrap: wrap;
@@ -654,6 +728,7 @@ function isCurrentEpisode(ep: MediaItem) {
   padding: 0;
 }
 .ep-card__thumb {
+  position: relative;
   aspect-ratio: 16 / 9;
   border-radius: 10px;
   overflow: hidden;
@@ -678,6 +753,20 @@ function isCurrentEpisode(ep: MediaItem) {
   font-size: 22px;
   font-weight: 700;
   color: var(--fg-tertiary);
+}
+.ep-card__progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.18);
+}
+.ep-card__progress span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
 }
 .ep-card__title {
   margin-top: 8px;

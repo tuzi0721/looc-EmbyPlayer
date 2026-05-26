@@ -69,6 +69,11 @@ export interface UserData {
   PlayCount: number;
 }
 
+export interface NameIdPair {
+  Name: string;
+  Id?: string | null;
+}
+
 export interface MediaItem {
   Id: string;
   Name: string;
@@ -77,6 +82,8 @@ export interface MediaItem {
   ProductionYear?: number | null;
   CommunityRating?: number | null;
   OfficialRating?: string | null;
+  Genres?: string[] | null;
+  GenreItems?: NameIdPair[] | null;
   RunTimeTicks?: number | null;
   SeriesName?: string | null;
   SeriesId?: string | null;

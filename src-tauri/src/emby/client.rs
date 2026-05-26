@@ -171,6 +171,11 @@ impl EmbyClient {
             &line.base_url,
             &endpoints::user_item(&account.user_id, item_id),
         )?;
+        let mut url = url;
+        url.query_pairs_mut().append_pair(
+            "Fields",
+            "Overview,Genres,GenreItems,People,CommunityRating,OfficialRating,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo,ProductionYear",
+        );
         let resp = self
             .authed_request(Method::GET, url, server, account, &line)?
             .send()
@@ -232,7 +237,7 @@ impl EmbyClient {
             }
             q.append_pair(
                 "Fields",
-                "Overview,PrimaryImageAspectRatio,UserData,RunTimeTicks",
+                "Overview,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo",
             );
         }
         let resp = self

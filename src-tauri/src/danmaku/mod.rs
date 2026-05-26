@@ -7,7 +7,7 @@ use reqwest::Client;
 use crate::emby::models::MediaItem;
 use crate::error::AppResult;
 
-pub use types::{DanmakuComment, DanmakuMode, DanmakuResult};
+pub use types::DanmakuResult;
 
 #[async_trait]
 pub trait DanmakuProvider: Send + Sync {
