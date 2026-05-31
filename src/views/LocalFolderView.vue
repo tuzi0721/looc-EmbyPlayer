@@ -48,7 +48,14 @@ const visibleItems = computed(() => {
   const query = normalizedSearchText.value;
   const filtered = query
     ? items.filter((item) =>
-        [item.name, item.relativePath ?? "", item.extension]
+        [
+          item.name,
+          item.relativePath ?? "",
+          item.extension,
+          item.nfo?.title ?? "",
+          item.nfo?.year ? String(item.nfo.year) : "",
+          item.nfo?.overview ?? "",
+        ]
           .join(" ")
           .toLocaleLowerCase()
           .includes(query),
@@ -108,6 +115,18 @@ function formatDate(ms?: number | null): string {
 function relativePathLabel(item: LocalFolderVideo): string {
   const value = item.relativePath?.trim();
   return value && value !== item.name ? value : "";
+}
+
+function displayTitle(item: LocalFolderVideo): string {
+  return item.nfo?.title?.trim() || item.name;
+}
+
+function metadataSummary(item: LocalFolderVideo): string {
+  const year = item.nfo?.year && Number.isFinite(item.nfo.year) ? String(item.nfo.year) : "";
+  const overview = item.nfo?.overview?.trim() ?? "";
+  const summary = [year, overview].filter(Boolean).join(" · ");
+  if (summary) return summary;
+  return item.nfoPath ? "NFO 元数据" : "";
 }
 
 function compareText(left: string, right: string): number {
@@ -378,7 +397,10 @@ watch(recursive, () => {
                 <Icon icon="lucide:file-video" width="18" />
               </span>
               <span class="file-row__main">
-                <strong>{{ item.name }}</strong>
+                <strong>{{ displayTitle(item) }}</strong>
+                <small v-if="metadataSummary(item)" class="file-row__metadata">
+                  {{ metadataSummary(item) }}
+                </small>
                 <small v-if="listing?.recursive && relativePathLabel(item)" class="file-row__path">
                   {{ relativePathLabel(item) }}
                 </small>
@@ -684,6 +706,9 @@ watch(recursive, () => {
   font-size: 12px;
 }
 .file-row__main .file-row__path {
+  color: var(--fg-secondary);
+}
+.file-row__main .file-row__metadata {
   color: var(--fg-secondary);
 }
 .file-row__play {

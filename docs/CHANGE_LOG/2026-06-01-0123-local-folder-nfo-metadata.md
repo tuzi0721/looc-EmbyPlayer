@@ -1,0 +1,23 @@
+# 本地文件夹 NFO 元数据
+
+- **时间**：2026-06-01 01:23 (UTC+8)
+- **动机**：本地文件夹已经能显示同名封面，但列表仍只展示文件名、大小和修改时间；按 Kodi / Jellyfin 常见整理方式，同名 `.nfo` 里已有标题、年份和简介，应先做成本地可读能力。
+- **修改文件**：
+  - `electron/main.mjs` — `list_local_folder` 为同目录同名 `.nfo` 建索引，读取 256 KiB 内的常见 NFO 标签并返回 `nfoPath/nfo`。
+  - `src-tauri/src/commands/player.rs` — Tauri `list_local_folder` 同步返回同名 `.nfo` 元数据，覆盖标题、年份和简介。
+  - `src/api/index.ts` — 本地文件夹视频模型新增 `LocalNfoMetadata`、`nfoPath` 和 `nfo`。
+  - `src/views/LocalFolderView.vue` — 文件行优先显示 NFO 标题，并在副信息行展示年份和简介摘要；当前列表搜索同步匹配 NFO 标题、年份和简介。
+  - `src/views/SettingsView.vue` — “文件服务 / 连接器”面板将 “NFO 元数据” 标记为可用能力。
+- **规则**：只读取视频同目录同名 `.nfo`，不做在线刮削、不写回文件、不长期索引；单个 NFO 超过 256 KiB 时跳过解析。
+- **风险**：当前解析覆盖常见 `<title>`、`<year>`、`<premiered>`、`<releasedate>`、`<plot>`、`<outline>` 标签，不宣称完整支持所有 NFO 方言或非 UTF-8 文件。
+- **回滚**：移除 `nfoPath/nfo` 字段、Electron/Tauri NFO 读取逻辑、文件行元数据显示和设置页能力项即可恢复原状。
+- **验证步骤**：
+  - `node --check electron\main.mjs`
+  - `cargo fmt --manifest-path src-tauri\Cargo.toml`
+  - `npm.cmd run build`
+  - `cargo check --manifest-path src-tauri\Cargo.toml --all-targets`
+  - in-app Browser 打开 `/settings?c=file-services`，确认“NFO 元数据”为可用
+  - `npm.cmd run electron:build`
+  - `git diff --check`
+  - diff-only 敏感信息扫描
+- **结果**：通过；Electron 命令覆盖检查仍为 93/93，Electron unpacked 包完整性检查通过，仓库 diff 未写入测试账号、密码、token 或完整播放 URL。

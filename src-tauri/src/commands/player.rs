@@ -69,6 +69,14 @@ pub struct ListLocalFolderPayload {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct LocalNfoMetadata {
+    pub title: Option<String>,
+    pub year: Option<u16>,
+    pub overview: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LocalFolderVideo {
     pub file_path: String,
     pub relative_path: String,
@@ -76,6 +84,8 @@ pub struct LocalFolderVideo {
     pub extension: String,
     pub poster_path: Option<String>,
     pub poster_url: Option<String>,
+    pub nfo_path: Option<String>,
+    pub nfo: Option<LocalNfoMetadata>,
     pub size_bytes: u64,
     pub modified_at_ms: Option<u64>,
 }
@@ -114,6 +124,7 @@ const LOCAL_IMAGE_EXTENSIONS: &[(&str, usize)] = &[
 ];
 const FOLDER_POSTER_STEMS: &[&str] = &["poster", "cover", "folder"];
 const MAX_LOCAL_FOLDER_VIDEOS: usize = 500;
+const MAX_LOCAL_NFO_BYTES: u64 = 256 * 1024;
 
 #[derive(Debug, Clone)]
 struct LocalPosterCandidate {
@@ -390,6 +401,131 @@ fn local_poster_url(path: &Path) -> Option<String> {
         .map(|url| url.to_string())
 }
 
+fn build_local_nfo_index(entries: &[std::fs::DirEntry]) -> HashMap<String, PathBuf> {
+    let mut by_stem: HashMap<String, (String, PathBuf)> = HashMap::new();
+
+    for entry in entries {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(ext) = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(|value| value.to_ascii_lowercase())
+        else {
+            continue;
+        };
+        if ext != "nfo" {
+            continue;
+        }
+        let Some(stem) = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .map(|value| value.to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        let should_replace = by_stem
+            .get(&stem)
+            .map(|(current_name, _)| name.as_str() < current_name.as_str())
+            .unwrap_or(true);
+        if should_replace {
+            by_stem.insert(stem, (name, path));
+        }
+    }
+
+    by_stem
+        .into_iter()
+        .map(|(stem, (_, path))| (stem, path))
+        .collect()
+}
+
+fn decode_nfo_text(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    let text = if trimmed.starts_with("<![CDATA[") && trimmed.ends_with("]]>") {
+        &trimmed[9..trimmed.len().saturating_sub(3)]
+    } else {
+        trimmed
+    };
+    let decoded = text
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'");
+    let normalized = decoded.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+fn extract_nfo_tag(content: &str, tag_name: &str) -> Option<String> {
+    let lower = content.to_ascii_lowercase();
+    let tag = tag_name.to_ascii_lowercase();
+    let open_prefix = format!("<{tag}");
+    let close_tag = format!("</{tag}>");
+    let mut cursor = 0;
+
+    while cursor < lower.len() {
+        let open_start = lower[cursor..].find(&open_prefix)? + cursor;
+        let after_name_index = open_start + tag.len() + 1;
+        if let Some(after_name) = lower.as_bytes().get(after_name_index) {
+            if !matches!(*after_name, b'>' | b'/' | b' ' | b'\t' | b'\r' | b'\n') {
+                cursor = after_name_index;
+                continue;
+            }
+        }
+        let open_end = lower[open_start..].find('>')? + open_start;
+        let close_start = lower[open_end + 1..].find(&close_tag)? + open_end + 1;
+        return decode_nfo_text(&content[open_end + 1..close_start]);
+    }
+
+    None
+}
+
+fn year_from_nfo_value(value: Option<String>) -> Option<u16> {
+    let value = value?;
+    let bytes = value.as_bytes();
+    if bytes.len() < 4 {
+        return None;
+    }
+    for index in 0..=bytes.len() - 4 {
+        let window = &bytes[index..index + 4];
+        if !window.iter().all(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
+        if window.starts_with(b"19") || window.starts_with(b"20") {
+            if let Ok(year) = value[index..index + 4].parse::<u16>() {
+                return Some(year);
+            }
+        }
+    }
+    None
+}
+
+fn read_local_nfo(path: &Path) -> Option<LocalNfoMetadata> {
+    let metadata = std::fs::metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_LOCAL_NFO_BYTES {
+        return None;
+    }
+    let content = std::fs::read_to_string(path).ok()?;
+    let title = extract_nfo_tag(&content, "title");
+    let overview =
+        extract_nfo_tag(&content, "plot").or_else(|| extract_nfo_tag(&content, "outline"));
+    let year = year_from_nfo_value(extract_nfo_tag(&content, "year"))
+        .or_else(|| year_from_nfo_value(extract_nfo_tag(&content, "premiered")))
+        .or_else(|| year_from_nfo_value(extract_nfo_tag(&content, "releasedate")));
+    if title.is_none() && overview.is_none() && year.is_none() {
+        return None;
+    }
+    Some(LocalNfoMetadata {
+        title,
+        year,
+        overview,
+    })
+}
+
 fn sidecar_subtitle_rank(video_stem: &str, subtitle_stem: &str) -> Option<usize> {
     let video = video_stem.to_lowercase();
     let subtitle = subtitle_stem.to_lowercase();
@@ -577,6 +713,7 @@ fn scan_local_folder_dir(
             AppError::InvalidState(format!("failed to read folder item: {}", error))
         })?;
     let (poster_by_stem, folder_poster) = build_local_poster_index(&entries);
+    let nfo_by_stem = build_local_nfo_index(&entries);
 
     for entry in entries {
         if *truncated {
@@ -645,6 +782,11 @@ fn scan_local_folder_dir(
             .as_ref()
             .map(|path| path.to_string_lossy().to_string());
         let poster_url = poster_path.as_deref().and_then(local_poster_url);
+        let nfo_path = nfo_by_stem.get(&stem).cloned();
+        let nfo_path_string = nfo_path
+            .as_ref()
+            .map(|path| path.to_string_lossy().to_string());
+        let nfo = nfo_path.as_deref().and_then(read_local_nfo);
 
         items.push(LocalFolderVideo {
             file_path: path.to_string_lossy().to_string(),
@@ -653,6 +795,8 @@ fn scan_local_folder_dir(
             extension,
             poster_path: poster_path_string,
             poster_url,
+            nfo_path: nfo_path_string,
+            nfo,
             size_bytes: metadata.len(),
             modified_at_ms,
         });

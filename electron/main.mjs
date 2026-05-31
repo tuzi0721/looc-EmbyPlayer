@@ -58,6 +58,7 @@ const localImageMimeTypes = new Map([
 ]);
 const folderPosterStems = new Set(["poster", "cover", "folder"]);
 const maxLocalFolderVideos = 500;
+const maxLocalNfoBytes = 256 * 1024;
 
 fs.mkdirSync(userDataDir, { recursive: true });
 app.setPath("userData", userDataDir);
@@ -572,6 +573,82 @@ function buildLocalPosterIndex(currentDir, dirents) {
   return { byStem, folderPoster };
 }
 
+function buildLocalNfoIndex(currentDir, dirents) {
+  const byStem = new Map();
+  for (const dirent of dirents) {
+    if (!dirent.isFile()) continue;
+    const ext = path.extname(dirent.name).replace(/^\./, "").toLowerCase();
+    if (ext !== "nfo") continue;
+    const stem = path.basename(dirent.name, path.extname(dirent.name)).toLowerCase();
+    if (!stem) continue;
+    const filePath = path.join(currentDir, dirent.name);
+    const current = byStem.get(stem);
+    if (!current || dirent.name.toLowerCase() < current.name) {
+      byStem.set(stem, { filePath, name: dirent.name.toLowerCase() });
+    }
+  }
+  return byStem;
+}
+
+function decodeNfoText(value) {
+  return value
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, "\"")
+    .replace(/&apos;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractNfoTag(content, tagName) {
+  const lower = content.toLowerCase();
+  const tag = tagName.toLowerCase();
+  let cursor = 0;
+  while (cursor < lower.length) {
+    const openStart = lower.indexOf(`<${tag}`, cursor);
+    if (openStart < 0) return null;
+    const afterName = lower.charAt(openStart + tag.length + 1);
+    if (afterName && !/[>\s/]/.test(afterName)) {
+      cursor = openStart + tag.length + 1;
+      continue;
+    }
+    const openEnd = lower.indexOf(">", openStart);
+    if (openEnd < 0) return null;
+    const closeStart = lower.indexOf(`</${tag}>`, openEnd + 1);
+    if (closeStart < 0) return null;
+    const value = decodeNfoText(content.slice(openEnd + 1, closeStart));
+    return value || null;
+  }
+  return null;
+}
+
+function yearFromNfoValue(value) {
+  if (!value) return null;
+  const match = String(value).match(/\b(19|20)\d{2}\b/);
+  return match ? Number(match[0]) : null;
+}
+
+async function readLocalNfo(filePath) {
+  try {
+    const stat = await fs.promises.stat(filePath);
+    if (!stat.isFile() || stat.size > maxLocalNfoBytes) return null;
+    const content = await fs.promises.readFile(filePath, "utf8");
+    const title = extractNfoTag(content, "title");
+    const overview = extractNfoTag(content, "plot") ?? extractNfoTag(content, "outline");
+    const year =
+      yearFromNfoValue(extractNfoTag(content, "year")) ??
+      yearFromNfoValue(extractNfoTag(content, "premiered")) ??
+      yearFromNfoValue(extractNfoTag(content, "releasedate"));
+    if (!title && !overview && !year) return null;
+    return { title, year, overview };
+  } catch (error) {
+    console.warn("failed to read local nfo", error);
+    return null;
+  }
+}
+
 function emitAppEvent(event, payload) {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send(`hills:event:${event}`, payload);
@@ -955,6 +1032,7 @@ async function listLocalFolder(payload = {}) {
     if (truncated) return;
     const dirents = await fs.promises.readdir(currentDir, { withFileTypes: true });
     const posterIndex = buildLocalPosterIndex(currentDir, dirents);
+    const nfoIndex = buildLocalNfoIndex(currentDir, dirents);
     for (const dirent of dirents) {
       if (truncated) return;
       const entryPath = path.join(currentDir, dirent.name);
@@ -975,6 +1053,7 @@ async function listLocalFolder(payload = {}) {
       const stem = path.basename(dirent.name, path.extname(dirent.name)).toLowerCase();
       const posterPath =
         posterIndex.byStem.get(stem)?.filePath ?? posterIndex.folderPoster?.filePath ?? null;
+      const nfoPath = nfoIndex.get(stem)?.filePath ?? null;
       items.push({
         filePath: entryPath,
         relativePath,
@@ -982,6 +1061,8 @@ async function listLocalFolder(payload = {}) {
         extension,
         posterPath,
         posterUrl: posterPath ? localImageProtocolUrl(posterPath) : null,
+        nfoPath,
+        nfo: nfoPath ? await readLocalNfo(nfoPath) : null,
         sizeBytes: fileStat.size,
         modifiedAtMs: Number(fileStat.mtimeMs.toFixed(0)),
       });

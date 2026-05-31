@@ -113,6 +113,12 @@ export interface DetectServerResult {
   reports: DetectServerLineReport[];
 }
 
+export interface LocalNfoMetadata {
+  title?: string | null;
+  year?: number | null;
+  overview?: string | null;
+}
+
 export interface LocalFolderVideo {
   filePath: string;
   relativePath?: string | null;
@@ -120,6 +126,8 @@ export interface LocalFolderVideo {
   extension: string;
   posterPath?: string | null;
   posterUrl?: string | null;
+  nfoPath?: string | null;
+  nfo?: LocalNfoMetadata | null;
   sizeBytes: number;
   modifiedAtMs?: number | null;
 }

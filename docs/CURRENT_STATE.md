@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（本地文件定位入口）
+> **更新时间**：2026-06-01（本地文件夹 NFO 元数据）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-0113-local-file-locate.md`](./CHANGE_LOG/2026-06-01-0113-local-file-locate.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-0123-local-folder-nfo-metadata.md`](./CHANGE_LOG/2026-06-01-0123-local-folder-nfo-metadata.md)
 
 ---
 
@@ -68,6 +68,8 @@
 **2026-06-01**：本地文件夹列表新增同名封面识别；Electron/Tauri 扫描同目录 `.jpg/.jpeg/.png/.webp/.avif/.bmp`，同名图片优先，`poster`、`cover`、`folder` 图片兜底，文件行会显示本地缩略图并在加载失败时回退视频图标。
 
 **2026-06-01**：本地文件夹页新增系统定位入口；工具栏可打开当前文件夹，文件行可打开视频所在目录，设置页“文件服务 / 连接器”同步将“本地文件定位”标记为可用。
+
+**2026-06-01**：本地文件夹列表新增同名 `.nfo` 元数据读取；Electron/Tauri 扫描视频同目录同名 NFO，提取标题、年份和简介，文件行优先显示 NFO 标题并让搜索匹配元数据内容。
 
 **2026-05-30**：单集详情页会并行加载季列表与当前季剧集，并通过详情/剧集加载序号避免快速切换 PDP 时旧请求覆盖新页面状态。
 

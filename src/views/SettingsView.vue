@@ -538,6 +538,13 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
     status: "available",
   },
   {
+    key: "sidecar-nfo",
+    label: "NFO 元数据",
+    detail: "本地文件夹读取同名 .nfo 的标题、年份和简介",
+    icon: "lucide:file-text",
+    status: "available",
+  },
+  {
     key: "local-file-locate",
     label: "本地文件定位",
     detail: "可从文件夹页打开当前目录或视频所在目录",
