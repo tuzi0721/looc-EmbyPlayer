@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-05-31（本地同名 XML 弹幕自动关联）
+> **更新时间**：2026-05-31（文件服务能力面板）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-05-31-2323-local-danmaku-sidecar.md`](./CHANGE_LOG/2026-05-31-2323-local-danmaku-sidecar.md)
+> **变更日志**：[`CHANGE_LOG/2026-05-31-2335-file-services-capability-panel.md`](./CHANGE_LOG/2026-05-31-2335-file-services-capability-panel.md)
 
 ---
 
@@ -46,6 +46,8 @@
 **2026-05-30**：媒体库分区页顶部标题改为常显当前分区名称；直达 `/library/:id` 且视图缓存为空时，会在加载媒体条目的同时并行补拉视图元数据，长标题保持单行省略。
 
 **2026-05-31**：Web/Electron dev 预览冷开深链接会把非 `file://` 的浏览器 path/query 同步进 memory router，`/settings?c=sync` 可直接展开对应设置面板，`/downloads?task=...` 可直接进入下载页；Electron 打包 `file://.../index.html` 不参与该同步，避免把本地文件路径误当成前端路由。
+
+**2026-05-31**：设置页新增“文件服务 / 连接器”只读能力面板，可通过 `/settings?c=file-services` 直达；本地单文件、最近本地文件、同名字幕、同名 XML 弹幕标记为可用，文件夹媒体库、WebDAV、SMB、Alist/OpenList、Plex 连接器标记为待接入。
 
 **2026-05-30**：单集详情页会并行加载季列表与当前季剧集，并通过详情/剧集加载序号避免快速切换 PDP 时旧请求覆盖新页面状态。
 
@@ -463,6 +465,8 @@ npm.cmd run electron:build
 本轮最近本地文件入口已闭环：新增 `localFiles` Pinia store，使用当前客户端 `localStorage` 保存最近 8 个本地文件路径；侧边栏底部在“打开本地文件”下方展示最近 3 个文件，可直接重开或一键清空。记录仅保存在用户本机浏览器/桌面壳本地状态，不写入仓库、后端或同步服务。验证已覆盖 `npm.cmd run build`、行尾空白检查、in-app Browser 空状态侧边栏目检与 `npm.cmd run electron:build`。
 
 本轮本地同名 XML 弹幕自动关联已闭环：本地文件播放成功后会依次尝试 `同名.xml`、`同名.danmaku.xml`、`同名.comments.xml`，解析到有效 XML 弹幕后自动开启弹幕；手动导入与自动导入共用同一套弹幕结果应用逻辑。切换本地文件时会清空旧弹幕，避免上一部的弹幕残留到下一部。验证已覆盖 `npm.cmd run build`、行尾空白检查与 `npm.cmd run electron:build`。
+
+本轮文件服务能力面板已闭环：设置页新增“文件服务 / 连接器”状态面板，明确本地单文件、最近本地文件、同名字幕和同名 XML 弹幕为可用能力，并将文件夹媒体库、WebDAV、SMB、Alist/OpenList、Plex 连接器保持为待接入；深链接 `/settings?c=file-services` 可直接展开该面板。验证已覆盖 `npm.cmd run build`、行尾空白检查、in-app Browser 目检与 `npm.cmd run electron:build`。
 
 ---
 

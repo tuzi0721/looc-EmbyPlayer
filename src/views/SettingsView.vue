@@ -21,6 +21,7 @@ type PanelId =
   | "about"
   | "theme"
   | "library"
+  | "fileServices"
   | "backup"
   | "sync"
   | "network"
@@ -90,6 +91,12 @@ function panelFromQuery(value: unknown): PanelId {
     case "backup":
     case "sync":
       return category;
+    case "file-services":
+    case "fileServices":
+    case "files":
+    case "connectors":
+    case "sources":
+      return "fileServices";
     case "enhancement":
       return "enhancement";
     case "ai-subtitles":
@@ -389,6 +396,14 @@ type SyncCapability = {
   status: CapabilityStatus;
 };
 
+type FileServiceCapability = {
+  key: string;
+  label: string;
+  detail: string;
+  icon: string;
+  status: CapabilityStatus;
+};
+
 const capabilityStatusLabel: Record<CapabilityStatus, string> = {
   available: "可用",
   disabled: "禁用",
@@ -399,6 +414,7 @@ const enhancementSummary = computed(() =>
   isWindowsPlatform.value ? "HDR 系统入口" : "等待硬件路径",
 );
 const aiSubtitleSummary = computed(() => "待接入");
+const fileServicesSummary = computed(() => "本地可用 / 服务待接入");
 
 const enhancementCapabilities = computed<EnhancementCapability[]>(() => {
   const mpvPath =
@@ -491,6 +507,72 @@ const aiSubtitleCapabilities = computed<AiSubtitleCapability[]>(() => [
 ]);
 
 const syncSummary = computed(() => "待接入");
+
+const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
+  {
+    key: "local-file",
+    label: "本地单文件",
+    detail: "侧边栏可选择单个视频并交给内嵌 mpv 播放",
+    icon: "lucide:file-video",
+    status: "available",
+  },
+  {
+    key: "recent-local-files",
+    label: "最近本地文件",
+    detail: "当前客户端本地保存最近 8 条记录",
+    icon: "lucide:history",
+    status: "available",
+  },
+  {
+    key: "sidecar-subtitles",
+    label: "同名字幕",
+    detail: "本地播放会自动关联同目录同名字幕",
+    icon: "lucide:subtitles",
+    status: "available",
+  },
+  {
+    key: "sidecar-danmaku",
+    label: "同名 XML 弹幕",
+    detail: "本地播放会尝试导入同名 XML 弹幕",
+    icon: "lucide:message-square-text",
+    status: "available",
+  },
+  {
+    key: "folder-library",
+    label: "文件夹媒体库",
+    detail: "未接入目录索引、刮削与增量刷新",
+    icon: "lucide:folder-open",
+    status: "planned",
+  },
+  {
+    key: "webdav",
+    label: "WebDAV",
+    detail: "未接入账号、目录浏览与直链播放",
+    icon: "lucide:cloud",
+    status: "planned",
+  },
+  {
+    key: "smb",
+    label: "SMB",
+    detail: "未接入 Windows 共享发现与凭据存储",
+    icon: "lucide:network",
+    status: "planned",
+  },
+  {
+    key: "alist-openlist",
+    label: "Alist / OpenList",
+    detail: "未接入站点配置、路径浏览与签名链接刷新",
+    icon: "lucide:list-tree",
+    status: "planned",
+  },
+  {
+    key: "plex",
+    label: "Plex 连接器",
+    detail: "未接入 Plex 鉴权、媒体库模型与播放会话",
+    icon: "lucide:server-cog",
+    status: "planned",
+  },
+]);
 
 const syncCapabilities = computed<SyncCapability[]>(() => [
   {
@@ -798,6 +880,27 @@ const danmakuSummary = computed(() => {
             @change="(e: any) => save('hideJavCodes', e.target.checked)"
           />
         </label>
+      </div>
+
+      <button class="row" @click="togglePanel('fileServices')">
+        <span>文件服务 / 连接器</span>
+        <span class="value">{{ fileServicesSummary }}</span>
+      </button>
+      <div v-if="openPanel === 'fileServices'" class="panel glass">
+        <ul class="cap-list">
+          <li v-for="cap in fileServiceCapabilities" :key="cap.key" class="cap-row">
+            <div class="cap-row__icon">
+              <Icon :icon="cap.icon" width="16" />
+            </div>
+            <div class="cap-row__main">
+              <strong>{{ cap.label }}</strong>
+              <span>{{ cap.detail }}</span>
+            </div>
+            <span class="cap-status" :class="`cap-status--${cap.status}`">
+              {{ capabilityStatusLabel[cap.status] }}
+            </span>
+          </li>
+        </ul>
       </div>
 
       <button
