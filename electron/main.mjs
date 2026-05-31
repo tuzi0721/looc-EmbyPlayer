@@ -176,23 +176,53 @@ function redactUrl(value) {
   if (typeof value !== "string") return value;
   try {
     const url = new URL(value);
-    if (url.username) url.username = "[redacted]";
-    if (url.password) url.password = "[redacted]";
     for (const key of ["api_key", "X-Emby-Token", "token", "access_token"]) {
       if (url.searchParams.has(key)) url.searchParams.set(key, "[redacted]");
     }
-    return url.toString();
+    const host = maskLogHostname(url.hostname);
+    const port = url.port ? `:${url.port}` : "";
+    return `${url.protocol}//${host}${port}${url.pathname}${url.search}${url.hash}`;
   } catch {
     return value
       .replace(/(api_key|X-Emby-Token|token|access_token)=([^&\s]+)/gi, "$1=[redacted]")
+      .replace(/(Authorization:\s*Bearer\s+)([^\s]+)/gi, "$1[redacted]")
       .replace(/(Token=")[^"]+(")/gi, "$1[redacted]$2");
   }
+}
+
+function maskLogHostname(hostname) {
+  const lower = String(hostname ?? "").toLowerCase();
+  if (
+    lower === "localhost" ||
+    lower === "127.0.0.1" ||
+    lower === "::1" ||
+    lower === "[::1]" ||
+    /^\d{1,3}(\.\d{1,3}){3}$/.test(lower)
+  ) {
+    return hostname;
+  }
+  return String(hostname)
+    .split(".")
+    .map((label, index, labels) => (index === labels.length - 1 ? label : maskLogHostLabel(label)))
+    .join(".");
+}
+
+function maskLogHostLabel(label) {
+  if (label.length <= 1) return label;
+  if (label.length <= 3) return `${label[0]}*${label.slice(-1)}`;
+  return `${label.slice(0, 2)}***${label.slice(-1)}`;
+}
+
+function redactHeaderTuple(value) {
+  if (!Array.isArray(value) || value.length < 2 || typeof value[0] !== "string") return null;
+  if (!/authorization|token|api[-_]?key/i.test(value[0])) return null;
+  return [value[0], "[redacted]", ...value.slice(2).map(redactSensitive)];
 }
 
 function redactSensitive(value) {
   if (value == null) return value;
   if (typeof value === "string") return redactUrl(value);
-  if (Array.isArray(value)) return value.map(redactSensitive);
+  if (Array.isArray(value)) return redactHeaderTuple(value) ?? value.map(redactSensitive);
   if (typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value).map(([key, item]) => {

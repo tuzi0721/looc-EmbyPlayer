@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（设置页线路 URL 脱敏预览）
+> **更新时间**：2026-06-01（Electron 播放日志脱敏加固）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-0606-settings-line-url-preview.md`](./CHANGE_LOG/2026-06-01-0606-settings-line-url-preview.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-0619-electron-playback-log-redaction.md`](./CHANGE_LOG/2026-06-01-0619-electron-playback-log-redaction.md)
 
 ---
 
@@ -542,6 +542,8 @@ npm.cmd run electron:build
 本轮真实双线路默认播放回归已闭环：1420 Web Preview 使用真实测试账号当前会话，将当前真实服务器编辑为两条 443 线路，保存后“测活”返回两条真实秒级延迟；设置页“设为当前”切到第二线路后，新开播放器默认播放源菜单选中第二线路，并可在会话内切到主线路再切回第二线路，期间 HTML 视频对象保持 1440×1080 / readyState 4。该阶段仅更新验证日志和状态快照，未改运行时代码，未写入账号、密码、token 或完整线路地址。
 
 本轮设置页线路 URL 脱敏预览已闭环：服务器列表普通查看态不再直接显示完整远端线路 URL，而是展示保留协议、端口和部分主机名的脱敏预览；`localhost` / IP 线路保持原样便于本地调试，完整 URL 仍只能在“编辑”表单中查看和修改。验证已覆盖 `npm.cmd run build`、in-app Browser 1420 设置页目检、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`。
+
+本轮 Electron 播放日志脱敏加固已闭环：`playback.log` 写入前的敏感字段处理现在会脱敏远端 URL 主机名、清理 query token，并识别 `Authorization` / token / api-key 类 header tuple，避免 header 数组里的裸 token 写入日志；`localhost` / IP 本地调试地址仍保留。验证已覆盖 `node --check electron\main.mjs`、`npm.cmd run check:electron-commands`、`npm.cmd run build`、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`。
 
 ---
 
