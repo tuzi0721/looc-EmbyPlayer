@@ -773,6 +773,8 @@ function invokeWebFallback<T>(
     case "list_local_folder":
       return Promise.resolve({
         directory: String((args?.payload as any)?.directory ?? ""),
+        recursive: Boolean((args?.payload as any)?.recursive),
+        truncated: false,
         items: [],
       } as T);
     case "import_danmaku_xml":

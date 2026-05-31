@@ -62,12 +62,15 @@ pub struct PlayFilePayload {
 #[serde(rename_all = "camelCase")]
 pub struct ListLocalFolderPayload {
     pub directory: String,
+    #[serde(default)]
+    pub recursive: bool,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalFolderVideo {
     pub file_path: String,
+    pub relative_path: String,
     pub name: String,
     pub extension: String,
     pub size_bytes: u64,
@@ -78,6 +81,8 @@ pub struct LocalFolderVideo {
 #[serde(rename_all = "camelCase")]
 pub struct LocalFolderListing {
     pub directory: String,
+    pub recursive: bool,
+    pub truncated: bool,
     pub items: Vec<LocalFolderVideo>,
 }
 
@@ -96,6 +101,7 @@ const LOCAL_VIDEO_EXTENSIONS: &[&str] = &[
     "mp4", "mkv", "mov", "avi", "wmv", "flv", "webm", "m4v", "ts", "m2ts", "mpeg", "mpg", "3gp",
     "ogv", "rmvb",
 ];
+const MAX_LOCAL_FOLDER_VIDEOS: usize = 500;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -437,17 +443,60 @@ pub async fn list_local_folder(payload: ListLocalFolderPayload) -> AppResult<Loc
         )));
     }
 
+    let recursive = payload.recursive;
     let mut items = Vec::new();
-    for entry in std::fs::read_dir(&directory)
+    let mut truncated = false;
+    scan_local_folder_dir(
+        &directory,
+        &directory,
+        recursive,
+        &mut items,
+        &mut truncated,
+    )?;
+
+    items.sort_by_key(|item| item.relative_path.to_ascii_lowercase());
+    Ok(LocalFolderListing {
+        directory: directory.to_string_lossy().to_string(),
+        recursive,
+        truncated,
+        items,
+    })
+}
+
+fn scan_local_folder_dir(
+    root: &Path,
+    directory: &Path,
+    recursive: bool,
+    items: &mut Vec<LocalFolderVideo>,
+    truncated: &mut bool,
+) -> AppResult<()> {
+    if *truncated {
+        return Ok(());
+    }
+
+    for entry in std::fs::read_dir(directory)
         .map_err(|error| AppError::InvalidState(format!("failed to read folder: {}", error)))?
     {
+        if *truncated {
+            break;
+        }
+
         let entry = entry.map_err(|error| {
             AppError::InvalidState(format!("failed to read folder item: {}", error))
         })?;
         let path = entry.path();
-        if !path.is_file() {
+        let file_type = entry.file_type().map_err(|error| {
+            AppError::InvalidState(format!("failed to inspect folder item: {}", error))
+        })?;
+
+        if recursive && file_type.is_dir() {
+            scan_local_folder_dir(root, &path, recursive, items, truncated)?;
             continue;
         }
+        if !file_type.is_file() {
+            continue;
+        }
+
         let Some(extension) = path
             .extension()
             .and_then(|value| value.to_str())
@@ -458,6 +507,11 @@ pub async fn list_local_folder(payload: ListLocalFolderPayload) -> AppResult<Loc
         if !LOCAL_VIDEO_EXTENSIONS.contains(&extension.as_str()) {
             continue;
         }
+        if items.len() >= MAX_LOCAL_FOLDER_VIDEOS {
+            *truncated = true;
+            break;
+        }
+
         let metadata = entry.metadata().map_err(|error| {
             AppError::InvalidState(format!("failed to inspect file: {}", error))
         })?;
@@ -474,8 +528,15 @@ pub async fn list_local_folder(payload: ListLocalFolderPayload) -> AppResult<Loc
             .and_then(|value| value.to_str())
             .unwrap_or_default()
             .to_string();
+        let relative_path = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .to_string();
+
         items.push(LocalFolderVideo {
             file_path: path.to_string_lossy().to_string(),
+            relative_path,
             name,
             extension,
             size_bytes: metadata.len(),
@@ -483,11 +544,7 @@ pub async fn list_local_folder(payload: ListLocalFolderPayload) -> AppResult<Loc
         });
     }
 
-    items.sort_by_key(|item| item.name.to_ascii_lowercase());
-    Ok(LocalFolderListing {
-        directory: directory.to_string_lossy().to_string(),
-        items,
-    })
+    Ok(())
 }
 
 #[tauri::command]

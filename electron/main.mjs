@@ -40,6 +40,7 @@ const localVideoExtensions = new Set([
   "ogv",
   "rmvb",
 ]);
+const maxLocalFolderVideos = 500;
 
 fs.mkdirSync(userDataDir, { recursive: true });
 app.setPath("userData", userDataDir);
@@ -871,29 +872,51 @@ async function listLocalFolder(payload = {}) {
   const directory = typeof payload.directory === "string" ? payload.directory.trim() : "";
   if (!directory) throw new Error("directory is required");
   const resolved = path.resolve(directory);
+  const recursive = payload.recursive === true;
   const stat = await fs.promises.stat(resolved).catch(() => null);
   if (!stat?.isDirectory()) throw new Error(`local folder missing: ${resolved}`);
 
-  const dirents = await fs.promises.readdir(resolved, { withFileTypes: true });
   const items = [];
-  for (const dirent of dirents) {
-    if (!dirent.isFile()) continue;
-    const extension = path.extname(dirent.name).replace(/^\./, "").toLowerCase();
-    if (!localVideoExtensions.has(extension)) continue;
-    const filePath = path.join(resolved, dirent.name);
-    const fileStat = await fs.promises.stat(filePath).catch(() => null);
-    if (!fileStat?.isFile()) continue;
-    items.push({
-      filePath,
-      name: dirent.name,
-      extension,
-      sizeBytes: fileStat.size,
-      modifiedAtMs: Number(fileStat.mtimeMs.toFixed(0)),
-    });
+  let truncated = false;
+
+  async function collect(currentDir) {
+    if (truncated) return;
+    const dirents = await fs.promises.readdir(currentDir, { withFileTypes: true });
+    for (const dirent of dirents) {
+      if (truncated) return;
+      const entryPath = path.join(currentDir, dirent.name);
+      if (recursive && dirent.isDirectory()) {
+        await collect(entryPath);
+        continue;
+      }
+      if (!dirent.isFile()) continue;
+      const extension = path.extname(dirent.name).replace(/^\./, "").toLowerCase();
+      if (!localVideoExtensions.has(extension)) continue;
+      if (items.length >= maxLocalFolderVideos) {
+        truncated = true;
+        return;
+      }
+      const fileStat = await fs.promises.stat(entryPath).catch(() => null);
+      if (!fileStat?.isFile()) continue;
+      const relativePath = path.relative(resolved, entryPath) || dirent.name;
+      items.push({
+        filePath: entryPath,
+        relativePath,
+        name: dirent.name,
+        extension,
+        sizeBytes: fileStat.size,
+        modifiedAtMs: Number(fileStat.mtimeMs.toFixed(0)),
+      });
+    }
   }
 
-  items.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-  return { directory: resolved, items };
+  await collect(resolved);
+  items.sort((a, b) =>
+    (a.relativePath ?? a.name).localeCompare(b.relativePath ?? b.name, undefined, {
+      numeric: true,
+    }),
+  );
+  return { directory: resolved, recursive, truncated, items };
 }
 
 async function preserveTrackSwitchCache() {

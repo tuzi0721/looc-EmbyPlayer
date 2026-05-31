@@ -16,6 +16,7 @@ const player = usePlayerStore();
 const listing = ref<LocalFolderListing | null>(null);
 const loading = ref(false);
 const errorText = ref<string | null>(null);
+const recursive = ref(false);
 
 const folderPath = computed(() => {
   const value = route.query.folder;
@@ -29,6 +30,7 @@ const folderTitle = computed(() => {
 
 const countLabel = computed(() => {
   const count = listing.value?.items.length ?? 0;
+  if (listing.value?.truncated) return `${count}+ 个视频`;
   return `${count} 个视频`;
 });
 const recentFolders = computed(() => localFiles.folderItems.slice(0, 6));
@@ -64,6 +66,11 @@ function formatDate(ms?: number | null): string {
   }
 }
 
+function relativePathLabel(item: LocalFolderVideo): string {
+  const value = item.relativePath?.trim();
+  return value && value !== item.name ? value : "";
+}
+
 async function chooseFolder() {
   const selected = await openFileDialog({
     multiple: false,
@@ -83,7 +90,7 @@ async function loadFolder(directory = folderPath.value) {
   loading.value = true;
   errorText.value = null;
   try {
-    listing.value = await api.listLocalFolder(directory);
+    listing.value = await api.listLocalFolder({ directory, recursive: recursive.value });
     localFiles.rememberFolder(listing.value.directory);
   } catch (error) {
     listing.value = null;
@@ -112,6 +119,9 @@ function openVideo(item: LocalFolderVideo, index: number) {
 }
 
 watch(folderPath, (directory) => void loadFolder(directory), { immediate: true });
+watch(recursive, () => {
+  if (folderPath.value) void loadFolder();
+});
 </script>
 
 <template>
@@ -122,6 +132,10 @@ watch(folderPath, (directory) => void loadFolder(directory), { immediate: true }
         <p v-if="folderPath" :title="folderPath">{{ folderPath }}</p>
       </div>
       <div class="local-folder__actions">
+        <label v-if="folderPath" class="toggle">
+          <input v-model="recursive" type="checkbox" />
+          <span>包含子文件夹</span>
+        </label>
         <button class="tool-btn" type="button" @click="chooseFolder">
           <Icon icon="lucide:folder-open" width="16" />
           <span>选择文件夹</span>
@@ -163,6 +177,8 @@ watch(folderPath, (directory) => void loadFolder(directory), { immediate: true }
     <div v-else class="local-folder__body">
       <div class="folder-meta">
         <span>{{ countLabel }}</span>
+        <span v-if="listing?.recursive">包含子文件夹</span>
+        <span v-if="listing?.truncated" class="folder-meta__warning">仅显示前 500 个</span>
         <span v-if="loading">扫描中</span>
       </div>
 
@@ -189,6 +205,9 @@ watch(folderPath, (directory) => void loadFolder(directory), { immediate: true }
             </span>
             <span class="file-row__main">
               <strong>{{ item.name }}</strong>
+              <small v-if="listing?.recursive && relativePathLabel(item)" class="file-row__path">
+                {{ relativePathLabel(item) }}
+              </small>
               <small>
                 {{ item.extension.toUpperCase() }} · {{ formatBytes(item.sizeBytes) }}
                 <template v-if="formatDate(item.modifiedAtMs)">
@@ -246,6 +265,22 @@ watch(folderPath, (directory) => void loadFolder(directory), { immediate: true }
   gap: 8px;
   flex-shrink: 0;
 }
+.toggle {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--fg-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.toggle input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
 .tool-btn,
 .icon-btn {
   appearance: none;
@@ -291,10 +326,14 @@ watch(folderPath, (directory) => void loadFolder(directory), { immediate: true }
 .folder-meta {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   min-height: 24px;
   color: var(--fg-tertiary);
   font-size: 12px;
+}
+.folder-meta__warning {
+  color: var(--warning, #fbbf24);
 }
 .file-list {
   list-style: none;
@@ -355,6 +394,9 @@ watch(folderPath, (directory) => void loadFolder(directory), { immediate: true }
   margin-top: 4px;
   color: var(--fg-tertiary);
   font-size: 12px;
+}
+.file-row__main .file-row__path {
+  color: var(--fg-secondary);
 }
 .file-row__play {
   color: var(--fg-tertiary);
@@ -429,6 +471,7 @@ watch(folderPath, (directory) => void loadFolder(directory), { immediate: true }
   }
   .local-folder__actions {
     justify-content: flex-start;
+    flex-wrap: wrap;
   }
   .local-folder__title p {
     max-width: 100%;

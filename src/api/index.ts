@@ -115,6 +115,7 @@ export interface DetectServerResult {
 
 export interface LocalFolderVideo {
   filePath: string;
+  relativePath?: string | null;
   name: string;
   extension: string;
   sizeBytes: number;
@@ -123,6 +124,8 @@ export interface LocalFolderVideo {
 
 export interface LocalFolderListing {
   directory: string;
+  recursive: boolean;
+  truncated: boolean;
   items: LocalFolderVideo[];
 }
 
@@ -336,8 +339,8 @@ export const api = {
     invoke<void>("play_local", { payload: { id, startMs } }),
   playFile: (payload: { filePath: string; startMs?: number | null }) =>
     invoke<void>("play_file", { payload }),
-  listLocalFolder: (directory: string) =>
-    invoke<LocalFolderListing>("list_local_folder", { payload: { directory } }),
+  listLocalFolder: (payload: { directory: string; recursive?: boolean }) =>
+    invoke<LocalFolderListing>("list_local_folder", { payload }),
 
   // Notifications
   listNotifications: () => invoke<AppNotification[]>("list_notifications"),
