@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-05-31（最近本地文件入口）
+> **更新时间**：2026-05-31（本地同名 XML 弹幕自动关联）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-05-31-2315-recent-local-files.md`](./CHANGE_LOG/2026-05-31-2315-recent-local-files.md)
+> **变更日志**：[`CHANGE_LOG/2026-05-31-2323-local-danmaku-sidecar.md`](./CHANGE_LOG/2026-05-31-2323-local-danmaku-sidecar.md)
 
 ---
 
@@ -462,9 +462,11 @@ npm.cmd run electron:build
 
 本轮最近本地文件入口已闭环：新增 `localFiles` Pinia store，使用当前客户端 `localStorage` 保存最近 8 个本地文件路径；侧边栏底部在“打开本地文件”下方展示最近 3 个文件，可直接重开或一键清空。记录仅保存在用户本机浏览器/桌面壳本地状态，不写入仓库、后端或同步服务。验证已覆盖 `npm.cmd run build`、行尾空白检查、in-app Browser 空状态侧边栏目检与 `npm.cmd run electron:build`。
 
+本轮本地同名 XML 弹幕自动关联已闭环：本地文件播放成功后会依次尝试 `同名.xml`、`同名.danmaku.xml`、`同名.comments.xml`，解析到有效 XML 弹幕后自动开启弹幕；手动导入与自动导入共用同一套弹幕结果应用逻辑。切换本地文件时会清空旧弹幕，避免上一部的弹幕残留到下一部。验证已覆盖 `npm.cmd run build`、行尾空白检查与 `npm.cmd run electron:build`。
+
 ---
 
 ## 10. Phase 2 待办
 
 - 播放窗口内嵌已通过本地屏幕像素 smoke；后续仍建议用真实媒体人工走一遍控制栏显示/隐藏、全屏和窗口 resize 体验。
-- 文件源能力目前已支持“打开单个本地视频文件”、同名字幕自动关联和最近本地文件入口；完整文件夹媒体库、同名弹幕自动关联仍待后续分阶段接入。
+- 文件源能力目前已支持“打开单个本地视频文件”、同名字幕自动关联、同名 XML 弹幕自动关联和最近本地文件入口；完整文件夹媒体库仍待后续分阶段接入。

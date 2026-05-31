@@ -16,7 +16,14 @@ import { useLibraryStore } from "@/stores/library";
 import { usePlayerStore } from "@/stores/player";
 import { useServerStore } from "@/stores/server";
 import { useSettingsStore } from "@/stores/settings";
-import type { DanmakuComment, MediaItem, MpvSnapshot, MpvTrackInfo, PictureMode } from "@/types/models";
+import type {
+  DanmakuComment,
+  DanmakuResult,
+  MediaItem,
+  MpvSnapshot,
+  MpvTrackInfo,
+  PictureMode,
+} from "@/types/models";
 import { writeTextToClipboard } from "@/utils/clipboard";
 import { keyboardBindingsForActions, PLAYER_SHORTCUTS, type PlayerShortcutAction } from "@/utils/keyboardShortcuts";
 import { formatLatencyMs } from "@/utils/latency";
@@ -173,6 +180,21 @@ async function toggleDanmaku() {
   }
 }
 
+function resetDanmakuState() {
+  danmakuEnabled.value = false;
+  danmakuComments.value = [];
+  danmakuRawCount.value = 0;
+  danmakuProvider.value = null;
+}
+
+function applyDanmakuResult(result: DanmakuResult) {
+  const comments = result.comments ?? [];
+  danmakuRawCount.value = comments.reduce((total, item) => total + (item.count ?? 1), 0);
+  danmakuProvider.value = result.provider;
+  danmakuComments.value = mergeDanmakuComments(comments);
+  danmakuEnabled.value = danmakuComments.value.length > 0;
+}
+
 async function importDanmakuXml() {
   const selected = await openFileDialog({
     multiple: false,
@@ -188,16 +210,43 @@ async function importDanmakuXml() {
   danmakuLoading.value = true;
   try {
     const result = await api.importDanmakuXml({ filePath: selected });
-    const comments = result.comments ?? [];
-    danmakuRawCount.value = comments.reduce((total, item) => total + (item.count ?? 1), 0);
-    danmakuProvider.value = result.provider;
-    danmakuComments.value = mergeDanmakuComments(comments);
-    danmakuEnabled.value = danmakuComments.value.length > 0;
+    applyDanmakuResult(result);
   } catch {
-    danmakuRawCount.value = 0;
-    danmakuProvider.value = null;
-    danmakuComments.value = [];
-    danmakuEnabled.value = false;
+    resetDanmakuState();
+  } finally {
+    danmakuLoading.value = false;
+  }
+}
+
+function replacePathExtension(filePath: string, suffix: string): string {
+  const slash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+  const dot = filePath.lastIndexOf(".");
+  const base = dot > slash ? filePath.slice(0, dot) : filePath;
+  return `${base}${suffix}`;
+}
+
+function localDanmakuXmlCandidates(filePath: string): string[] {
+  return [
+    replacePathExtension(filePath, ".xml"),
+    replacePathExtension(filePath, ".danmaku.xml"),
+    replacePathExtension(filePath, ".comments.xml"),
+  ].filter((value, index, list) => list.indexOf(value) === index);
+}
+
+async function autoImportLocalDanmakuXml(filePath: string) {
+  danmakuLoading.value = true;
+  try {
+    for (const candidate of localDanmakuXmlCandidates(filePath)) {
+      try {
+        const result = await api.importDanmakuXml({ filePath: candidate });
+        if ((result.comments ?? []).length === 0) continue;
+        applyDanmakuResult(result);
+        return;
+      } catch {
+        // Try the next sidecar name.
+      }
+    }
+    resetDanmakuState();
   } finally {
     danmakuLoading.value = false;
   }
@@ -511,11 +560,13 @@ watch(currentItemId, (id, oldId) => {
   if (!oldId || id === oldId) return;
   introSkipAppliedItemId = null;
   outroSkipAppliedItemId = null;
-  danmakuEnabled.value = false;
   closePlayerPanels();
-  danmakuComments.value = [];
-  danmakuRawCount.value = 0;
-  danmakuProvider.value = null;
+  resetDanmakuState();
+});
+
+watch(localFilePath, (filePath, oldFilePath) => {
+  if (!oldFilePath || filePath === oldFilePath) return;
+  resetDanmakuState();
 });
 
 watch(episodeMenuOpen, (open) => {
@@ -1500,11 +1551,13 @@ async function startCurrentPlayback() {
   const stealthWhenRecording = route.query.stealth !== "0";
 
   if (filePath) {
+    resetDanmakuState();
     await player.playFile({
       filePath,
       startMs: start,
       title: localFileTitle.value,
     });
+    await autoImportLocalDanmakuXml(filePath);
   } else if (localId) {
     if (!lib.itemCache[props.id]) {
       await lib.loadItem(props.id);
