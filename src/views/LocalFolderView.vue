@@ -8,6 +8,8 @@ import { openFileDialog } from "@/platform";
 import { useLocalFilesStore } from "@/stores/localFiles";
 import { usePlayerStore } from "@/stores/player";
 
+type SortMode = "path" | "name" | "modified" | "size";
+
 const route = useRoute();
 const router = useRouter();
 const localFiles = useLocalFilesStore();
@@ -18,6 +20,7 @@ const loading = ref(false);
 const errorText = ref<string | null>(null);
 const recursive = ref(false);
 const searchText = ref("");
+const sortMode = ref<SortMode>("path");
 
 const folderPath = computed(() => {
   const value = route.query.folder;
@@ -42,13 +45,15 @@ const normalizedSearchText = computed(() => searchText.value.trim().toLocaleLowe
 const visibleItems = computed(() => {
   const items = listing.value?.items ?? [];
   const query = normalizedSearchText.value;
-  if (!query) return items;
-  return items.filter((item) =>
-    [item.name, item.relativePath ?? "", item.extension]
-      .join(" ")
-      .toLocaleLowerCase()
-      .includes(query),
-  );
+  const filtered = query
+    ? items.filter((item) =>
+        [item.name, item.relativePath ?? "", item.extension]
+          .join(" ")
+          .toLocaleLowerCase()
+          .includes(query),
+      )
+    : items;
+  return [...filtered].sort(compareVideos);
 });
 const countLabel = computed(() => {
   const total = listing.value?.items.length ?? 0;
@@ -94,6 +99,23 @@ function formatDate(ms?: number | null): string {
 function relativePathLabel(item: LocalFolderVideo): string {
   const value = item.relativePath?.trim();
   return value && value !== item.name ? value : "";
+}
+
+function compareText(left: string, right: string): number {
+  return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+}
+
+function compareVideos(left: LocalFolderVideo, right: LocalFolderVideo): number {
+  if (sortMode.value === "name") {
+    return compareText(left.name, right.name) || compareText(left.relativePath ?? "", right.relativePath ?? "");
+  }
+  if (sortMode.value === "modified") {
+    return (right.modifiedAtMs ?? 0) - (left.modifiedAtMs ?? 0) || compareText(left.name, right.name);
+  }
+  if (sortMode.value === "size") {
+    return right.sizeBytes - left.sizeBytes || compareText(left.name, right.name);
+  }
+  return compareText(left.relativePath ?? left.name, right.relativePath ?? right.name);
 }
 
 async function chooseFolder() {
@@ -243,6 +265,15 @@ watch(recursive, () => {
         <label class="search-box">
           <Icon icon="lucide:search" width="15" />
           <input v-model="searchText" type="search" placeholder="搜索文件名或路径" />
+        </label>
+        <label class="sort-box" title="排序">
+          <Icon icon="lucide:arrow-up-down" width="15" />
+          <select v-model="sortMode">
+            <option value="path">路径</option>
+            <option value="name">文件名</option>
+            <option value="modified">最近修改</option>
+            <option value="size">大小</option>
+          </select>
         </label>
         <button
           v-if="searchText"
@@ -433,6 +464,32 @@ watch(recursive, () => {
 .search-box input::placeholder {
   color: var(--fg-tertiary);
 }
+.sort-box {
+  width: 136px;
+  height: 36px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-tertiary);
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+}
+.sort-box select {
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.sort-box option {
+  background: #1f1f24;
+  color: white;
+}
 .folder-meta {
   display: flex;
   align-items: center;
@@ -599,6 +656,12 @@ watch(recursive, () => {
   .local-folder__actions {
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+  .folder-toolbar {
+    flex-wrap: wrap;
+  }
+  .sort-box {
+    width: 100%;
   }
   .local-folder__title p {
     max-width: 100%;
