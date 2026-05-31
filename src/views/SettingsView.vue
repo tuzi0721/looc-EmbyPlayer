@@ -540,9 +540,9 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
   {
     key: "folder-library",
     label: "文件夹媒体库",
-    detail: "未接入目录索引、刮削与增量刷新",
+    detail: "可打开本地文件夹并列出这一层的视频文件",
     icon: "lucide:folder-open",
-    status: "planned",
+    status: "available",
   },
   {
     key: "webdav",

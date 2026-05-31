@@ -58,6 +58,29 @@ pub struct PlayFilePayload {
     pub start_ms: Option<i64>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListLocalFolderPayload {
+    pub directory: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalFolderVideo {
+    pub file_path: String,
+    pub name: String,
+    pub extension: String,
+    pub size_bytes: u64,
+    pub modified_at_ms: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalFolderListing {
+    pub directory: String,
+    pub items: Vec<LocalFolderVideo>,
+}
+
 #[derive(Debug)]
 struct SidecarSubtitle {
     path: PathBuf,
@@ -68,6 +91,11 @@ struct SidecarSubtitle {
 
 const SIDECAR_SUBTITLE_EXTENSIONS: &[(&str, usize)] =
     &[("srt", 0), ("ass", 1), ("ssa", 2), ("vtt", 3)];
+
+const LOCAL_VIDEO_EXTENSIONS: &[&str] = &[
+    "mp4", "mkv", "mov", "avi", "wmv", "flv", "webm", "m4v", "ts", "m2ts", "mpeg", "mpg", "3gp",
+    "ogv", "rmvb",
+];
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -395,6 +423,71 @@ pub async fn play_file(state: State<'_, Arc<AppState>>, payload: PlayFilePayload
 
     *state.current_play_session.lock().await = None;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn list_local_folder(payload: ListLocalFolderPayload) -> AppResult<LocalFolderListing> {
+    let directory = PathBuf::from(payload.directory.trim());
+    let directory = std::fs::canonicalize(&directory)
+        .map_err(|error| AppError::InvalidState(format!("invalid folder path: {}", error)))?;
+    if !directory.is_dir() {
+        return Err(AppError::NotFound(format!(
+            "local folder missing: {}",
+            directory.to_string_lossy()
+        )));
+    }
+
+    let mut items = Vec::new();
+    for entry in std::fs::read_dir(&directory)
+        .map_err(|error| AppError::InvalidState(format!("failed to read folder: {}", error)))?
+    {
+        let entry = entry.map_err(|error| {
+            AppError::InvalidState(format!("failed to read folder item: {}", error))
+        })?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(extension) = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(|value| value.to_ascii_lowercase())
+        else {
+            continue;
+        };
+        if !LOCAL_VIDEO_EXTENSIONS.contains(&extension.as_str()) {
+            continue;
+        }
+        let metadata = entry.metadata().map_err(|error| {
+            AppError::InvalidState(format!("failed to inspect file: {}", error))
+        })?;
+        if !metadata.is_file() {
+            continue;
+        }
+        let modified_at_ms = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis() as u64);
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_string();
+        items.push(LocalFolderVideo {
+            file_path: path.to_string_lossy().to_string(),
+            name,
+            extension,
+            size_bytes: metadata.len(),
+            modified_at_ms,
+        });
+    }
+
+    items.sort_by_key(|item| item.name.to_ascii_lowercase());
+    Ok(LocalFolderListing {
+        directory: directory.to_string_lossy().to_string(),
+        items,
+    })
 }
 
 #[tauri::command]

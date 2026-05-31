@@ -113,6 +113,19 @@ export interface DetectServerResult {
   reports: DetectServerLineReport[];
 }
 
+export interface LocalFolderVideo {
+  filePath: string;
+  name: string;
+  extension: string;
+  sizeBytes: number;
+  modifiedAtMs?: number | null;
+}
+
+export interface LocalFolderListing {
+  directory: string;
+  items: LocalFolderVideo[];
+}
+
 export interface ScreenshotResult {
   filePath: string;
 }
@@ -323,6 +336,8 @@ export const api = {
     invoke<void>("play_local", { payload: { id, startMs } }),
   playFile: (payload: { filePath: string; startMs?: number | null }) =>
     invoke<void>("play_file", { payload }),
+  listLocalFolder: (directory: string) =>
+    invoke<LocalFolderListing>("list_local_folder", { payload: { directory } }),
 
   // Notifications
   listNotifications: () => invoke<AppNotification[]>("list_notifications"),

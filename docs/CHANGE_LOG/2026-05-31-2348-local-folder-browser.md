@@ -1,0 +1,22 @@
+# 本地文件夹浏览
+
+- **时间**：2026-05-31 23:48 (UTC+8)
+- **动机**：文件源能力已经支持打开单个本地视频，但还不能从一个文件夹里浏览视频列表。目标清单里的“文件夹媒体库”需要先有一个真实可用的最小入口，再逐步扩展递归索引、刮削和远程文件服务。
+- **修改文件**：
+  - `electron/main.mjs` — 新增 `list_local_folder`，按本地目录的一层文件枚举常见视频格式并返回文件名、路径、扩展名、大小和修改时间。
+  - `src-tauri/src/commands/player.rs`、`src-tauri/src/lib.rs` — Tauri 同步新增 `list_local_folder` 命令。
+  - `src/api/index.ts`、`src/platform/index.ts` — 新增本地文件夹 API 类型和 Web Preview 空列表 fallback。
+  - `src/router/index.ts`、`src/views/LocalFolderView.vue` — 新增 `/local-folder` 页面，支持选择文件夹、刷新、查看视频列表并点击进入本地文件播放。
+  - `src/components/common/AppSidebar.vue` — 侧边栏底部新增“打开本地文件夹”入口。
+  - `src/views/SettingsView.vue` — “文件服务 / 连接器”面板将“文件夹媒体库”更新为可用。
+- **风险**：当前只枚举所选目录的第一层视频文件，不递归、不生成封面、不做元数据刮削，也不持久化文件夹索引；WebDAV、SMB、Alist / OpenList、Plex 仍保持待接入。
+- **回滚**：删除 `/local-folder` 路由与页面、侧边栏文件夹入口、`list_local_folder` 前后端命令，并把设置页“文件夹媒体库”状态改回待接入即可。
+- **验证步骤**：
+  - `cargo fmt --manifest-path src-tauri/Cargo.toml`
+  - `node --check electron/main.mjs`
+  - `npm.cmd run build`
+  - `cargo check --manifest-path src-tauri/Cargo.toml --all-targets`
+  - `git diff --check`
+  - in-app Browser 打开 `http://localhost:1420/local-folder` 与 `http://localhost:1420/settings?c=file-services` 目检
+  - `npm.cmd run electron:build`
+- **结果**：通过；Electron 命令覆盖检查显示 93 个 renderer 命令均有 Electron handler，Electron unpacked 包完整性检查通过。

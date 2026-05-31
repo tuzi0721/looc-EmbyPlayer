@@ -132,6 +132,7 @@ pub fn run() {
             commands::download::remove_download,
             commands::download::play_local,
             commands::player::play_file,
+            commands::player::list_local_folder,
             commands::subtitle::list_subtitles,
             commands::subtitle::search_online_subtitles,
             commands::subtitle::resolve_online_subtitle,

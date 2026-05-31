@@ -43,6 +43,12 @@ const routes: RouteRecordRaw[] = [
     meta: { transition: "slide-up" },
   },
   {
+    path: "/local-folder",
+    name: "local-folder",
+    component: () => import("@/views/LocalFolderView.vue"),
+    meta: { transition: "slide-up" },
+  },
+  {
     path: "/item/:id",
     name: "item-detail",
     component: () => import("@/views/DetailView.vue"),

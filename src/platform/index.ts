@@ -770,6 +770,11 @@ function invokeWebFallback<T>(
       return Promise.reject(
         new Error("Web Preview 不支持直接播放本地文件，请使用桌面版"),
       );
+    case "list_local_folder":
+      return Promise.resolve({
+        directory: String((args?.payload as any)?.directory ?? ""),
+        items: [],
+      } as T);
     case "import_danmaku_xml":
       return Promise.resolve({
         provider: "xml",

@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-05-31（文件服务能力面板）
+> **更新时间**：2026-05-31（本地文件夹浏览）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-05-31-2335-file-services-capability-panel.md`](./CHANGE_LOG/2026-05-31-2335-file-services-capability-panel.md)
+> **变更日志**：[`CHANGE_LOG/2026-05-31-2348-local-folder-browser.md`](./CHANGE_LOG/2026-05-31-2348-local-folder-browser.md)
 
 ---
 
@@ -48,6 +48,8 @@
 **2026-05-31**：Web/Electron dev 预览冷开深链接会把非 `file://` 的浏览器 path/query 同步进 memory router，`/settings?c=sync` 可直接展开对应设置面板，`/downloads?task=...` 可直接进入下载页；Electron 打包 `file://.../index.html` 不参与该同步，避免把本地文件路径误当成前端路由。
 
 **2026-05-31**：设置页新增“文件服务 / 连接器”只读能力面板，可通过 `/settings?c=file-services` 直达；本地单文件、最近本地文件、同名字幕、同名 XML 弹幕标记为可用，文件夹媒体库、WebDAV、SMB、Alist/OpenList、Plex 连接器标记为待接入。
+
+**2026-05-31**：新增 `/local-folder` 本地文件夹页面；Electron/Tauri 提供 `list_local_folder` 命令枚举所选目录第一层常见视频文件，侧边栏“打开本地文件夹”可进入列表，点击视频继续走 `/player/local-file?file=...` 本地播放器链路。设置页“文件服务 / 连接器”面板同步将“文件夹媒体库”标记为可用。
 
 **2026-05-30**：单集详情页会并行加载季列表与当前季剧集，并通过详情/剧集加载序号避免快速切换 PDP 时旧请求覆盖新页面状态。
 
@@ -468,9 +470,11 @@ npm.cmd run electron:build
 
 本轮文件服务能力面板已闭环：设置页新增“文件服务 / 连接器”状态面板，明确本地单文件、最近本地文件、同名字幕和同名 XML 弹幕为可用能力，并将文件夹媒体库、WebDAV、SMB、Alist/OpenList、Plex 连接器保持为待接入；深链接 `/settings?c=file-services` 可直接展开该面板。验证已覆盖 `npm.cmd run build`、行尾空白检查、in-app Browser 目检与 `npm.cmd run electron:build`。
 
+本轮本地文件夹浏览已闭环：新增 `/local-folder` 页面和侧边栏“打开本地文件夹”入口，Electron/Tauri `list_local_folder` 会枚举所选目录第一层的常见视频格式并返回文件名、路径、扩展名、大小和修改时间；列表项点击后复用现有本地文件播放、最近本地文件、同名字幕和同名 XML 弹幕链路。Web Preview 对该命令返回空列表，避免假装拥有本地文件权限。验证已覆盖 `cargo fmt --manifest-path src-tauri/Cargo.toml`、`node --check electron/main.mjs`、`npm.cmd run build`、`cargo check --manifest-path src-tauri/Cargo.toml --all-targets`、行尾空白检查、in-app Browser 目检与 `npm.cmd run electron:build`。
+
 ---
 
 ## 10. Phase 2 待办
 
 - 播放窗口内嵌已通过本地屏幕像素 smoke；后续仍建议用真实媒体人工走一遍控制栏显示/隐藏、全屏和窗口 resize 体验。
-- 文件源能力目前已支持“打开单个本地视频文件”、同名字幕自动关联、同名 XML 弹幕自动关联和最近本地文件入口；完整文件夹媒体库仍待后续分阶段接入。
+- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层视频浏览、同名字幕自动关联、同名 XML 弹幕自动关联和最近本地文件入口；递归目录索引、封面/元数据刮削、WebDAV、SMB、Alist/OpenList 和 Plex 仍待后续分阶段接入。

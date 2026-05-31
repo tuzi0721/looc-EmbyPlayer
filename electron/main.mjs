@@ -23,6 +23,23 @@ const imageCacheDir = path.join(userDataDir, "image-cache");
 const imageCacheInflight = new Map();
 const imageQueryKeys = new Set(["maxWidth", "maxHeight", "width", "height", "quality", "format", "tag"]);
 const noOpCommands = new Set([]);
+const localVideoExtensions = new Set([
+  "mp4",
+  "mkv",
+  "mov",
+  "avi",
+  "wmv",
+  "flv",
+  "webm",
+  "m4v",
+  "ts",
+  "m2ts",
+  "mpeg",
+  "mpg",
+  "3gp",
+  "ogv",
+  "rmvb",
+]);
 
 fs.mkdirSync(userDataDir, { recursive: true });
 app.setPath("userData", userDataDir);
@@ -848,6 +865,35 @@ async function playLocalFilePath(filePath, startMs = null) {
     fileName: path.basename(resolved),
     startMs: startMs ?? null,
   });
+}
+
+async function listLocalFolder(payload = {}) {
+  const directory = typeof payload.directory === "string" ? payload.directory.trim() : "";
+  if (!directory) throw new Error("directory is required");
+  const resolved = path.resolve(directory);
+  const stat = await fs.promises.stat(resolved).catch(() => null);
+  if (!stat?.isDirectory()) throw new Error(`local folder missing: ${resolved}`);
+
+  const dirents = await fs.promises.readdir(resolved, { withFileTypes: true });
+  const items = [];
+  for (const dirent of dirents) {
+    if (!dirent.isFile()) continue;
+    const extension = path.extname(dirent.name).replace(/^\./, "").toLowerCase();
+    if (!localVideoExtensions.has(extension)) continue;
+    const filePath = path.join(resolved, dirent.name);
+    const fileStat = await fs.promises.stat(filePath).catch(() => null);
+    if (!fileStat?.isFile()) continue;
+    items.push({
+      filePath,
+      name: dirent.name,
+      extension,
+      sizeBytes: fileStat.size,
+      modifiedAtMs: Number(fileStat.mtimeMs.toFixed(0)),
+    });
+  }
+
+  items.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  return { directory: resolved, items };
 }
 
 async function preserveTrackSwitchCache() {
@@ -1818,6 +1864,7 @@ async function handleInvoke(command, args = {}) {
     await playLocalFilePath(args.payload?.filePath, args.payload?.startMs ?? null);
     return null;
   }
+  if (command === "list_local_folder") return listLocalFolder(args.payload ?? {});
   if (command === "list_notifications") return store.listNotifications();
   if (command === "unread_count") return store.unreadCount();
   if (command === "list_danmaku_providers") return danmaku.listProviders();

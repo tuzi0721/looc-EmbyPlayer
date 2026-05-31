@@ -94,6 +94,14 @@ function gotoDownloads() {
 function gotoRemote() {
   router.push("/remote").catch(() => {});
 }
+function gotoLocalFolder(folderPath?: string) {
+  router
+    .push({
+      name: "local-folder",
+      query: folderPath ? { folder: folderPath } : {},
+    })
+    .catch(() => {});
+}
 
 function openLocalPath(filePath: string) {
   localFiles.remember(filePath);
@@ -128,6 +136,19 @@ async function openLocalFile() {
   }).catch(() => null);
   if (typeof selected !== "string" || selected.length === 0) return;
   openLocalPath(selected);
+}
+
+async function openLocalFolder() {
+  const selected = await openFileDialog({
+    multiple: false,
+    directory: true,
+    title: "打开本地文件夹",
+  }).catch(() => null);
+  if (typeof selected === "string" && selected.length > 0) {
+    gotoLocalFolder(selected);
+  } else {
+    gotoLocalFolder();
+  }
 }
 </script>
 
@@ -294,6 +315,15 @@ async function openLocalFile() {
       <button class="add-srv" @click="openLocalFile">
         <Icon icon="lucide:file-video" width="14" />
         <span>打开本地文件</span>
+      </button>
+
+      <button
+        class="add-srv"
+        :class="{ active: route.name === 'local-folder' }"
+        @click="openLocalFolder"
+      >
+        <Icon icon="lucide:folder-open" width="14" />
+        <span>打开本地文件夹</span>
       </button>
 
       <div v-if="recentLocalFiles.length > 0" class="local-recent">
@@ -680,6 +710,11 @@ async function openLocalFile() {
   border-color: var(--accent);
   color: var(--accent);
   background: rgba(10, 132, 255, 0.06);
+}
+.add-srv.active {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .local-recent {
