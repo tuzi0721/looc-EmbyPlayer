@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-05-31（同步能力面板）
+> **更新时间**：2026-05-31（Memory History 深链接冷开）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-05-31-2154-sync-capability-panel.md`](./CHANGE_LOG/2026-05-31-2154-sync-capability-panel.md)
+> **变更日志**：[`CHANGE_LOG/2026-05-31-2201-memory-history-deep-links.md`](./CHANGE_LOG/2026-05-31-2201-memory-history-deep-links.md)
 
 ---
 
@@ -44,6 +44,8 @@
 **2026-05-29**：服务器连接器图标与活动线路 fallback 抽到 `src/utils/serverVisuals.ts`；侧边栏服务器项使用统一连接器头像并显示线路健康点，首页未登录服务器卡片复用同一套图标/线路解析。
 
 **2026-05-30**：媒体库分区页顶部标题改为常显当前分区名称；直达 `/library/:id` 且视图缓存为空时，会在加载媒体条目的同时并行补拉视图元数据，长标题保持单行省略。
+
+**2026-05-31**：Web/Electron dev 预览冷开深链接会把非 `file://` 的浏览器 path/query 同步进 memory router，`/settings?c=sync` 可直接展开对应设置面板，`/downloads?task=...` 可直接进入下载页；Electron 打包 `file://.../index.html` 不参与该同步，避免把本地文件路径误当成前端路由。
 
 **2026-05-30**：单集详情页会并行加载季列表与当前季剧集，并通过详情/剧集加载序号避免快速切换 PDP 时旧请求覆盖新页面状态。
 
@@ -274,7 +276,9 @@ npm.cmd run build
 npm.cmd run electron:build
 ```
 
-本轮下载通知任务定位的 `node --check electron\backend\store.mjs`、`node --check electron\backend\downloads.mjs`、`node --check electron\main.mjs`、`npm.cmd run check:electron-commands`、`npm.cmd run build`、行尾空白检查与 `npm.cmd run electron:build` 已通过；in-app Browser 复用 1420 服务点击侧边栏“下载”后进入下载页，空任务状态正常且页面错误数为 0。直接以 `/downloads?task=...` 冷开时因当前路由使用 memory history 仍先显示首页，真实通知点击走应用内 router push，不受该冷开限制影响。
+本轮下载通知任务定位的 `node --check electron\backend\store.mjs`、`node --check electron\backend\downloads.mjs`、`node --check electron\main.mjs`、`npm.cmd run check:electron-commands`、`npm.cmd run build`、行尾空白检查与 `npm.cmd run electron:build` 已通过；in-app Browser 复用 1420 服务点击侧边栏“下载”后进入下载页，空任务状态正常且页面错误数为 0。后续 `2026-05-31-2201-memory-history-deep-links.md` 已补齐 memory history 冷开 path/query 同步，直接以 `/downloads?task=...` 冷开可进入下载页。
+
+本轮 Memory History 深链接冷开已接入：启动时会在非 `file://` 且路径不是 `/` / `index.html` 时，把浏览器 path/query 同步到 memory router；`/settings?c=sync` 可直接展开同步面板，`/downloads?task=demo` 可直接进入下载页空态。验证已覆盖 `npm.cmd run build`、行尾空白检查、in-app Browser 1421 干净 dev server 冷开两条深链接与 `npm.cmd run electron:build`。
 
 本轮画质增强能力面板的 `npm.cmd run build`、行尾空白检查与 `npm.cmd run electron:build` 已通过；in-app Browser 点击设置页“画质增强”后显示 Windows HDR、RTX VSR、RTX TrueHDR、AMD FSR、RIFE、GLSL Shaders 6 个能力项，Web Preview 下 Windows HDR 为禁用，其余增强项为待接入，页面错误数为 0。
 
