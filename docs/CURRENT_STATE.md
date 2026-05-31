@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（真实服务器连接回归）
+> **更新时间**：2026-06-01（Web Preview 播放手势兜底）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-0708-real-server-connection-smoke.md`](./CHANGE_LOG/2026-06-01-0708-real-server-connection-smoke.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-0714-web-preview-play-gesture-fallback.md`](./CHANGE_LOG/2026-06-01-0714-web-preview-play-gesture-fallback.md)
 
 ---
 
@@ -557,6 +557,8 @@ npm.cmd run electron:build
 本轮打开下载目录入口已闭环：设置页“下载”面板新增“打开”按钮，Electron/Tauri 桌面运行时会确保当前下载目录存在后调用系统文件管理器打开，并在面板内显示结果或错误；Web Preview 继续禁用桌面目录选择/打开/清除能力，避免假按钮。验证已覆盖 `node --check electron\main.mjs`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`npm.cmd run check:electron-commands`、`npm.cmd run build`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、in-app Browser 1420 下载设置面板目检、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`。
 
 本轮真实服务器连接回归已闭环：in-app Browser 1420 当前会话直接使用真实测试账号，设置页仅保留真实服务器 `001`，两条 443 线路测活返回有效延迟并显示为 Emby 已连接；首页媒体库、真实电影媒体库列表、真实条目详情和播放入口均加载成功，播放器创建真实 HTML video 对象，`readyState = 4`，视频尺寸为 1440×1080，页面无播放失败提示。上轮遗留的两个本地 mock 服务器条目已从当前浏览器状态删除，避免后续测试混淆；自动化点击播放按钮未让 HTML video 时间推进，下一阶段继续单独追播放器启动/用户手势链路。验证过程未写入账号、密码、token 或完整线路地址。
+
+本轮 Web Preview 播放手势兜底已闭环：HTML/HLS 播放按钮在 `video.play()` 被浏览器拒绝为缺少用户手势时，会自动切到静音并重试，避免真实视频对象已加载但时间停在 0 秒；真实测试账号会话直接打开真实播放器页后，点击播放按钮将 HTML video 从 `currentTime = 0` 推进到约 10 秒，`paused = false`，视频尺寸保持 1440×1080 且页面无播放失败提示。验证已覆盖 `npm.cmd run build`、in-app Browser 1420 真实播放页回归、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`；Electron/Tauri 内嵌 mpv 路径不受该 Web Preview fallback 影响。
 
 ---
 

@@ -1052,12 +1052,34 @@ async function togglePlay() {
   if (useHtmlVideo) {
     const video = videoEl.value;
     if (!video) return;
-    if (video.paused) await video.play();
+    if (video.paused) await playHtmlVideoFromUserAction(video);
     else video.pause();
     syncHtmlVideoState();
   } else if (paused.value) await player.resume();
   else await player.pause();
   bumpControls();
+}
+
+async function playHtmlVideoFromUserAction(video: HTMLVideoElement) {
+  try {
+    await video.play();
+    errorText.value = null;
+    return;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "NotAllowedError" && !video.muted) {
+      video.muted = true;
+      htmlMuted.value = true;
+      try {
+        await video.play();
+        errorText.value = null;
+        return;
+      } catch (retryError) {
+        error = retryError;
+      }
+    }
+    errorText.value = error instanceof Error ? error.message : String(error);
+    showControls.value = true;
+  }
 }
 
 async function ensureQueueItems() {
