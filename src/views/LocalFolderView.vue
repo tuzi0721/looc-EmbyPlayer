@@ -73,6 +73,11 @@ function fileNameFromPath(filePath: string): string {
   return filePath.split(/[\\/]/).filter(Boolean).pop() ?? filePath;
 }
 
+function directoryFromPath(filePath: string): string {
+  const index = Math.max(filePath.lastIndexOf("\\"), filePath.lastIndexOf("/"));
+  return index > 0 ? filePath.slice(0, index) : filePath;
+}
+
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "-";
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -181,6 +186,24 @@ function markPosterFailed(item: LocalFolderVideo) {
   posterFailures.value = next;
 }
 
+async function openCurrentFolderInSystem() {
+  const directory = listing.value?.directory ?? folderPath.value;
+  if (!directory) return;
+  try {
+    await api.openPath(directory);
+  } catch (error) {
+    errorText.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function openVideoFolder(item: LocalFolderVideo) {
+  try {
+    await api.openPath(directoryFromPath(item.filePath));
+  } catch (error) {
+    errorText.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
 function openVideo(item: LocalFolderVideo, index: number) {
   const items = visibleItems.value;
   player.setLocalQueue(items.map((entry) => entry.filePath), index);
@@ -222,6 +245,15 @@ watch(recursive, () => {
           @click="toggleCurrentFolderFavorite"
         >
           <Icon :icon="folderFavorited ? 'lucide:star' : 'lucide:star'" width="16" />
+        </button>
+        <button
+          v-if="folderPath"
+          class="icon-btn"
+          type="button"
+          title="在系统中打开文件夹"
+          @click="openCurrentFolderInSystem"
+        >
+          <Icon icon="lucide:folder-search" width="16" />
         </button>
         <label v-if="folderPath" class="toggle">
           <input v-model="recursive" type="checkbox" />
@@ -358,6 +390,14 @@ watch(recursive, () => {
                 </small>
               </span>
               <Icon icon="lucide:play" width="17" class="file-row__play" />
+            </button>
+            <button
+              class="file-row__action"
+              type="button"
+              title="打开所在文件夹"
+              @click="openVideoFolder(item)"
+            >
+              <Icon icon="lucide:folder-search" width="16" />
             </button>
             <button
               class="file-row__favorite"
@@ -564,7 +604,7 @@ watch(recursive, () => {
   width: 100%;
   min-height: 58px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 36px;
+  grid-template-columns: minmax(0, 1fr) 36px 36px;
   align-items: stretch;
 }
 .file-row__open {
@@ -582,10 +622,12 @@ watch(recursive, () => {
   cursor: pointer;
 }
 .file-row__open:hover,
-.file-row__favorite:hover {
+.file-row__favorite:hover,
+.file-row__action:hover {
   color: var(--accent);
 }
-.file-row__favorite {
+.file-row__favorite,
+.file-row__action {
   appearance: none;
   border: none;
   background: transparent;

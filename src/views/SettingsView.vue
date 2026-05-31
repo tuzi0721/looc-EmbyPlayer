@@ -538,6 +538,13 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
     status: "available",
   },
   {
+    key: "local-file-locate",
+    label: "本地文件定位",
+    detail: "可从文件夹页打开当前目录或视频所在目录",
+    icon: "lucide:folder-search",
+    status: "available",
+  },
+  {
     key: "sidecar-subtitles",
     label: "同名字幕",
     detail: "本地播放会自动关联同目录同名字幕",
