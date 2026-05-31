@@ -452,6 +452,8 @@ npm.cmd run electron:build
 
 本轮内嵌视觉临时脚本已清理：删除上一轮遗留的 `scripts/smoke-electron-embedded-visual.mjs`，并确认仓库内未检出测试账号名或密码明文。后续真实联调只使用临时进程参数或环境变量承载敏感字段。
 
+本轮 Git 同步状态已复核：工作树干净，`main` 本地比 `origin/main` 领先 7 个提交；上轮遗留的 `127.0.0.1:1421` 临时 Vite dev server 已关闭。再次执行 `git push origin main` 仍失败，错误为 `schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS`，当前判断是本机 Git 凭据缺失，不是代码冲突或远端拒绝；凭据恢复后可直接推送。
+
 ---
 
 ## 10. Phase 2 待办
