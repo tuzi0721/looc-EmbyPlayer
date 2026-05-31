@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
 
 import GlassNavBar from "@/components/common/GlassNavBar.vue";
 import GlassButton from "@/components/common/GlassButton.vue";
+import { api } from "@/api";
 import { useDownloadsStore } from "@/stores/downloads";
 import type { DownloadStatus, DownloadTask } from "@/types/models";
 
 const downloads = useDownloadsStore();
 const router = useRouter();
+const actionBusy = ref<string | null>(null);
+const errorText = ref<string | null>(null);
 
 onMounted(() => downloads.refresh());
 
@@ -47,6 +50,60 @@ async function play(t: DownloadTask) {
   router.push({ name: "player", params: { id: t.itemId }, query: { local: t.id } });
 }
 
+function fileNameFromPath(filePath: string): string {
+  return filePath.split(/[\\/]/).filter(Boolean).pop() ?? filePath;
+}
+
+function dirNameFromPath(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, "/");
+  const index = normalized.lastIndexOf("/");
+  return index > 0 ? filePath.slice(0, index) : filePath;
+}
+
+function stringifyError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function runTaskAction(key: string, action: () => Promise<void>) {
+  if (actionBusy.value) return;
+  actionBusy.value = key;
+  errorText.value = null;
+  try {
+    await action();
+  } catch (error) {
+    errorText.value = stringifyError(error);
+  } finally {
+    actionBusy.value = null;
+  }
+}
+
+async function retry(t: DownloadTask) {
+  await runTaskAction(`retry:${t.id}`, () => downloads.resume(t.id));
+}
+
+async function pause(t: DownloadTask) {
+  await runTaskAction(`pause:${t.id}`, () => downloads.pause(t.id));
+}
+
+async function resume(t: DownloadTask) {
+  await runTaskAction(`resume:${t.id}`, () => downloads.resume(t.id));
+}
+
+async function cancel(t: DownloadTask) {
+  await runTaskAction(`cancel:${t.id}`, () => downloads.cancel(t.id));
+}
+
+async function remove(t: DownloadTask, deleteFile = false) {
+  await runTaskAction(`remove:${t.id}:${deleteFile ? "file" : "record"}`, () =>
+    downloads.remove(t.id, deleteFile),
+  );
+}
+
+async function openFolder(t: DownloadTask) {
+  if (!t.filePath) return;
+  await runTaskAction(`folder:${t.id}`, () => api.openPath(dirNameFromPath(t.filePath)));
+}
+
 function statusLabel(s: DownloadStatus) {
   return {
     pending: "等待中",
@@ -64,6 +121,8 @@ function statusLabel(s: DownloadStatus) {
     <GlassNavBar show-back title="下载" />
 
     <div class="content">
+      <p v-if="errorText" class="error glass glass-strong">{{ errorText }}</p>
+
       <section v-for="(arr, key) in grouped" :key="key" v-show="arr.length > 0">
         <header class="row-head">
           <h2>
@@ -83,6 +142,9 @@ function statusLabel(s: DownloadStatus) {
                 <span v-if="pct(t) != null">{{ pct(t)!.toFixed(1) }}%</span>
                 <span v-if="t.error" class="err">{{ t.error }}</span>
               </div>
+              <div v-if="t.filePath" class="task__path" :title="t.filePath">
+                {{ fileNameFromPath(t.filePath) }}
+              </div>
               <div class="task__bar">
                 <span
                   :style="{
@@ -98,28 +160,83 @@ function statusLabel(s: DownloadStatus) {
             </div>
             <div class="task__actions">
               <template v-if="t.status === 'running'">
-                <GlassButton size="sm" variant="ghost" @click="downloads.pause(t.id)">
+                <GlassButton
+                  size="sm"
+                  variant="ghost"
+                  title="暂停"
+                  :loading="actionBusy === `pause:${t.id}`"
+                  @click="pause(t)"
+                >
                   <Icon icon="lucide:pause" width="14" />
                 </GlassButton>
-                <GlassButton size="sm" variant="ghost" @click="downloads.cancel(t.id)">
+                <GlassButton
+                  size="sm"
+                  variant="ghost"
+                  title="取消"
+                  :loading="actionBusy === `cancel:${t.id}`"
+                  @click="cancel(t)"
+                >
                   <Icon icon="lucide:square" width="14" />
                 </GlassButton>
               </template>
               <template v-else-if="t.status === 'paused'">
-                <GlassButton size="sm" variant="primary" @click="downloads.resume(t.id)">
+                <GlassButton
+                  size="sm"
+                  variant="primary"
+                  title="继续"
+                  :loading="actionBusy === `resume:${t.id}`"
+                  @click="resume(t)"
+                >
                   <Icon icon="lucide:play" width="14" />
                 </GlassButton>
               </template>
               <GlassButton
+                v-else-if="t.status === 'failed' || t.status === 'cancelled'"
+                size="sm"
+                variant="primary"
+                title="重试"
+                :loading="actionBusy === `retry:${t.id}`"
+                @click="retry(t)"
+              >
+                <Icon icon="lucide:rotate-ccw" width="14" />
+              </GlassButton>
+              <GlassButton
                 v-if="t.status === 'completed'"
                 size="sm"
                 variant="primary"
+                title="本地播放"
                 @click="play(t)"
               >
                 <Icon icon="lucide:play" width="14" />
                 本地播放
               </GlassButton>
-              <GlassButton size="sm" variant="danger" @click="downloads.remove(t.id, false)">
+              <GlassButton
+                v-if="t.filePath"
+                size="sm"
+                variant="ghost"
+                title="打开所在目录"
+                :loading="actionBusy === `folder:${t.id}`"
+                @click="openFolder(t)"
+              >
+                <Icon icon="lucide:folder-open" width="14" />
+              </GlassButton>
+              <GlassButton
+                size="sm"
+                variant="ghost"
+                title="移除记录"
+                :loading="actionBusy === `remove:${t.id}:record`"
+                @click="remove(t, false)"
+              >
+                <Icon icon="lucide:x" width="14" />
+              </GlassButton>
+              <GlassButton
+                v-if="t.filePath"
+                size="sm"
+                variant="danger"
+                title="删除文件和记录"
+                :loading="actionBusy === `remove:${t.id}:file`"
+                @click="remove(t, true)"
+              >
                 <Icon icon="lucide:trash-2" width="14" />
               </GlassButton>
             </div>
@@ -173,6 +290,10 @@ function statusLabel(s: DownloadStatus) {
   gap: 16px;
   padding: 16px 18px;
   border-radius: 18px;
+  min-width: 0;
+}
+.task__main {
+  min-width: 0;
 }
 .task__title {
   display: flex;
@@ -181,16 +302,40 @@ function statusLabel(s: DownloadStatus) {
   font-size: 14px;
   font-weight: 600;
   color: var(--fg-primary);
+  min-width: 0;
+}
+.task__title span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .task__sub {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   font-size: 12px;
   color: var(--fg-tertiary);
   margin-top: 4px;
 }
+.task__path {
+  margin-top: 5px;
+  max-width: 100%;
+  color: var(--fg-tertiary);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .err {
   color: var(--danger);
+}
+.error {
+  margin: 0;
+  padding: 12px 14px;
+  color: var(--danger);
+  font-size: 13px;
+  border-radius: 14px;
 }
 .task__bar {
   margin-top: 10px;
@@ -226,10 +371,11 @@ function statusLabel(s: DownloadStatus) {
 }
 .task__actions {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: flex-end;
   justify-content: center;
+  max-width: 168px;
 }
 .badge.stealth {
   font-size: 10px;
@@ -248,5 +394,14 @@ function statusLabel(s: DownloadStatus) {
   gap: 10px;
   color: var(--fg-tertiary);
   padding: 60px;
+}
+@media (max-width: 720px) {
+  .task {
+    grid-template-columns: 1fr;
+  }
+  .task__actions {
+    max-width: none;
+    justify-content: flex-start;
+  }
 }
 </style>

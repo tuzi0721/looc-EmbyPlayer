@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-05-31（截图避让重置）
+> **更新时间**：2026-05-31（下载中心操作补齐）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-05-31-1411-screenshot-avoidance-reset.md`](./CHANGE_LOG/2026-05-31-1411-screenshot-avoidance-reset.md)
+> **变更日志**：[`CHANGE_LOG/2026-05-31-1426-download-center-actions.md`](./CHANGE_LOG/2026-05-31-1426-download-center-actions.md)
 
 ---
 
@@ -233,6 +233,7 @@
 - **2026-05-29**：Electron 桌面集成接入托盘、`rodelplayer://` 协议入口、single instance 深链转发、关闭隐藏到托盘和播放期间 `powerSaveBlocker` 防息屏；`set_now_playing*` / `clear_now_playing` 不再是空操作，托盘 tooltip 会显示播放状态、活动下载数和未读通知数。
 - **2026-05-29**：Electron 弹幕源接入 DanDanPlay provider，`list_danmaku_providers` 返回真实列表，`fetch_danmaku` 会读取当前媒体详情、按剧集名匹配 DanDanPlay、拉取评论并转换为播放器弹幕格式；Electron 与 Tauri 侧使用一致的弹幕 User-Agent。
 - **2026-05-29**：Electron 下载中心接入基础下载管理器，支持 Emby/Jellyfin 直连下载、Range 断点续写、暂停/继续/取消/移除、本地 mpv 播放和启动后恢复 running 任务；下载任务保存 headers/User-Agent 以便默认无 `api_key` 的鉴权路径可恢复。
+- **2026-05-31**：下载中心操作补齐：失败/取消任务可重试，任务卡显示本地文件名，已保存路径可打开所在目录；删除操作拆成“移除记录”和“删除文件和记录”，并为任务操作补齐忙碌状态和错误提示，窄屏下操作按钮自动换行。
 - **2026-05-29**：Electron 远程遥控接入 Emby/Jellyfin `Sessions`、Playstate 与 GeneralCommand API，支持在线会话列表、播放暂停/停止/快退快进/进度跳转、音量设置和向远端设备发送消息，并过滤 Hills Lite 自己的会话。
 - **2026-05-29**：Electron 通知中心命令接入 JSON 状态，支持列表、未读计数、删除、单条已读、全部已读和清空，并在操作后发出 `notification:*` 事件同步前端通知中心与 toast 队列。
 - **2026-05-29**：Electron `list_subtitles` 从空实现改为按当前播放会话读取 Emby/Jellyfin PlaybackInfo，生成服务器字幕列表与可交给 mpv `sub-add` 的字幕 URL；停止播放或上报停止后会清空当前字幕会话，避免字幕面板显示上一条播放的字幕。
@@ -423,6 +424,8 @@ npm.cmd run electron:build
 本轮字幕堆叠已接入：Electron/Tauri 均新增 `set_secondary_subtitle_track`，通过 mpv `secondary-sid` / `secondary-sub-visibility` 选择第二字幕轨，播放器快照新增 `secondarySubId`；字幕面板在有多条字幕时显示“第二字幕”区，可关闭或选择第二字幕，并阻止主字幕与第二字幕选择同一轨道。验证已覆盖 `node --check electron\backend\mpv.mjs`、`node --check electron\main.mjs`、`npm.cmd run check:electron-commands`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run build`、行尾空白检查、本地 Vite HTTP 200 检查与 `npm.cmd run electron:build`；in-app Browser 本轮仍被 Browser URL policy 拒绝打开 `127.0.0.1`，因此未做浏览器视觉目检。
 
 本轮截图避让重置已接入：播放器执行截图前会清理控制栏隐藏计时器、关闭临时面板、临时收起顶部/底部控制层、等待渲染帧并强制同步 embedded mpv rect，减少截图继承控制栏显示状态下内嵌视频避让区域的概率；截图成功或失败后恢复控制层提示计时。验证已覆盖 `npm.cmd run build`、行尾空白检查与 `npm.cmd run electron:build`；未做真实播放器截图文件的人工视觉对比。
+
+本轮下载中心操作补齐已接入：下载任务卡新增失败/取消重试、打开所在目录、移除记录、删除文件和记录入口，并显示本地文件名；任务操作带忙碌态和错误提示，操作区改为可换行按钮组以适配窄屏。验证已覆盖 `npm.cmd run build`、`npm.cmd run check:electron-commands`、行尾空白检查与 `npm.cmd run electron:build`；in-app Browser 尝试打开 `http://localhost:1420/downloads` 时被 Browser URL policy 拒绝，因此未做浏览器视觉目检。
 
 本轮添加服务器账号入口可见性已修正：账号区移到线路区之前，用户名、密码、端口和自动识别入口在 1280x720 预览首屏同时可见；弹窗内容区补齐 `min-height: 0`，避免底部按钮栏压住输入。验证已覆盖 in-app Browser 目检、`npm.cmd run build` 与本阶段触碰文件行尾空白检查。
 
