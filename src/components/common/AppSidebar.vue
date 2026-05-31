@@ -43,6 +43,7 @@ const unreadNotificationsLabel = computed(() =>
   notifications.unread > 99 ? "99+" : String(notifications.unread),
 );
 const recentLocalFiles = computed(() => localFiles.items.slice(0, 3));
+const recentLocalFolders = computed(() => localFiles.folderItems.slice(0, 2));
 
 function loggedInOn(serverId: string): boolean {
   return auth.accounts.some((a) => a.serverId === serverId);
@@ -103,6 +104,11 @@ function gotoLocalFolder(folderPath?: string) {
     .catch(() => {});
 }
 
+function openLocalFolderPath(folderPath: string) {
+  localFiles.rememberFolder(folderPath);
+  gotoLocalFolder(folderPath);
+}
+
 function openLocalPath(filePath: string) {
   localFiles.remember(filePath);
   router
@@ -145,7 +151,7 @@ async function openLocalFolder() {
     title: "打开本地文件夹",
   }).catch(() => null);
   if (typeof selected === "string" && selected.length > 0) {
-    gotoLocalFolder(selected);
+    openLocalFolderPath(selected);
   } else {
     gotoLocalFolder();
   }
@@ -325,6 +331,25 @@ async function openLocalFolder() {
         <Icon icon="lucide:folder-open" width="14" />
         <span>打开本地文件夹</span>
       </button>
+
+      <div v-if="recentLocalFolders.length > 0" class="local-recent">
+        <div class="local-recent__head">
+          <span>最近本地文件夹</span>
+          <button class="iconbtn" aria-label="清空最近本地文件夹" @click="localFiles.clearFolders()">
+            <Icon icon="lucide:x" width="13" />
+          </button>
+        </div>
+        <button
+          v-for="entry in recentLocalFolders"
+          :key="entry.folderPath"
+          class="local-recent__item"
+          :title="entry.folderPath"
+          @click="openLocalFolderPath(entry.folderPath)"
+        >
+          <Icon icon="lucide:folder" width="14" />
+          <span>{{ entry.name }}</span>
+        </button>
+      </div>
 
       <div v-if="recentLocalFiles.length > 0" class="local-recent">
         <div class="local-recent__head">

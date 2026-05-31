@@ -31,6 +31,7 @@ const countLabel = computed(() => {
   const count = listing.value?.items.length ?? 0;
   return `${count} 个视频`;
 });
+const recentFolders = computed(() => localFiles.folderItems.slice(0, 6));
 
 function fileNameFromPath(filePath: string): string {
   return filePath.split(/[\\/]/).filter(Boolean).pop() ?? filePath;
@@ -70,7 +71,7 @@ async function chooseFolder() {
     title: "打开本地文件夹",
   }).catch(() => null);
   if (typeof selected !== "string" || selected.length === 0) return;
-  router.push({ name: "local-folder", query: { folder: selected } }).catch(() => {});
+  openFolderPath(selected);
 }
 
 async function loadFolder(directory = folderPath.value) {
@@ -83,12 +84,18 @@ async function loadFolder(directory = folderPath.value) {
   errorText.value = null;
   try {
     listing.value = await api.listLocalFolder(directory);
+    localFiles.rememberFolder(listing.value.directory);
   } catch (error) {
     listing.value = null;
     errorText.value = error instanceof Error ? error.message : String(error);
   } finally {
     loading.value = false;
   }
+}
+
+function openFolderPath(folderPath: string) {
+  localFiles.rememberFolder(folderPath);
+  router.push({ name: "local-folder", query: { folder: folderPath } }).catch(() => {});
 }
 
 function openVideo(item: LocalFolderVideo, index: number) {
@@ -138,6 +145,19 @@ watch(folderPath, (directory) => void loadFolder(directory), { immediate: true }
         <Icon icon="lucide:folder-open" width="16" />
         <span>选择文件夹</span>
       </button>
+      <div v-if="recentFolders.length > 0" class="recent-folders">
+        <button
+          v-for="entry in recentFolders"
+          :key="entry.folderPath"
+          class="recent-folder"
+          type="button"
+          :title="entry.folderPath"
+          @click="openFolderPath(entry.folderPath)"
+        >
+          <Icon icon="lucide:folder" width="15" />
+          <span>{{ entry.name }}</span>
+        </button>
+      </div>
     </div>
 
     <div v-else class="local-folder__body">
@@ -362,6 +382,38 @@ watch(folderPath, (directory) => void loadFolder(directory), { immediate: true }
 .empty--error {
   color: var(--danger);
 }
+.recent-folders {
+  width: min(520px, 100%);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.recent-folder {
+  appearance: none;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-secondary);
+  min-width: 0;
+  min-height: 34px;
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  cursor: pointer;
+  text-align: left;
+}
+.recent-folder:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.recent-folder span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .spin {
   animation: spin 1s linear infinite;
 }
@@ -380,6 +432,9 @@ watch(folderPath, (directory) => void loadFolder(directory), { immediate: true }
   }
   .local-folder__title p {
     max-width: 100%;
+  }
+  .recent-folders {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

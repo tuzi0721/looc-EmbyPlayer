@@ -7,7 +7,14 @@ export interface RecentLocalFile {
   openedAt: string;
 }
 
-const STORAGE_KEY = "hills-lite:recent-local-files";
+export interface RecentLocalFolder {
+  folderPath: string;
+  name: string;
+  openedAt: string;
+}
+
+const FILE_STORAGE_KEY = "hills-lite:recent-local-files";
+const FOLDER_STORAGE_KEY = "hills-lite:recent-local-folders";
 const MAX_RECENTS = 8;
 
 function fileNameFromPath(filePath: string): string {
@@ -32,16 +39,39 @@ function normalizeEntry(value: unknown): RecentLocalFile | null {
   };
 }
 
+function normalizeFolderEntry(value: unknown): RecentLocalFolder | null {
+  if (!value || typeof value !== "object") return null;
+  const entry = value as Partial<RecentLocalFolder>;
+  if (typeof entry.folderPath !== "string" || entry.folderPath.trim().length === 0) return null;
+  const openedAt =
+    typeof entry.openedAt === "string" && !Number.isNaN(Date.parse(entry.openedAt))
+      ? entry.openedAt
+      : new Date().toISOString();
+  return {
+    folderPath: entry.folderPath,
+    name:
+      typeof entry.name === "string" && entry.name.trim().length > 0
+        ? entry.name.trim()
+        : fileNameFromPath(entry.folderPath),
+    openedAt,
+  };
+}
+
 export const useLocalFilesStore = defineStore("localFiles", () => {
   const items = ref<RecentLocalFile[]>([]);
+  const folderItems = ref<RecentLocalFolder[]>([]);
 
-  function save() {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items.value));
+  function saveFiles() {
+    window.localStorage.setItem(FILE_STORAGE_KEY, JSON.stringify(items.value));
+  }
+
+  function saveFolders() {
+    window.localStorage.setItem(FOLDER_STORAGE_KEY, JSON.stringify(folderItems.value));
   }
 
   function load() {
     try {
-      const parsed = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "[]");
+      const parsed = JSON.parse(window.localStorage.getItem(FILE_STORAGE_KEY) ?? "[]");
       items.value = Array.isArray(parsed)
         ? parsed
             .map(normalizeEntry)
@@ -51,6 +81,19 @@ export const useLocalFilesStore = defineStore("localFiles", () => {
         : [];
     } catch {
       items.value = [];
+    }
+
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(FOLDER_STORAGE_KEY) ?? "[]");
+      folderItems.value = Array.isArray(parsed)
+        ? parsed
+            .map(normalizeFolderEntry)
+            .filter((entry): entry is RecentLocalFolder => entry != null)
+            .sort((left, right) => Date.parse(right.openedAt) - Date.parse(left.openedAt))
+            .slice(0, MAX_RECENTS)
+        : [];
+    } catch {
+      folderItems.value = [];
     }
   }
 
@@ -66,15 +109,35 @@ export const useLocalFilesStore = defineStore("localFiles", () => {
       },
       ...items.value.filter((item) => item.filePath.toLowerCase() !== key),
     ].slice(0, MAX_RECENTS);
-    save();
+    saveFiles();
+  }
+
+  function rememberFolder(folderPath: string) {
+    const text = folderPath.trim();
+    if (!text) return;
+    const key = text.toLowerCase();
+    folderItems.value = [
+      {
+        folderPath: text,
+        name: fileNameFromPath(text),
+        openedAt: new Date().toISOString(),
+      },
+      ...folderItems.value.filter((item) => item.folderPath.toLowerCase() !== key),
+    ].slice(0, MAX_RECENTS);
+    saveFolders();
   }
 
   function clear() {
     items.value = [];
-    window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(FILE_STORAGE_KEY);
+  }
+
+  function clearFolders() {
+    folderItems.value = [];
+    window.localStorage.removeItem(FOLDER_STORAGE_KEY);
   }
 
   load();
 
-  return { items, remember, clear };
+  return { items, folderItems, remember, rememberFolder, clear, clearFolders };
 });
