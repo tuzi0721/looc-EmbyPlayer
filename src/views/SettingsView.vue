@@ -25,6 +25,7 @@ type PanelId =
   | "sync"
   | "network"
   | "player"
+  | "enhancement"
   | "externalPlayer"
   | "danmaku"
   | "shortcuts"
@@ -89,6 +90,8 @@ function panelFromQuery(value: unknown): PanelId {
     case "backup":
     case "sync":
       return category;
+    case "enhancement":
+      return "enhancement";
     case "external-player":
       return "externalPlayer";
     case "appearance":
@@ -369,6 +372,79 @@ const runtimeLabel = computed(() =>
 
 const activeAccountLabel = computed(() => auth.activeAccount?.username ?? "未登录");
 const isWindowsPlatform = computed(() => platformLabel.value.toLowerCase().includes("windows"));
+
+type EnhancementStatus = "available" | "disabled" | "planned";
+
+type EnhancementCapability = {
+  key: string;
+  label: string;
+  detail: string;
+  icon: string;
+  status: EnhancementStatus;
+  action?: "windows-hdr";
+};
+
+const enhancementStatusLabel: Record<EnhancementStatus, string> = {
+  available: "可用",
+  disabled: "禁用",
+  planned: "待接入",
+};
+
+const enhancementSummary = computed(() =>
+  isWindowsPlatform.value ? "HDR 系统入口" : "等待硬件路径",
+);
+
+const enhancementCapabilities = computed<EnhancementCapability[]>(() => {
+  const mpvPath =
+    settings.settings.mpvBackend === "embedded"
+      ? "当前内嵌宿主仍走 mpv IPC 窗口托管"
+      : "当前播放核心为 mpv IPC";
+  return [
+    {
+      key: "windows-hdr",
+      label: "Windows HDR",
+      detail: isWindowsPlatform.value ? "系统显示设置" : "仅 Windows",
+      icon: "lucide:sun-medium",
+      status: isWindowsPlatform.value ? "available" : "disabled",
+      action: "windows-hdr",
+    },
+    {
+      key: "rtx-vsr",
+      label: "RTX VSR",
+      detail: `${mpvPath}，未接入 NVIDIA 检测`,
+      icon: "lucide:sparkles",
+      status: "planned",
+    },
+    {
+      key: "true-hdr",
+      label: "RTX TrueHDR",
+      detail: `${mpvPath}，未接入 HDR 输出链路`,
+      icon: "lucide:contrast",
+      status: "planned",
+    },
+    {
+      key: "amd-fsr",
+      label: "AMD FSR",
+      detail: "未接入 GPU 型号检测与滤镜链",
+      icon: "lucide:scan",
+      status: "planned",
+    },
+    {
+      key: "rife",
+      label: "RIFE 插帧",
+      detail: "未接入模型运行时与队列",
+      icon: "lucide:frames",
+      status: "planned",
+    },
+    {
+      key: "glsl-shaders",
+      label: "GLSL Shaders",
+      detail: "未开放 shader 文件选择与 mpv 配置",
+      icon: "lucide:sliders-horizontal",
+      status: "planned",
+    },
+  ];
+});
 
 const syncSummary = computed(() => {
   if (!settings.settings.traktSyncEnabled) return "未启用";
@@ -915,17 +991,37 @@ const danmakuSummary = computed(() => {
             @change="(e: any) => save('appendAuthQuery', e.target.checked)"
           />
         </label>
-        <div class="panel__actions">
-          <button
-            type="button"
-            class="action-btn"
-            :disabled="!isWindowsPlatform"
-            @click="openWindowsHdrSettings"
-          >
-            <Icon icon="lucide:sun-medium" width="15" />
-            <span>Windows HDR</span>
-          </button>
-        </div>
+      </div>
+
+      <button class="row" @click="togglePanel('enhancement')">
+        <span>画质增强</span>
+        <span class="value">{{ enhancementSummary }}</span>
+      </button>
+      <div v-if="openPanel === 'enhancement'" class="panel glass">
+        <ul class="cap-list">
+          <li v-for="cap in enhancementCapabilities" :key="cap.key" class="cap-row">
+            <div class="cap-row__icon">
+              <Icon :icon="cap.icon" width="16" />
+            </div>
+            <div class="cap-row__main">
+              <strong>{{ cap.label }}</strong>
+              <span>{{ cap.detail }}</span>
+            </div>
+            <span class="cap-status" :class="`cap-status--${cap.status}`">
+              {{ enhancementStatusLabel[cap.status] }}
+            </span>
+            <button
+              v-if="cap.action === 'windows-hdr'"
+              type="button"
+              class="action-btn cap-row__action"
+              :disabled="cap.status !== 'available'"
+              title="打开"
+              @click="openWindowsHdrSettings"
+            >
+              <Icon icon="lucide:external-link" width="14" />
+            </button>
+          </li>
+        </ul>
       </div>
 
       <button class="row" @click="togglePanel('externalPlayer')">
@@ -1139,6 +1235,76 @@ const danmakuSummary = computed(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+.cap-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cap-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--separator);
+}
+.cap-row:last-child {
+  border-bottom: none;
+}
+.cap-row__icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--fg-secondary);
+  background: rgba(255, 255, 255, 0.05);
+}
+.cap-row__main {
+  min-width: 0;
+}
+.cap-row__main strong,
+.cap-row__main span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cap-row__main strong {
+  color: var(--fg-primary);
+  font-size: 13px;
+}
+.cap-row__main span {
+  margin-top: 3px;
+  color: var(--fg-tertiary);
+  font-size: 12px;
+}
+.cap-status {
+  min-width: 52px;
+  text-align: center;
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  color: var(--fg-secondary);
+  font-size: 11px;
+  padding: 3px 8px;
+}
+.cap-status--available {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 38%, transparent);
+}
+.cap-status--disabled {
+  color: var(--danger);
+  border-color: rgba(255, 69, 58, 0.35);
+}
+.cap-row__action {
+  min-width: 34px;
+  padding: 0 9px;
+  justify-content: center;
 }
 .about-panel {
   gap: 14px;

@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-05-31（下载通知任务定位）
+> **更新时间**：2026-05-31（画质增强能力面板）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-05-31-2113-download-notification-task-routing.md`](./CHANGE_LOG/2026-05-31-2113-download-notification-task-routing.md)
+> **变更日志**：[`CHANGE_LOG/2026-05-31-2126-enhancement-capability-panel.md`](./CHANGE_LOG/2026-05-31-2126-enhancement-capability-panel.md)
 
 ---
 
@@ -172,6 +172,7 @@
 - **2026-05-29**：播放器顶部“置顶”按钮接入真实窗口置顶开关；Electron/Tauri 均新增 `set_always_on_top` 命令，离开播放器时会尝试恢复非置顶。
 - **2026-05-29**：播放器设置菜单“统计信息”改为可用 Stats 浮层，展示时间、进度、速度、音量、缓存、网络、当前音轨/字幕和轨道数量，支持菜单开关与 `Esc` 关闭。
 - **2026-05-29**：设置页播放器面板新增 `Windows HDR` 按钮，Windows 平台可直接打开系统显示/HDR 相关设置，非 Windows 平台禁用。
+- **2026-05-31**：设置页新增“画质增强”能力面板，Windows HDR 保持系统入口，其余 RTX VSR、RTX TrueHDR、AMD FSR、RIFE 与 GLSL Shaders 以待接入状态展示，不提供尚无后端支撑的假开关。
 - **2026-05-29**：设置页新增“外部播放器”面板，持久化外部播放器路径和启动参数；播放器设置菜单新增“外部播放器”入口，Electron/Tauri 均可把当前媒体流、标题和当前位置交给系统默认或指定外部播放器打开。
 - **2026-05-29**：设置页新增“弹幕”面板，持久化弹幕透明度、速度和字号；播放器 `DanmakuOverlay` 改为读取设置 store 中的弹幕参数。
 - **2026-05-28**：设置页播放器分组新增“右上角网速”开关，默认关闭。
@@ -273,6 +274,8 @@ npm.cmd run electron:build
 ```
 
 本轮下载通知任务定位的 `node --check electron\backend\store.mjs`、`node --check electron\backend\downloads.mjs`、`node --check electron\main.mjs`、`npm.cmd run check:electron-commands`、`npm.cmd run build`、行尾空白检查与 `npm.cmd run electron:build` 已通过；in-app Browser 复用 1420 服务点击侧边栏“下载”后进入下载页，空任务状态正常且页面错误数为 0。直接以 `/downloads?task=...` 冷开时因当前路由使用 memory history 仍先显示首页，真实通知点击走应用内 router push，不受该冷开限制影响。
+
+本轮画质增强能力面板的 `npm.cmd run build`、行尾空白检查与 `npm.cmd run electron:build` 已通过；in-app Browser 点击设置页“画质增强”后显示 Windows HDR、RTX VSR、RTX TrueHDR、AMD FSR、RIFE、GLSL Shaders 6 个能力项，Web Preview 下 Windows HDR 为禁用，其余增强项为待接入，页面错误数为 0。
 
 本轮 Web Preview 服务器内存 fallback 的 `npm.cmd run build`、`npm.cmd run electron:build` 与行尾空白检查已通过；in-app Browser 打开 `http://127.0.0.1:1420/settings?c=servers` 后可在 Web Preview 中添加 `Web 预览服务器`，保存后列表显示 `https://preview.test/`、`UA` 与 `Headers 1`，再次编辑 headers 为两行后显示 `Headers 2`，控制台 error 数为 0。
 
@@ -395,6 +398,8 @@ npm.cmd run electron:build
 本轮播放器 Stats 浮层的行尾空白检查、`npm.cmd run build`、`npm.cmd run electron:build` 已通过。
 
 本轮 Windows HDR 设置入口的行尾空白检查、`npm.cmd run build`、`npm.cmd run electron:build` 已通过。
+
+本轮画质增强能力面板已接入：设置页新增只读能力列表，Windows HDR 保持系统入口，RTX VSR、RTX TrueHDR、AMD FSR、RIFE 和 GLSL Shaders 显示待接入状态，不提供尚无后端支撑的开关。验证已覆盖 `npm.cmd run build`、行尾空白检查、in-app Browser 面板目检与 `npm.cmd run electron:build`。
 
 本轮首启引导基础的 `node --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、行尾空白检查、`npm.cmd run build`、`npm.cmd run electron:build` 已通过。
 
