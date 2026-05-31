@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-05-31（GitHub 远端覆盖推送完成）
+> **更新时间**：2026-05-31（在线字幕搜索接入 ASSRT）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-05-31-1323-github-force-push-complete.md`](./CHANGE_LOG/2026-05-31-1323-github-force-push-complete.md)
+> **变更日志**：[`CHANGE_LOG/2026-05-31-1347-online-subtitle-assrt.md`](./CHANGE_LOG/2026-05-31-1347-online-subtitle-assrt.md)
 
 ---
 
@@ -235,6 +235,7 @@
 - **2026-05-29**：Electron 远程遥控接入 Emby/Jellyfin `Sessions`、Playstate 与 GeneralCommand API，支持在线会话列表、播放暂停/停止/快退快进/进度跳转、音量设置和向远端设备发送消息，并过滤 Hills Lite 自己的会话。
 - **2026-05-29**：Electron 通知中心命令接入 JSON 状态，支持列表、未读计数、删除、单条已读、全部已读和清空，并在操作后发出 `notification:*` 事件同步前端通知中心与 toast 队列。
 - **2026-05-29**：Electron `list_subtitles` 从空实现改为按当前播放会话读取 Emby/Jellyfin PlaybackInfo，生成服务器字幕列表与可交给 mpv `sub-add` 的字幕 URL；停止播放或上报停止后会清空当前字幕会话，避免字幕面板显示上一条播放的字幕。
+- **2026-05-31**：播放器字幕面板新增 ASSRT 在线字幕搜索入口，Electron/Tauri 新增 `search_online_subtitles` 与 `resolve_online_subtitle`；用户自行填写 ASSRT Token，搜索结果解析到具体字幕 URL 后通过现有 `addSubtitle` / mpv `sub-add` 加载。Web Preview 不伪造外部服务请求，搜索返回空结果并对解析加载给出不支持提示。
 - **2026-05-29**：Electron 全局快捷键命令从空实现改为真实持久化与注册，支持列表、录制、解绑、重置和 `shortcut:trigger` 事件分发；Tauri 侧保存空快捷键数组后不再在重启时恢复默认，允许用户彻底解绑全部全局快捷键。
 - **2026-05-28**：新增 `src/platform` 渲染层适配器，统一 `invoke`、事件监听、平台检测和文件选择，现有 Tauri API 改为懒加载 fallback。
 - **2026-05-28**：新增 `electron/main.mjs` / `electron/preload.mjs`，建立 Electron BrowserWindow、`contextBridge`、dialog、platform 和受控 IPC invoke 入口。
@@ -414,6 +415,8 @@ npm.cmd run electron:build
 本轮播放窗口内嵌宿主接线已完成：前端在 Electron/Tauri 运行时启用内嵌，Electron `embed_*` 改为创建应用托管宿主窗口并把原生句柄传给 mpv，Tauri IPC 启动 mpv 时也补齐 `--wid`；控制栏显示时的嵌入 rect 会避开顶部/底部控制区。验证已覆盖 `node --check electron\backend\mpv.mjs`、`node --check electron\main.mjs`、`npm.cmd run check:electron-commands`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run build`、行尾空白检查、Electron 运行时 `embed_*` 命令 smoke、Electron 临时 userData 真实内嵌播放 smoke 与 `npm.cmd run electron:build`；真实播放 smoke 返回有效时长、4 条轨道和播放中状态，验证过程未写入密码、token 或完整播放 URL。
 
 本轮 Electron 内嵌黑屏修复已闭环：原 Win32 child HWND 会被 Chromium 合成层挡住，已改为由主窗口拥有的无边框 popup 宿主窗口；mpv 自截图与屏幕截图均返回彩色视频像素，恢复硬解设置后 smoke 仍通过。验证已覆盖 `node --check electron\backend\mpv.mjs`、`node --check electron\main.mjs`、`node --check scripts\smoke-electron-embedded-local.mjs`、`node --check scripts\check-electron-package.mjs`、`cargo fmt --manifest-path src-tauri\Cargo.toml`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run check:electron-commands`、Electron embedded smoke、`npm.cmd run build:electron-helper` 与 `npm.cmd run electron:build`；Electron unpacked 产物已确认包含 `resources\electron_mpv_host.exe`。
+
+本轮 ASSRT 在线字幕搜索已接入：Electron/Tauri 均新增 `search_online_subtitles` 与 `resolve_online_subtitle`，按 ASSRT 文档使用 `q`、`cnt`、`pos` 搜索并解析 `lang.desc`、`subtype`、评分与文件列表；播放器字幕面板新增 Token 输入、关键词搜索、结果列表和一键加载。验证已覆盖 `node --check electron\main.mjs`、`npm.cmd run check:electron-commands`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run build`、行尾空白检查与敏感关键字扫描；没有用户 ASSRT Token，未做真实 ASSRT 请求，in-app Browser 本轮拒绝打开 `127.0.0.1:1420`，因此未做浏览器视觉目检。
 
 本轮添加服务器账号入口可见性已修正：账号区移到线路区之前，用户名、密码、端口和自动识别入口在 1280x720 预览首屏同时可见；弹窗内容区补齐 `min-height: 0`，避免底部按钮栏压住输入。验证已覆盖 in-app Browser 目检、`npm.cmd run build` 与本阶段触碰文件行尾空白检查。
 

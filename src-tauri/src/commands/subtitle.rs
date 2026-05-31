@@ -6,6 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tauri::State;
 use url::Url;
 
@@ -34,6 +35,57 @@ pub struct SubtitleList {
     pub item_id: String,
     pub media_source_id: String,
     pub tracks: Vec<EmbySubtitle>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OnlineSubtitleSearchPayload {
+    pub provider: String,
+    pub token: String,
+    pub query: String,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OnlineSubtitleSearchResult {
+    pub provider: String,
+    pub id: String,
+    pub title: String,
+    pub video_name: Option<String>,
+    pub language: Option<String>,
+    pub format: Option<String>,
+    pub release_site: Option<String>,
+    pub upload_time: Option<String>,
+    pub score: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OnlineSubtitleSearchResponse {
+    pub provider: String,
+    pub results: Vec<OnlineSubtitleSearchResult>,
+    pub quota: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OnlineSubtitleResolvePayload {
+    pub provider: String,
+    pub token: String,
+    pub id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OnlineSubtitleResolveResult {
+    pub provider: String,
+    pub id: String,
+    pub title: String,
+    pub source: String,
+    pub file_name: Option<String>,
+    pub format: Option<String>,
 }
 
 /// Build the list of subtitle tracks the Emby server has for the active
@@ -139,6 +191,255 @@ fn absolute_url(base: &str, rel: &str) -> AppResult<Url> {
     } else {
         endpoints::join(base, rel)
     }
+}
+
+fn text_value(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::String(text) => {
+            let text = text.trim();
+            if text.is_empty() {
+                None
+            } else {
+                Some(text.to_string())
+            }
+        }
+        Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    }
+}
+
+fn number_value(value: Option<&Value>) -> Option<f64> {
+    match value? {
+        Value::Number(number) => number.as_f64(),
+        Value::String(text) => text.parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+async fn assrt_request(path: &str, token: &str, params: &[(&str, String)]) -> AppResult<Value> {
+    let token = token.trim();
+    if token.is_empty() {
+        return Err(AppError::Auth("ASSRT token is required".into()));
+    }
+    let mut url = Url::parse(&format!(
+        "https://api.assrt.net/v1/{}",
+        path.trim_start_matches('/')
+    ))?;
+    {
+        let mut query = url.query_pairs_mut();
+        for (key, value) in params {
+            if !value.is_empty() {
+                query.append_pair(key, value);
+            }
+        }
+    }
+    let response = reqwest::Client::new()
+        .get(url)
+        .bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("User-Agent", "Hills Lite/0.1 (subtitle-search)")
+        .send()
+        .await?;
+    let status = response.status();
+    let json = response.json::<Value>().await?;
+    if !status.is_success() {
+        let message = text_value(json.get("message").or_else(|| json.get("error")))
+            .unwrap_or_else(|| format!("ASSRT HTTP {status}"));
+        return Err(AppError::Other(message));
+    }
+    if let Some(code) = number_value(json.get("status").or_else(|| json.get("code"))) {
+        if code != 0.0 {
+            let message = text_value(json.get("message").or_else(|| json.get("error")))
+                .unwrap_or_else(|| format!("ASSRT status {code}"));
+            return Err(AppError::Other(message));
+        }
+    }
+    Ok(json)
+}
+
+fn assrt_subs(value: &Value) -> Vec<&Value> {
+    let data = value.get("data").unwrap_or(value);
+    [
+        data.pointer("/sub/subs"),
+        data.get("subs"),
+        data.pointer("/result/subs"),
+        data.get("result"),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|value| value.as_array())
+    .map(|items| items.iter().collect())
+    .unwrap_or_default()
+}
+
+fn normalize_assrt_search_item(value: &Value) -> Option<OnlineSubtitleSearchResult> {
+    let id = text_value(
+        value
+            .get("id")
+            .or_else(|| value.get("sid"))
+            .or_else(|| value.get("sub_id")),
+    )?;
+    let title = text_value(value.get("native_name"))
+        .or_else(|| text_value(value.get("title")))
+        .or_else(|| text_value(value.get("videoname")))
+        .or_else(|| text_value(value.get("filename")))
+        .unwrap_or_else(|| id.clone());
+    Some(OnlineSubtitleSearchResult {
+        provider: "assrt".into(),
+        id,
+        title,
+        video_name: text_value(value.get("videoname").or_else(|| value.get("video_name"))),
+        language: value
+            .get("lang")
+            .and_then(|lang| text_value(lang.get("desc").or_else(|| lang.get("name"))))
+            .or_else(|| text_value(value.get("lang").or_else(|| value.get("language")))),
+        format: text_value(
+            value
+                .get("subtype")
+                .or_else(|| value.get("file_type"))
+                .or_else(|| value.get("format")),
+        ),
+        release_site: text_value(
+            value
+                .get("release_site")
+                .or_else(|| value.get("releaseSite")),
+        ),
+        upload_time: text_value(value.get("upload_time").or_else(|| value.get("uploadTime"))),
+        score: number_value(
+            value
+                .get("vote_score")
+                .or_else(|| value.get("score"))
+                .or_else(|| value.get("rate")),
+        ),
+    })
+}
+
+#[tauri::command]
+pub async fn search_online_subtitles(
+    payload: OnlineSubtitleSearchPayload,
+) -> AppResult<OnlineSubtitleSearchResponse> {
+    if payload.provider != "assrt" {
+        return Err(AppError::InvalidState(
+            "unsupported subtitle provider".into(),
+        ));
+    }
+    let query = payload.query.trim();
+    if query.chars().count() < 3 {
+        return Ok(OnlineSubtitleSearchResponse {
+            provider: "assrt".into(),
+            results: vec![],
+            quota: None,
+        });
+    }
+    let limit = payload.limit.unwrap_or(10).clamp(1, 15);
+    let json = assrt_request(
+        "sub/search",
+        &payload.token,
+        &[
+            ("q", query.to_string()),
+            ("cnt", limit.to_string()),
+            ("pos", "0".into()),
+        ],
+    )
+    .await?;
+    let results = assrt_subs(&json)
+        .into_iter()
+        .filter_map(normalize_assrt_search_item)
+        .take(limit)
+        .collect();
+    let quota = number_value(json.get("quota").or_else(|| json.pointer("/data/quota")));
+    Ok(OnlineSubtitleSearchResponse {
+        provider: "assrt".into(),
+        results,
+        quota,
+    })
+}
+
+fn preferred_assrt_file(files: Option<&Value>) -> Option<&Value> {
+    let items = files?.as_array()?;
+    let supported = [".srt", ".ass", ".ssa", ".vtt"];
+    items
+        .iter()
+        .find(|file| {
+            let name = text_value(
+                file.get("f")
+                    .or_else(|| file.get("filename"))
+                    .or_else(|| file.get("name")),
+            )
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+            supported.iter().any(|ext| name.ends_with(ext))
+        })
+        .or_else(|| {
+            items.iter().find(|file| {
+                text_value(
+                    file.get("url")
+                        .or_else(|| file.get("download_url"))
+                        .or_else(|| file.get("link")),
+                )
+                .is_some()
+            })
+        })
+}
+
+#[tauri::command]
+pub async fn resolve_online_subtitle(
+    payload: OnlineSubtitleResolvePayload,
+) -> AppResult<OnlineSubtitleResolveResult> {
+    if payload.provider != "assrt" {
+        return Err(AppError::InvalidState(
+            "unsupported subtitle provider".into(),
+        ));
+    }
+    let id = payload.id.trim();
+    if id.is_empty() {
+        return Err(AppError::InvalidState("subtitle id is required".into()));
+    }
+    let json = assrt_request("sub/detail", &payload.token, &[("id", id.to_string())]).await?;
+    let detail = assrt_subs(&json)
+        .into_iter()
+        .next()
+        .or_else(|| json.get("sub"))
+        .or_else(|| json.pointer("/data/sub"))
+        .or_else(|| json.get("data"))
+        .unwrap_or(&json);
+    let file = preferred_assrt_file(detail.get("filelist").or_else(|| detail.get("files")));
+    let source = text_value(
+        file.and_then(|file| {
+            file.get("url")
+                .or_else(|| file.get("download_url"))
+                .or_else(|| file.get("link"))
+        })
+        .or_else(|| {
+            detail
+                .get("url")
+                .or_else(|| detail.get("download_url"))
+                .or_else(|| detail.get("link"))
+        }),
+    )
+    .ok_or_else(|| AppError::NotFound("ASSRT subtitle URL".into()))?;
+    let file_name = text_value(file.and_then(|file| {
+        file.get("f")
+            .or_else(|| file.get("filename"))
+            .or_else(|| file.get("name"))
+    }));
+    let title = text_value(detail.get("native_name"))
+        .or_else(|| text_value(detail.get("title")))
+        .or_else(|| text_value(detail.get("videoname")))
+        .or_else(|| file_name.clone())
+        .unwrap_or_else(|| id.to_string());
+    let format = file_name.as_deref().and_then(|name| {
+        name.rsplit_once('.')
+            .map(|(_, ext)| ext.to_ascii_lowercase())
+    });
+    Ok(OnlineSubtitleResolveResult {
+        provider: "assrt".into(),
+        id: id.into(),
+        title,
+        source,
+        file_name,
+        format,
+    })
 }
 
 #[derive(Debug, Deserialize)]

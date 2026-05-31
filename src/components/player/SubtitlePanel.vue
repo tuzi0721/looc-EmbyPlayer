@@ -7,9 +7,14 @@ import { api } from "@/api";
 import { openFileDialog } from "@/platform";
 import { usePlayerStore } from "@/stores/player";
 import { useSettingsStore } from "@/stores/settings";
-import type { AppSettings, EmbySubtitle, SubtitleStyleSettings } from "@/types/models";
+import type {
+  AppSettings,
+  EmbySubtitle,
+  OnlineSubtitleSearchResult,
+  SubtitleStyleSettings,
+} from "@/types/models";
 
-const props = defineProps<{ visible: boolean }>();
+const props = defineProps<{ visible: boolean; defaultQuery?: string | null }>();
 const emit = defineEmits<{ (e: "close"): void }>();
 
 const player = usePlayerStore();
@@ -17,6 +22,14 @@ const settings = useSettingsStore();
 
 const embyTracks = ref<EmbySubtitle[]>([]);
 const loading = ref(false);
+const ASSRT_TOKEN_KEY = "hills-lite:assrt-token:v1";
+const MIN_ONLINE_QUERY_CHARS = 3;
+const onlineToken = ref("");
+const onlineQuery = ref("");
+const onlineResults = ref<OnlineSubtitleSearchResult[]>([]);
+const onlineLoading = ref(false);
+const onlineError = ref<string | null>(null);
+const onlineResolvingId = ref<string | null>(null);
 type SubtitleStylePatch = Partial<
   Pick<
     AppSettings,
@@ -131,6 +144,64 @@ async function pickExternal() {
   await player.addSubtitle({ source: result, select: true });
 }
 
+function applyDefaultOnlineQuery() {
+  if (onlineQuery.value.trim()) return;
+  const query = props.defaultQuery?.trim();
+  if (query) onlineQuery.value = query;
+}
+
+async function searchOnline() {
+  const token = onlineToken.value.trim();
+  const query = onlineQuery.value.trim();
+  onlineError.value = null;
+  if (!token) {
+    onlineError.value = "需要 ASSRT Token";
+    return;
+  }
+  if (query.length < MIN_ONLINE_QUERY_CHARS) {
+    onlineError.value = `请输入至少 ${MIN_ONLINE_QUERY_CHARS} 个字符`;
+    return;
+  }
+  onlineLoading.value = true;
+  try {
+    window.localStorage.setItem(ASSRT_TOKEN_KEY, token);
+    const response = await api.searchOnlineSubtitles({
+      provider: "assrt",
+      token,
+      query,
+      limit: 10,
+    });
+    onlineResults.value = response.results ?? [];
+    if (onlineResults.value.length === 0) onlineError.value = "未找到字幕";
+  } catch (error: any) {
+    onlineResults.value = [];
+    onlineError.value = error?.message ?? String(error);
+  } finally {
+    onlineLoading.value = false;
+  }
+}
+
+async function attachOnline(result: OnlineSubtitleSearchResult) {
+  onlineError.value = null;
+  onlineResolvingId.value = result.id;
+  try {
+    const resolved = await api.resolveOnlineSubtitle({
+      provider: "assrt",
+      token: onlineToken.value.trim(),
+      id: result.id,
+    });
+    await player.addSubtitle({
+      source: resolved.source,
+      title: resolved.fileName ?? resolved.title,
+      select: true,
+    });
+  } catch (error: any) {
+    onlineError.value = error?.message ?? String(error);
+  } finally {
+    onlineResolvingId.value = null;
+  }
+}
+
 function setActive(id: number | null) {
   player.setSubtitleTrack(id);
 }
@@ -147,11 +218,23 @@ function resetDelay() {
 watch(
   () => props.visible,
   (v) => {
-    if (v) refresh();
+    if (v) {
+      applyDefaultOnlineQuery();
+      refresh();
+    }
+  },
+);
+
+watch(
+  () => props.defaultQuery,
+  () => {
+    if (props.visible) applyDefaultOnlineQuery();
   },
 );
 
 onMounted(() => {
+  onlineToken.value = window.localStorage.getItem(ASSRT_TOKEN_KEY) ?? "";
+  applyDefaultOnlineQuery();
   if (props.visible) refresh();
 });
 </script>
@@ -228,6 +311,61 @@ onMounted(() => {
           <Icon icon="lucide:folder-open" width="14" />
           选择本地字幕文件
         </GlassButton>
+      </section>
+
+      <section class="block">
+        <div class="row-head">
+          <span>在线字幕</span>
+          <button class="ghost" :disabled="onlineLoading" @click="searchOnline">
+            <Icon :icon="onlineLoading ? 'lucide:loader' : 'lucide:search'" width="13"
+              :class="{ spin: onlineLoading }" />
+            <span>搜索</span>
+          </button>
+        </div>
+        <input
+          class="field"
+          type="password"
+          autocomplete="off"
+          placeholder="ASSRT Token"
+          v-model="onlineToken"
+          @keydown.enter="searchOnline"
+        />
+        <p class="provider-note">
+          字幕服务由 <a href="https://assrt.net" target="_blank" rel="noreferrer">assrt.net</a> 提供
+        </p>
+        <div class="search-row">
+          <input
+            class="field"
+            type="search"
+            placeholder="影片名 / 关键词"
+            v-model="onlineQuery"
+            @keydown.enter="searchOnline"
+          />
+          <button class="micro" :disabled="onlineLoading" @click="searchOnline">
+            <Icon icon="lucide:search" width="13" />
+          </button>
+        </div>
+        <ul class="tracks">
+          <li
+            v-for="result in onlineResults"
+            :key="result.id"
+            class="online-result"
+            @click="attachOnline(result)"
+          >
+            <Icon icon="lucide:cloud-download" width="14" />
+            <span>
+              <span class="result-title">{{ result.title }}</span>
+              <span class="result-meta">
+                {{ [result.language, result.format, result.releaseSite].filter(Boolean).join(" · ") || "ASSRT" }}
+              </span>
+            </span>
+            <button class="micro" :disabled="onlineResolvingId === result.id" @click.stop="attachOnline(result)">
+              <Icon :icon="onlineResolvingId === result.id ? 'lucide:loader' : 'lucide:plus'" width="12"
+                :class="{ spin: onlineResolvingId === result.id }" />
+            </button>
+          </li>
+          <li v-if="onlineError" class="hint">{{ onlineError }}</li>
+        </ul>
       </section>
 
       <section class="block">
@@ -455,6 +593,51 @@ onMounted(() => {
 .tag.forced {
   color: #ff9f0a;
   border-color: rgba(255, 159, 10, 0.4);
+}
+.field {
+  min-width: 0;
+  width: 100%;
+  height: 32px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  padding: 0 10px;
+  color: var(--fg-primary);
+  background: rgba(255, 255, 255, 0.05);
+  outline: none;
+}
+.field:focus {
+  border-color: rgba(10, 132, 255, 0.55);
+}
+.provider-note {
+  margin: -2px 0 0;
+  color: var(--fg-tertiary);
+  font-size: 10px;
+  line-height: 1.4;
+}
+.provider-note a {
+  color: inherit;
+}
+.search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.online-result {
+  align-items: start;
+}
+.result-title,
+.result-meta {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.result-meta {
+  margin-top: 2px;
+  color: var(--fg-tertiary);
+  font-size: 10px;
 }
 .delay-row {
   display: flex;

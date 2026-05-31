@@ -228,6 +228,14 @@ function mergeDanmakuComments(comments: DanmakuComment[]): DanmakuComment[] {
 
 const currentItemId = computed(() => player.itemId ?? props.id);
 const item = computed(() => lib.itemCache[currentItemId.value] ?? lib.itemCache[props.id] ?? null);
+const subtitleSearchQuery = computed(() => {
+  const target = item.value;
+  if (!target) return "";
+  const names = [target.SeriesName, target.Name].filter(
+    (name): name is string => typeof name === "string" && name.trim().length > 0,
+  );
+  return [...new Set(names.map((name) => name.trim()))].join(" ");
+});
 const activeServer = computed(() => {
   const account = auth.activeAccount;
   return account ? serverStore.byId(account.serverId) ?? null : null;
@@ -1581,7 +1589,11 @@ onBeforeUnmount(async () => {
         :bottom-reserve-pct="danmakuBottomReservePct"
       />
 
-      <SubtitlePanel :visible="subtitlePanelOpen" @close="subtitlePanelOpen = false" />
+      <SubtitlePanel
+        :visible="subtitlePanelOpen"
+        :default-query="subtitleSearchQuery"
+        @close="subtitlePanelOpen = false"
+      />
 
       <transition name="fade">
         <div v-if="screenshotMessage" class="player__hint glass glass-strong">

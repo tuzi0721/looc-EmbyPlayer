@@ -762,6 +762,10 @@ function invokeWebFallback<T>(
       }).then(normalizeItemsResponse) as Promise<T>;
     case "list_subtitles":
       return Promise.resolve(null as T);
+    case "search_online_subtitles":
+      return Promise.resolve({ provider: "assrt", results: [] } as T);
+    case "resolve_online_subtitle":
+      return Promise.reject(new Error("Web preview does not support online subtitle loading"));
     case "import_danmaku_xml":
       return Promise.resolve({
         provider: "xml",

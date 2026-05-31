@@ -831,6 +831,141 @@ function normalizeHexColor(value, fallback) {
   return /^#[0-9a-fA-F]{6}$/.test(text) ? text.toUpperCase() : fallback;
 }
 
+function textValue(value) {
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text ? text : null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+function numberValue(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+async function assrtRequest(pathname, token, params = {}) {
+  const authToken = String(token ?? "").trim();
+  if (!authToken) throw new Error("ASSRT token is required");
+  const url = new URL(`https://api.assrt.net/v1/${pathname.replace(/^\/+/, "")}`);
+  for (const [key, value] of Object.entries(params)) {
+    if (value != null && value !== "") url.searchParams.set(key, String(value));
+  }
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${authToken}`,
+      "User-Agent": "Hills Lite/0.1 (subtitle-search)",
+    },
+  });
+  const body = await response.text();
+  let json;
+  try {
+    json = body ? JSON.parse(body) : {};
+  } catch {
+    throw new Error(`ASSRT response is not valid JSON: HTTP ${response.status}`);
+  }
+  if (!response.ok) {
+    throw new Error(json?.message ?? json?.error ?? `ASSRT HTTP ${response.status}`);
+  }
+  const status = numberValue(json?.status ?? json?.code);
+  if (status != null && status !== 0) {
+    throw new Error(json?.message ?? json?.error ?? `ASSRT status ${status}`);
+  }
+  return json;
+}
+
+function assrtSubList(json) {
+  const data = json?.data ?? json;
+  const candidates = [data?.sub?.subs, data?.subs, data?.result?.subs, data?.result];
+  return candidates.find((value) => Array.isArray(value)) ?? [];
+}
+
+function normalizeAssrtSearchItem(item) {
+  const id = textValue(item?.id ?? item?.sid ?? item?.sub_id);
+  if (!id) return null;
+  const title =
+    textValue(item?.native_name) ??
+    textValue(item?.title) ??
+    textValue(item?.videoname) ??
+    textValue(item?.filename) ??
+    id;
+  return {
+    provider: "assrt",
+    id,
+    title,
+    videoName: textValue(item?.videoname ?? item?.video_name),
+    language: textValue(item?.lang?.desc ?? item?.lang?.name ?? item?.lang ?? item?.language),
+    format: textValue(item?.subtype ?? item?.file_type ?? item?.format),
+    releaseSite: textValue(item?.release_site ?? item?.releaseSite),
+    uploadTime: textValue(item?.upload_time ?? item?.uploadTime),
+    score: numberValue(item?.vote_score ?? item?.score ?? item?.rate),
+  };
+}
+
+async function searchOnlineSubtitles(payload = {}) {
+  if (payload.provider !== "assrt") throw new Error("unsupported subtitle provider");
+  const query = String(payload.query ?? "").trim();
+  if (query.length < 3) return { provider: "assrt", results: [] };
+  const limit = clampNumber(payload.limit, 1, 15, 10);
+  const json = await assrtRequest("sub/search", payload.token, {
+    q: query,
+    cnt: limit,
+    pos: 0,
+  });
+  const results = assrtSubList(json)
+    .map(normalizeAssrtSearchItem)
+    .filter(Boolean)
+    .slice(0, limit);
+  return {
+    provider: "assrt",
+    results,
+    quota: numberValue(json?.quota ?? json?.data?.quota),
+  };
+}
+
+function preferredAssrtSubtitleFile(files) {
+  const list = Array.isArray(files) ? files : [];
+  const supported = [".srt", ".ass", ".ssa", ".vtt"];
+  return (
+    list.find((file) => {
+      const name = textValue(file?.f ?? file?.filename ?? file?.name) ?? "";
+      return supported.some((ext) => name.toLowerCase().endsWith(ext));
+    }) ??
+    list.find((file) => textValue(file?.url ?? file?.download_url ?? file?.link)) ??
+    null
+  );
+}
+
+async function resolveOnlineSubtitle(payload = {}) {
+  if (payload.provider !== "assrt") throw new Error("unsupported subtitle provider");
+  const id = String(payload.id ?? "").trim();
+  if (!id) throw new Error("subtitle id is required");
+  const json = await assrtRequest("sub/detail", payload.token, { id });
+  const detail = assrtSubList(json)[0] ?? json?.sub ?? json?.data?.sub ?? json?.data ?? {};
+  const file = preferredAssrtSubtitleFile(detail?.filelist ?? detail?.files);
+  const source =
+    textValue(file?.url ?? file?.download_url ?? file?.link) ??
+    textValue(detail?.url ?? detail?.download_url ?? detail?.link);
+  if (!source) throw new Error("ASSRT detail did not include a playable subtitle URL");
+  const fileName = textValue(file?.f ?? file?.filename ?? file?.name);
+  const title =
+    textValue(detail?.native_name) ??
+    textValue(detail?.title) ??
+    textValue(detail?.videoname) ??
+    fileName ??
+    id;
+  return {
+    provider: "assrt",
+    id,
+    title,
+    source,
+    fileName,
+    format: fileName?.split(".").pop()?.toLowerCase() ?? null,
+  };
+}
+
 function subtitleStyleFrom(value = {}) {
   return {
     scale: clampNumber(value.scale ?? value.subtitleScale, 0.5, 2.5, 1),
@@ -1510,6 +1645,14 @@ async function handleInvoke(command, args = {}) {
       commandArgs.push(payload.lang);
     }
     return runMpvIfRunning(() => mpv.command(commandArgs));
+  }
+
+  if (command === "search_online_subtitles") {
+    return searchOnlineSubtitles(args.payload ?? {});
+  }
+
+  if (command === "resolve_online_subtitle") {
+    return resolveOnlineSubtitle(args.payload ?? {});
   }
 
   if (command === "remove_subtitle") {

@@ -12,6 +12,8 @@ import type {
   LineHealthReport,
   MediaItem,
   MpvSnapshot,
+  OnlineSubtitleResolveResult,
+  OnlineSubtitleSearchResponse,
   PictureMode,
   RemoteSession,
   Server,
@@ -332,6 +334,17 @@ export const api = {
 
   // Subtitles
   listSubtitles: () => invoke<SubtitleList | null>("list_subtitles"),
+  searchOnlineSubtitles: (payload: {
+    provider: "assrt";
+    token: string;
+    query: string;
+    limit?: number;
+  }) => invoke<OnlineSubtitleSearchResponse>("search_online_subtitles", { payload }),
+  resolveOnlineSubtitle: (payload: {
+    provider: "assrt";
+    token: string;
+    id: string;
+  }) => invoke<OnlineSubtitleResolveResult>("resolve_online_subtitle", { payload }),
   addSubtitle: (payload: {
     source: string;
     title?: string;

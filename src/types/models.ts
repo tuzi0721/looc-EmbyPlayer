@@ -323,6 +323,33 @@ export interface SubtitleList {
   tracks: EmbySubtitle[];
 }
 
+export interface OnlineSubtitleSearchResult {
+  provider: "assrt";
+  id: string;
+  title: string;
+  videoName?: string | null;
+  language?: string | null;
+  format?: string | null;
+  releaseSite?: string | null;
+  uploadTime?: string | null;
+  score?: number | null;
+}
+
+export interface OnlineSubtitleSearchResponse {
+  provider: "assrt";
+  results: OnlineSubtitleSearchResult[];
+  quota?: number | null;
+}
+
+export interface OnlineSubtitleResolveResult {
+  provider: "assrt";
+  id: string;
+  title: string;
+  source: string;
+  fileName?: string | null;
+  format?: string | null;
+}
+
 export interface DownloadTask {
   id: string;
   serverId: string;
