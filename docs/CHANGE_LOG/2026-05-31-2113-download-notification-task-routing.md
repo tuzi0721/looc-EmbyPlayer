@@ -1,0 +1,23 @@
+# 下载通知任务定位
+
+- **时间**：2026-05-31 21:13 (UTC+8)
+- **动机**：下载中心操作已经补齐，但 Electron 路径下下载完成/失败/取消没有生成通知；通知里的 `open-task` 动作也只进入下载页，无法定位到具体任务。
+- **修改文件**：
+  - `electron/backend/store.mjs` — 新增通知写入方法，按既有通知模型规范化、持久化并限制 100 条。
+  - `electron/backend/downloads.mjs` — Electron 下载任务在完成、失败、取消状态切换后生成通知，完成通知带 `taskId` 动作 payload。
+  - `electron/main.mjs` — 下载管理器接入通知写入与 `notification:new` / unread 事件同步。
+  - `src/utils/notificationActions.ts` — 抽出通知动作路由逻辑，统一通知中心和 Toast 的行为。
+  - `src/components/common/NotificationCenter.vue`、`src/components/common/ToastStack.vue` — `open-task` 跳转到带任务参数的下载页。
+  - `src/views/DownloadsView.vue` — 读取 `task` 查询参数，滚动并高亮对应下载任务。
+- **风险**：Electron 下载通知只在状态真正变化时触发；如果旧数据里没有对应任务，点击通知会退化为进入下载中心。
+- **回滚**：撤回上述文件修改即可恢复到仅打开下载页、不生成 Electron 下载通知的行为。
+- **验证步骤**：
+  - `node --check electron\backend\store.mjs`
+  - `node --check electron\backend\downloads.mjs`
+  - `node --check electron\main.mjs`
+  - `npm.cmd run check:electron-commands`
+  - `npm.cmd run build`
+  - `git diff --check`
+  - `npm.cmd run electron:build`
+  - in-app Browser 打开本地 1420 服务并点击侧边栏“下载”
+- **结果**：通过；Electron unpacked 包仍包含 `app.asar`、`resources\electron_mpv_host.exe` 和 6 个随包 mpv 文件。浏览器目检确认下载页可从侧边栏进入并显示空任务状态，未发现页面错误。

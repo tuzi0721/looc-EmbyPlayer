@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
 
 import { useNotificationsStore } from "@/stores/notifications";
+import { runNotificationAction } from "@/utils/notificationActions";
 import type {
   AppNotification,
   NotificationAction,
@@ -67,19 +68,7 @@ function close(id: string) {
 async function trigger(toast: AppNotification, action: NotificationAction) {
   await store.markRead(toast.id);
   close(toast.id);
-  switch (action.kind) {
-    case "navigate": {
-      const to = (action.payload as { route?: string })?.route;
-      if (to) router.push(to);
-      break;
-    }
-    case "open-task": {
-      router.push("/downloads");
-      break;
-    }
-    default:
-      break;
-  }
+  await runNotificationAction(router, toast, action);
 }
 
 onBeforeUnmount(() => {

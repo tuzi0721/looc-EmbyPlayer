@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
 
 import GlassNavBar from "@/components/common/GlassNavBar.vue";
@@ -10,11 +10,39 @@ import { useDownloadsStore } from "@/stores/downloads";
 import type { DownloadStatus, DownloadTask } from "@/types/models";
 
 const downloads = useDownloadsStore();
+const route = useRoute();
 const router = useRouter();
 const actionBusy = ref<string | null>(null);
 const errorText = ref<string | null>(null);
 
-onMounted(() => downloads.refresh());
+const highlightedTaskId = computed(() =>
+  typeof route.query.task === "string" && route.query.task.trim()
+    ? route.query.task.trim()
+    : null,
+);
+
+function scrollToHighlightedTask() {
+  const id = highlightedTaskId.value;
+  if (!id) return;
+  const el = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]")).find(
+    (node) => node.dataset.taskId === id,
+  );
+  el?.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+onMounted(async () => {
+  await downloads.refresh();
+  await nextTick();
+  scrollToHighlightedTask();
+});
+
+watch(
+  () => [highlightedTaskId.value, downloads.tasks.length],
+  async () => {
+    await nextTick();
+    scrollToHighlightedTask();
+  },
+);
 
 const grouped = computed(() => {
   const groups: Record<DownloadStatus, DownloadTask[]> = {
@@ -131,7 +159,13 @@ function statusLabel(s: DownloadStatus) {
           </h2>
         </header>
         <div class="list">
-          <article v-for="t in arr" :key="t.id" class="task glass glass-strong">
+          <article
+            v-for="t in arr"
+            :key="t.id"
+            class="task glass glass-strong"
+            :class="{ highlighted: t.id === highlightedTaskId }"
+            :data-task-id="t.id"
+          >
             <div class="task__main">
               <div class="task__title">
                 <span>{{ t.title }}</span>
@@ -291,6 +325,12 @@ function statusLabel(s: DownloadStatus) {
   padding: 16px 18px;
   border-radius: 18px;
   min-width: 0;
+}
+.task.highlighted {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--glass-border));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 46%, transparent),
+    0 18px 52px rgba(168, 85, 247, 0.18);
 }
 .task__main {
   min-width: 0;

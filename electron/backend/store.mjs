@@ -409,6 +409,22 @@ export class JsonStore {
     return structuredClone(normalizeNotifications(this.state.notifications));
   }
 
+  async pushNotification(spec) {
+    await this.load();
+    const notification = normalizeNotification({
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      read: false,
+      sticky: false,
+      ...spec,
+    });
+    if (!notification) throw new Error("invalid notification");
+    this.state.notifications.unshift(notification);
+    this.state.notifications = normalizeNotifications(this.state.notifications);
+    await this.save();
+    return structuredClone(notification);
+  }
+
   async unreadCount() {
     await this.load();
     return this.state.notifications.filter((item) => !item.read).length;

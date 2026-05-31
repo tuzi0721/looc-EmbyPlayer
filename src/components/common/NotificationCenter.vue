@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
 
 import { useNotificationsStore } from "@/stores/notifications";
+import { runNotificationAction } from "@/utils/notificationActions";
 import type {
   AppNotification,
   NotificationAction,
@@ -70,18 +71,7 @@ function fmtTime(ts: string): string {
 async function trigger(n: AppNotification, action: NotificationAction) {
   await store.markRead(n.id);
   store.closeCenter();
-  switch (action.kind) {
-    case "navigate": {
-      const route = (action.payload as { route?: string })?.route;
-      if (route) router.push(route);
-      break;
-    }
-    case "open-task":
-      router.push("/downloads");
-      break;
-    default:
-      break;
-  }
+  await runNotificationAction(router, n, action);
 }
 
 function close() {

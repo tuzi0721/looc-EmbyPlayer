@@ -85,6 +85,7 @@ const mpv = new MpvController(store, { logDir: userDataDir });
 const downloads = new DownloadManager(store, emby, mpv, {
   userDataDir,
   emit: (event, payload) => emitAppEvent(event, payload),
+  notify: (spec) => pushNotification(spec),
 });
 desktopIntegration = new DesktopIntegration({
   app,
@@ -661,6 +662,13 @@ function refreshSecondaryDisplayBlackout() {
 
 async function emitNotificationUnread() {
   emitAppEvent("notification:unread", { unread: await store.unreadCount() });
+}
+
+async function pushNotification(spec) {
+  const notification = await store.pushNotification(spec);
+  emitAppEvent("notification:new", notification);
+  await emitNotificationUnread();
+  return notification;
 }
 
 function notificationId(args) {

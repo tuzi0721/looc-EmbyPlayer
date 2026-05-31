@@ -74,6 +74,7 @@ export class DownloadManager {
     this.mpv = mpv;
     this.downloadDir = path.join(options.userDataDir, "downloads");
     this.emit = options.emit ?? (() => {});
+    this.notify = options.notify ?? (() => {});
     this.active = new Map();
   }
 
@@ -287,6 +288,7 @@ export class DownloadManager {
   }
 
   async updateTask(task, patch) {
+    const previousStatus = task.status;
     const next = {
       ...task,
       ...patch,
@@ -294,7 +296,54 @@ export class DownloadManager {
     };
     const saved = await this.store.upsertDownload(next);
     this.emitState(saved);
+    if (previousStatus !== saved.status) {
+      await this.notifyStatus(saved);
+    }
     return saved;
+  }
+
+  async notifyStatus(task) {
+    try {
+      switch (task.status) {
+        case "completed":
+          await this.notify({
+            kind: "success",
+            category: "download",
+            title: `${task.title} 下载完成`,
+            body: null,
+            action: {
+              kind: "open-task",
+              label: "本地播放",
+              payload: { taskId: task.id },
+            },
+            sourceId: task.id,
+          });
+          break;
+        case "failed":
+          await this.notify({
+            kind: "error",
+            category: "download",
+            title: `${task.title} 下载失败`,
+            body: task.error || "未知错误",
+            sticky: true,
+            sourceId: task.id,
+          });
+          break;
+        case "cancelled":
+          await this.notify({
+            kind: "info",
+            category: "download",
+            title: `${task.title} 已取消`,
+            body: null,
+            sourceId: task.id,
+          });
+          break;
+        default:
+          break;
+      }
+    } catch (error) {
+      console.warn("failed to push download notification", error);
+    }
   }
 
   emitProgress(task) {
