@@ -29,7 +29,15 @@ const folderTitle = computed(() => {
   return fileNameFromPath(folderPath.value) || folderPath.value;
 });
 
-const recentFolders = computed(() => localFiles.folderItems.slice(0, 6));
+const favoriteFolders = computed(() => localFiles.favoriteFolderItems.slice(0, 6));
+const favoriteFolderKeys = computed(
+  () => new Set(localFiles.favoriteFolderItems.map((entry) => entry.folderPath.toLowerCase())),
+);
+const recentFolders = computed(() =>
+  localFiles.folderItems
+    .filter((entry) => !favoriteFolderKeys.value.has(entry.folderPath.toLowerCase()))
+    .slice(0, 6),
+);
 const normalizedSearchText = computed(() => searchText.value.trim().toLocaleLowerCase());
 const visibleItems = computed(() => {
   const items = listing.value?.items ?? [];
@@ -48,6 +56,9 @@ const countLabel = computed(() => {
   if (normalizedSearchText.value) return `${visibleItems.value.length} / ${total}${suffix} 个视频`;
   return `${total}${suffix} 个视频`;
 });
+const folderFavorited = computed(() =>
+  Boolean(folderPath.value && localFiles.isFavoriteFolder(folderPath.value)),
+);
 
 function fileNameFromPath(filePath: string): string {
   return filePath.split(/[\\/]/).filter(Boolean).pop() ?? filePath;
@@ -119,6 +130,12 @@ function openFolderPath(folderPath: string) {
   router.push({ name: "local-folder", query: { folder: folderPath } }).catch(() => {});
 }
 
+function toggleCurrentFolderFavorite() {
+  const directory = listing.value?.directory ?? folderPath.value;
+  if (!directory) return;
+  localFiles.toggleFavoriteFolder(directory);
+}
+
 function openVideo(item: LocalFolderVideo, index: number) {
   const items = visibleItems.value;
   player.setLocalQueue(items.map((entry) => entry.filePath), index);
@@ -149,6 +166,17 @@ watch(recursive, () => {
         <p v-if="folderPath" :title="folderPath">{{ folderPath }}</p>
       </div>
       <div class="local-folder__actions">
+        <button
+          v-if="folderPath"
+          class="icon-btn favorite-folder-btn"
+          :class="{ active: folderFavorited }"
+          type="button"
+          :title="folderFavorited ? '取消收藏文件夹' : '收藏文件夹'"
+          :aria-pressed="folderFavorited"
+          @click="toggleCurrentFolderFavorite"
+        >
+          <Icon :icon="folderFavorited ? 'lucide:star' : 'lucide:star'" width="16" />
+        </button>
         <label v-if="folderPath" class="toggle">
           <input v-model="recursive" type="checkbox" />
           <span>包含子文件夹</span>
@@ -176,18 +204,37 @@ watch(recursive, () => {
         <Icon icon="lucide:folder-open" width="16" />
         <span>选择文件夹</span>
       </button>
-      <div v-if="recentFolders.length > 0" class="recent-folders">
-        <button
-          v-for="entry in recentFolders"
-          :key="entry.folderPath"
-          class="recent-folder"
-          type="button"
-          :title="entry.folderPath"
-          @click="openFolderPath(entry.folderPath)"
-        >
-          <Icon icon="lucide:folder" width="15" />
-          <span>{{ entry.name }}</span>
-        </button>
+      <div v-if="favoriteFolders.length > 0" class="folder-shortcuts">
+        <span>收藏本地文件夹</span>
+        <div class="recent-folders">
+          <button
+            v-for="entry in favoriteFolders"
+            :key="entry.folderPath"
+            class="recent-folder"
+            type="button"
+            :title="entry.folderPath"
+            @click="openFolderPath(entry.folderPath)"
+          >
+            <Icon icon="lucide:star" width="15" />
+            <span>{{ entry.name }}</span>
+          </button>
+        </div>
+      </div>
+      <div v-if="recentFolders.length > 0" class="folder-shortcuts">
+        <span>最近本地文件夹</span>
+        <div class="recent-folders">
+          <button
+            v-for="entry in recentFolders"
+            :key="entry.folderPath"
+            class="recent-folder"
+            type="button"
+            :title="entry.folderPath"
+            @click="openFolderPath(entry.folderPath)"
+          >
+            <Icon icon="lucide:folder" width="15" />
+            <span>{{ entry.name }}</span>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -464,6 +511,12 @@ watch(recursive, () => {
 .file-row__play {
   color: var(--fg-tertiary);
 }
+.favorite-folder-btn {
+  color: var(--fg-secondary);
+}
+.favorite-folder-btn.active {
+  color: #fbbf24;
+}
 .file-row:hover .file-row__play {
   color: var(--accent);
 }
@@ -492,6 +545,17 @@ watch(recursive, () => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+.folder-shortcuts {
+  width: min(520px, 100%);
+  display: grid;
+  gap: 8px;
+}
+.folder-shortcuts > span {
+  justify-self: start;
+  color: var(--fg-tertiary);
+  font-size: 11px;
+  font-weight: 700;
 }
 .recent-folder {
   appearance: none;

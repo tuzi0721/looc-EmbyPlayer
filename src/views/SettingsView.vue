@@ -545,6 +545,13 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
     status: "available",
   },
   {
+    key: "favorite-local-folders",
+    label: "收藏本地文件夹",
+    detail: "当前客户端本地保存常用文件夹入口",
+    icon: "lucide:star",
+    status: "available",
+  },
+  {
     key: "webdav",
     label: "WebDAV",
     detail: "未接入账号、目录浏览与直链播放",

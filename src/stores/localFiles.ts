@@ -13,9 +13,17 @@ export interface RecentLocalFolder {
   openedAt: string;
 }
 
+export interface FavoriteLocalFolder {
+  folderPath: string;
+  name: string;
+  favoritedAt: string;
+}
+
 const FILE_STORAGE_KEY = "hills-lite:recent-local-files";
 const FOLDER_STORAGE_KEY = "hills-lite:recent-local-folders";
+const FAVORITE_FOLDER_STORAGE_KEY = "hills-lite:favorite-local-folders";
 const MAX_RECENTS = 8;
+const MAX_FAVORITES = 32;
 
 function fileNameFromPath(filePath: string): string {
   return filePath.split(/[\\/]/).filter(Boolean).pop() ?? filePath;
@@ -57,9 +65,28 @@ function normalizeFolderEntry(value: unknown): RecentLocalFolder | null {
   };
 }
 
+function normalizeFavoriteFolderEntry(value: unknown): FavoriteLocalFolder | null {
+  if (!value || typeof value !== "object") return null;
+  const entry = value as Partial<FavoriteLocalFolder>;
+  if (typeof entry.folderPath !== "string" || entry.folderPath.trim().length === 0) return null;
+  const favoritedAt =
+    typeof entry.favoritedAt === "string" && !Number.isNaN(Date.parse(entry.favoritedAt))
+      ? entry.favoritedAt
+      : new Date().toISOString();
+  return {
+    folderPath: entry.folderPath,
+    name:
+      typeof entry.name === "string" && entry.name.trim().length > 0
+        ? entry.name.trim()
+        : fileNameFromPath(entry.folderPath),
+    favoritedAt,
+  };
+}
+
 export const useLocalFilesStore = defineStore("localFiles", () => {
   const items = ref<RecentLocalFile[]>([]);
   const folderItems = ref<RecentLocalFolder[]>([]);
+  const favoriteFolderItems = ref<FavoriteLocalFolder[]>([]);
 
   function saveFiles() {
     window.localStorage.setItem(FILE_STORAGE_KEY, JSON.stringify(items.value));
@@ -67,6 +94,13 @@ export const useLocalFilesStore = defineStore("localFiles", () => {
 
   function saveFolders() {
     window.localStorage.setItem(FOLDER_STORAGE_KEY, JSON.stringify(folderItems.value));
+  }
+
+  function saveFavoriteFolders() {
+    window.localStorage.setItem(
+      FAVORITE_FOLDER_STORAGE_KEY,
+      JSON.stringify(favoriteFolderItems.value),
+    );
   }
 
   function load() {
@@ -94,6 +128,19 @@ export const useLocalFilesStore = defineStore("localFiles", () => {
         : [];
     } catch {
       folderItems.value = [];
+    }
+
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(FAVORITE_FOLDER_STORAGE_KEY) ?? "[]");
+      favoriteFolderItems.value = Array.isArray(parsed)
+        ? parsed
+            .map(normalizeFavoriteFolderEntry)
+            .filter((entry): entry is FavoriteLocalFolder => entry != null)
+            .sort((left, right) => Date.parse(right.favoritedAt) - Date.parse(left.favoritedAt))
+            .slice(0, MAX_FAVORITES)
+        : [];
+    } catch {
+      favoriteFolderItems.value = [];
     }
   }
 
@@ -137,7 +184,50 @@ export const useLocalFilesStore = defineStore("localFiles", () => {
     window.localStorage.removeItem(FOLDER_STORAGE_KEY);
   }
 
+  function isFavoriteFolder(folderPath: string) {
+    const key = folderPath.trim().toLowerCase();
+    if (!key) return false;
+    return favoriteFolderItems.value.some((item) => item.folderPath.toLowerCase() === key);
+  }
+
+  function toggleFavoriteFolder(folderPath: string) {
+    const text = folderPath.trim();
+    if (!text) return;
+    const key = text.toLowerCase();
+    if (isFavoriteFolder(text)) {
+      favoriteFolderItems.value = favoriteFolderItems.value.filter(
+        (item) => item.folderPath.toLowerCase() !== key,
+      );
+    } else {
+      favoriteFolderItems.value = [
+        {
+          folderPath: text,
+          name: fileNameFromPath(text),
+          favoritedAt: new Date().toISOString(),
+        },
+        ...favoriteFolderItems.value.filter((item) => item.folderPath.toLowerCase() !== key),
+      ].slice(0, MAX_FAVORITES);
+    }
+    saveFavoriteFolders();
+  }
+
+  function clearFavoriteFolders() {
+    favoriteFolderItems.value = [];
+    window.localStorage.removeItem(FAVORITE_FOLDER_STORAGE_KEY);
+  }
+
   load();
 
-  return { items, folderItems, remember, rememberFolder, clear, clearFolders };
+  return {
+    items,
+    folderItems,
+    favoriteFolderItems,
+    remember,
+    rememberFolder,
+    clear,
+    clearFolders,
+    isFavoriteFolder,
+    toggleFavoriteFolder,
+    clearFavoriteFolders,
+  };
 });

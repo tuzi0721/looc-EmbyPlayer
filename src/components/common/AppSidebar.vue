@@ -43,7 +43,15 @@ const unreadNotificationsLabel = computed(() =>
   notifications.unread > 99 ? "99+" : String(notifications.unread),
 );
 const recentLocalFiles = computed(() => localFiles.items.slice(0, 3));
-const recentLocalFolders = computed(() => localFiles.folderItems.slice(0, 2));
+const favoriteLocalFolders = computed(() => localFiles.favoriteFolderItems.slice(0, 2));
+const favoriteLocalFolderKeys = computed(
+  () => new Set(localFiles.favoriteFolderItems.map((entry) => entry.folderPath.toLowerCase())),
+);
+const recentLocalFolders = computed(() =>
+  localFiles.folderItems
+    .filter((entry) => !favoriteLocalFolderKeys.value.has(entry.folderPath.toLowerCase()))
+    .slice(0, 2),
+);
 
 function loggedInOn(serverId: string): boolean {
   return auth.accounts.some((a) => a.serverId === serverId);
@@ -331,6 +339,29 @@ async function openLocalFolder() {
         <Icon icon="lucide:folder-open" width="14" />
         <span>打开本地文件夹</span>
       </button>
+
+      <div v-if="favoriteLocalFolders.length > 0" class="local-recent">
+        <div class="local-recent__head">
+          <span>收藏本地文件夹</span>
+          <button
+            class="iconbtn"
+            aria-label="清空收藏本地文件夹"
+            @click="localFiles.clearFavoriteFolders()"
+          >
+            <Icon icon="lucide:x" width="13" />
+          </button>
+        </div>
+        <button
+          v-for="entry in favoriteLocalFolders"
+          :key="entry.folderPath"
+          class="local-recent__item"
+          :title="entry.folderPath"
+          @click="openLocalFolderPath(entry.folderPath)"
+        >
+          <Icon icon="lucide:star" width="14" />
+          <span>{{ entry.name }}</span>
+        </button>
+      </div>
 
       <div v-if="recentLocalFolders.length > 0" class="local-recent">
         <div class="local-recent__head">
