@@ -50,7 +50,21 @@ impl DownloadManager {
             .path()
             .app_data_dir()
             .map_err(|e| AppError::Other(format!("data dir: {e}")))?;
-        let dir = base.join("downloads");
+        let settings = self.engine.config.settings();
+        let dir = settings
+            .download_directory
+            .as_deref()
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
+            .map(|path| {
+                if path.is_absolute() {
+                    path
+                } else {
+                    base.join(path)
+                }
+            })
+            .unwrap_or_else(|| base.join("downloads"));
         std::fs::create_dir_all(&dir)?;
         Ok(dir)
     }

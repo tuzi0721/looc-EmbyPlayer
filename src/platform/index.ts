@@ -75,6 +75,7 @@ const WEB_DEFAULT_SETTINGS: AppSettings = {
   skipOutroSeconds: 90,
   screenshotIncludeSubtitles: true,
   appendAuthQuery: false,
+  downloadDirectory: null,
   homeHeroStyle: "classic",
   closeToTray: true,
   traktSyncEnabled: false,

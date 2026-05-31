@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（详情页桌面下载入口）
+> **更新时间**：2026-06-01（下载保存目录设置）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-0627-detail-download-entry.md`](./CHANGE_LOG/2026-06-01-0627-detail-download-entry.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-0643-download-directory-setting.md`](./CHANGE_LOG/2026-06-01-0643-download-directory-setting.md)
 
 ---
 
@@ -276,6 +276,7 @@
 - **2026-05-31**：下载中心操作补齐：失败/取消任务可重试，任务卡显示本地文件名，已保存路径可打开所在目录；删除操作拆成“移除记录”和“删除文件和记录”，并为任务操作补齐忙碌状态和错误提示，窄屏下操作按钮自动换行。
 - **2026-05-31**：Electron 下载任务完成、失败和取消会写入通知中心并同步 toast/unread 事件；完成通知的 `open-task` 动作携带 `taskId`，通知中心和 Toast 点击后进入 `/downloads?task=<id>`，下载页会滚动并高亮对应任务。
 - **2026-06-01**：详情页下载入口复用 Electron/Tauri 已有 `start_download` 链路并默认优先直连保存；入口只在桌面运行时可见，Web Preview 继续保留安全空下载后端，不展示不可点击的伪功能。
+- **2026-06-01**：设置页新增“下载”面板，`downloadDirectory` 可指定新下载任务保存目录；Electron/Tauri 下载管理器会优先使用该目录，未配置时继续写入应用默认下载目录，Web Preview 不伪装本地目录选择能力。
 - **2026-05-29**：Electron 远程遥控接入 Emby/Jellyfin `Sessions`、Playstate 与 GeneralCommand API，支持在线会话列表、播放暂停/停止/快退快进/进度跳转、音量设置和向远端设备发送消息，并过滤 Hills Lite 自己的会话。
 - **2026-05-29**：Electron 通知中心命令接入 JSON 状态，支持列表、未读计数、删除、单条已读、全部已读和清空，并在操作后发出 `notification:*` 事件同步前端通知中心与 toast 队列。
 - **2026-05-29**：Electron `list_subtitles` 从空实现改为按当前播放会话读取 Emby/Jellyfin PlaybackInfo，生成服务器字幕列表与可交给 mpv `sub-add` 的字幕 URL；停止播放或上报停止后会清空当前字幕会话，避免字幕面板显示上一条播放的字幕。
@@ -548,6 +549,8 @@ npm.cmd run electron:build
 本轮 Electron 播放日志脱敏加固已闭环：`playback.log` 写入前的敏感字段处理现在会脱敏远端 URL 主机名、清理 query token，并识别 `Authorization` / token / api-key 类 header tuple，避免 header 数组里的裸 token 写入日志；`localhost` / IP 本地调试地址仍保留。验证已覆盖 `node --check electron\main.mjs`、`npm.cmd run check:electron-commands`、`npm.cmd run build`、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`。
 
 本轮详情页桌面下载入口已闭环：`DetailView` 接入下载 store，在 Electron/Tauri 桌面运行时为电影、单集和剧集继续观看目标提供 Hero 下载按钮，创建任务后进入 `/downloads?task=...`；Web Preview 不显示该入口，避免没有桌面后端时出现假按钮。验证已覆盖 `npm.cmd run build`、in-app Browser 1420 真实测试账号会话打开真实详情页并确认 Web Preview 无桌面下载按钮、`npm.cmd run check:electron-commands`、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`。
+
+本轮下载保存目录设置已闭环：设置模型新增 `downloadDirectory`，设置页“下载”面板可填写或在桌面运行时选择保存目录；Electron/Tauri 下载管理器创建新任务时会优先使用该目录，相对目录解析到应用 userData 下，未配置时继续使用默认下载目录。验证已覆盖 `node --check electron\backend\downloads.mjs`、`node --check electron\backend\store.mjs`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`npm.cmd run build`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、in-app Browser 1420 下载设置面板目检、Electron 目录解析 smoke、`npm.cmd run check:electron-commands`、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`。
 
 ---
 

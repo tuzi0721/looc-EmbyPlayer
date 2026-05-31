@@ -26,6 +26,7 @@ type PanelId =
   | "sync"
   | "network"
   | "player"
+  | "downloads"
   | "enhancement"
   | "aiSubtitles"
   | "externalPlayer"
@@ -47,6 +48,7 @@ const savingServerId = ref<string | null>(null);
 const settingActiveLineId = ref<string | null>(null);
 const externalPlayerPathDraft = ref("");
 const externalPlayerArgsDraft = ref("");
+const downloadDirectoryDraft = ref("");
 const backupBusy = ref<"export" | "import" | null>(null);
 const backupStatus = ref("");
 const appVersion = "0.1.0";
@@ -91,12 +93,15 @@ function panelFromQuery(value: unknown): PanelId {
     case "servers":
     case "network":
     case "player":
+    case "downloads":
     case "externalPlayer":
     case "danmaku":
     case "shortcuts":
     case "backup":
     case "sync":
       return category;
+    case "download":
+      return "downloads";
     case "file-services":
     case "fileServices":
     case "files":
@@ -143,6 +148,14 @@ watch(
   () => settings.settings.externalPlayerArgs,
   (args) => {
     externalPlayerArgsDraft.value = args ?? "";
+  },
+  { immediate: true },
+);
+
+watch(
+  () => settings.settings.downloadDirectory,
+  (path) => {
+    downloadDirectoryDraft.value = path ?? "";
   },
   { immediate: true },
 );
@@ -265,6 +278,28 @@ async function pickExternalPlayer() {
   if (typeof selected === "string" && selected.length > 0) {
     externalPlayerPathDraft.value = selected;
     await saveExternalPlayerPath(selected);
+  }
+}
+
+async function saveDownloadDirectory(value = downloadDirectoryDraft.value) {
+  const normalized = value.trim() || null;
+  const current = settings.settings.downloadDirectory ?? null;
+
+  downloadDirectoryDraft.value = normalized ?? "";
+  if (normalized === current) return;
+
+  await save("downloadDirectory", normalized as any);
+}
+
+async function pickDownloadDirectory() {
+  const selected = await openFileDialog({
+    multiple: false,
+    directory: true,
+    title: "选择下载目录",
+  });
+  if (typeof selected === "string" && selected.length > 0) {
+    downloadDirectoryDraft.value = selected;
+    await saveDownloadDirectory(selected);
   }
 }
 
@@ -719,6 +754,14 @@ const externalPlayerSummary = computed(() => {
   if (!path) return "系统默认";
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 });
+
+const downloadDirectorySummary = computed(() => {
+  const path = settings.settings.downloadDirectory?.trim();
+  if (!path) return "默认目录";
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+});
+
+const canPickDownloadDirectory = computed(() => isElectronRuntime || isTauriRuntime);
 
 const danmakuSummary = computed(() => {
   const avoidance = settings.settings.danmakuAvoidSubtitles ? "避让" : "覆盖";
@@ -1260,6 +1303,42 @@ const danmakuSummary = computed(() => {
             @change="(e: any) => save('appendAuthQuery', e.target.checked)"
           />
         </label>
+      </div>
+
+      <button class="row" @click="togglePanel('downloads')">
+        <span>下载</span>
+        <span class="value">{{ downloadDirectorySummary }}</span>
+      </button>
+      <div v-if="openPanel === 'downloads'" class="panel glass">
+        <label class="field">
+          <span>保存目录</span>
+          <GlassInput
+            v-model="downloadDirectoryDraft"
+            placeholder="留空使用默认目录"
+            @change="() => saveDownloadDirectory()"
+            @blur="() => saveDownloadDirectory()"
+          />
+        </label>
+        <div class="panel__actions">
+          <button
+            type="button"
+            class="action-btn"
+            :disabled="!canPickDownloadDirectory"
+            @click="pickDownloadDirectory"
+          >
+            <Icon icon="lucide:folder-open" width="15" />
+            <span>选择</span>
+          </button>
+          <button
+            type="button"
+            class="action-btn"
+            :disabled="!settings.settings.downloadDirectory"
+            @click="downloadDirectoryDraft = ''; saveDownloadDirectory('')"
+          >
+            <Icon icon="lucide:x" width="15" />
+            <span>清除</span>
+          </button>
+        </div>
       </div>
 
       <button class="row" @click="togglePanel('enhancement')">

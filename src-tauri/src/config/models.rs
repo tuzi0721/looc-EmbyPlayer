@@ -176,6 +176,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub append_auth_query: bool,
     #[serde(default)]
+    pub download_directory: Option<String>,
+    #[serde(default)]
     pub home_hero_style: HomeHeroStyle,
     #[serde(default = "default_true")]
     pub close_to_tray: bool,
@@ -243,6 +245,7 @@ impl Default for AppSettings {
             skip_outro_seconds: default_skip_outro_seconds(),
             screenshot_include_subtitles: true,
             append_auth_query: false,
+            download_directory: None,
             home_hero_style: HomeHeroStyle::default(),
             close_to_tray: true,
             trakt_sync_enabled: false,

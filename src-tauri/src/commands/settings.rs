@@ -47,6 +47,8 @@ pub struct SettingsPatch {
     pub skip_outro_seconds: Option<u32>,
     pub screenshot_include_subtitles: Option<bool>,
     pub append_auth_query: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_nullable_field")]
+    pub download_directory: Option<Option<String>>,
     pub home_hero_style: Option<HomeHeroStyle>,
     pub close_to_tray: Option<bool>,
     pub trakt_sync_enabled: Option<bool>,
@@ -214,6 +216,16 @@ pub async fn update_settings(
         }
         if let Some(v) = patch.append_auth_query {
             s.append_auth_query = v;
+        }
+        if let Some(v) = patch.download_directory {
+            s.download_directory = v.and_then(|path| {
+                let path = path.trim().to_string();
+                if path.is_empty() {
+                    None
+                } else {
+                    Some(path)
+                }
+            });
         }
         if let Some(v) = patch.home_hero_style {
             s.home_hero_style = v;

@@ -1,0 +1,25 @@
+# 下载保存目录设置
+
+- **时间**：2026-06-01 06:43 (UTC+8)
+- **动机**：详情页已经能创建真实下载任务，但下载文件仍固定保存到应用数据目录，用户无法选择离线媒体的落盘位置，下载体验不完整。
+- **修改文件**：
+  - `src/types/models.ts`、`src/stores/settings.ts`、`src/platform/index.ts`：新增 `downloadDirectory` 设置字段和 Web Preview 默认值。
+  - `src/views/SettingsView.vue`：设置页新增“下载”面板，可填写保存目录；Electron/Tauri 运行时可通过目录选择器选择路径，Web Preview 不伪装本地目录选择能力。
+  - `electron/backend/store.mjs`、`electron/backend/downloads.mjs`：Electron 设置默认值新增下载目录字段，下载任务创建时按设置目录生成文件路径；相对目录解析到 userData 下。
+  - `src-tauri/src/config/models.rs`、`src-tauri/src/commands/settings.rs`、`src-tauri/src/download/manager.rs`：Tauri 设置模型、补丁更新和下载目录解析同步支持自定义目录。
+  - `docs/CURRENT_STATE.md`：记录下载保存目录设置与验证结果。
+- **风险**：用户填写不可写目录时，创建下载任务会在实际落盘创建目录阶段报错；当前阶段不迁移既有下载任务路径。
+- **回滚**：移除 `downloadDirectory` 设置字段、设置页下载面板和两端下载目录解析改动，并删除本日志与状态段落。
+- **验证步骤**：
+  - `node --check electron\backend\downloads.mjs`
+  - `node --check electron\backend\store.mjs`
+  - `cargo fmt --manifest-path src-tauri\Cargo.toml --check`
+  - `npm.cmd run build`
+  - `cargo check --manifest-path src-tauri\Cargo.toml --all-targets`
+  - in-app Browser 1420 打开 `/settings?c=downloads`，确认下载面板可展开，Web Preview 下目录选择按钮禁用。
+  - Electron 下载目录解析 smoke：默认目录与相对目录均解析到 userData 下。
+  - `npm.cmd run check:electron-commands`
+  - `git diff --check`
+  - 敏感关键字扫描确认未写入测试账号、密码、token 或完整线路地址。
+  - `npm.cmd run electron:build`
+- **结果**：通过；新下载任务会优先保存到用户配置的桌面下载目录，未配置时继续使用应用默认目录。

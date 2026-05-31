@@ -72,7 +72,8 @@ export class DownloadManager {
     this.store = store;
     this.emby = emby;
     this.mpv = mpv;
-    this.downloadDir = path.join(options.userDataDir, "downloads");
+    this.userDataDir = options.userDataDir;
+    this.defaultDownloadDir = path.join(options.userDataDir, "downloads");
     this.emit = options.emit ?? (() => {});
     this.notify = options.notify ?? (() => {});
     this.active = new Map();
@@ -80,6 +81,17 @@ export class DownloadManager {
 
   async list() {
     return this.store.listDownloads();
+  }
+
+  async downloadDirectory() {
+    const settings = await this.store.getSettings();
+    const configured = typeof settings.downloadDirectory === "string"
+      ? settings.downloadDirectory.trim()
+      : "";
+    if (!configured) return this.defaultDownloadDir;
+    return path.isAbsolute(configured)
+      ? path.resolve(configured)
+      : path.resolve(this.userDataDir, configured);
   }
 
   async start(payload = {}) {
@@ -94,7 +106,11 @@ export class DownloadManager {
     );
     const mediaSource = source.diagnostics?.selectedMediaSource ?? {};
     const extension = extensionFrom(mediaSource.container, source.streamUrl);
-    const filePath = await uniqueFilePath(this.downloadDir, item.Name || source.itemId, extension);
+    const filePath = await uniqueFilePath(
+      await this.downloadDirectory(),
+      item.Name || source.itemId,
+      extension,
+    );
     const now = new Date().toISOString();
     const task = await this.store.upsertDownload({
       id: randomUUID(),

@@ -28,6 +28,7 @@ export const DEFAULT_SETTINGS = {
   skipOutroSeconds: 90,
   screenshotIncludeSubtitles: true,
   appendAuthQuery: false,
+  downloadDirectory: null,
   homeHeroStyle: "classic",
   closeToTray: true,
   traktSyncEnabled: false,

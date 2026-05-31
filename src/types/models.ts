@@ -64,6 +64,7 @@ export interface AppSettings {
   skipOutroSeconds: number;
   screenshotIncludeSubtitles: boolean;
   appendAuthQuery: boolean;
+  downloadDirectory?: string | null;
   homeHeroStyle: "classic" | "cinema";
   closeToTray: boolean;
   traktSyncEnabled: boolean;
