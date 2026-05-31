@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-05-31（AI 字幕能力面板）
+> **更新时间**：2026-05-31（同步能力面板）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-05-31-2146-ai-subtitle-capability-panel.md`](./CHANGE_LOG/2026-05-31-2146-ai-subtitle-capability-panel.md)
+> **变更日志**：[`CHANGE_LOG/2026-05-31-2154-sync-capability-panel.md`](./CHANGE_LOG/2026-05-31-2154-sync-capability-panel.md)
 
 ---
 
@@ -224,7 +224,7 @@
 - **2026-05-29**：Electron `noOpCommands` 清理为仅保留 `embed_attach`、`embed_set_rect`、`embed_set_visible`、`embed_detach`；`add_subtitle`、`remove_subtitle`、`set_subtitle_delay`、`set_subtitle_scale`、`set_subtitle_style` 和 `cycle_subtitle` 均继续由真实 mpv handler 执行，不再被迁移状态误标为占位命令。
 - **2026-05-29**：`package.json` 补齐 Electron 打包 author 元数据，`npm.cmd run electron:build` 不再输出 `author is missed in the package.json`；重复依赖引用和 Node DEP0190 提示仍待后续单独清理。
 - **2026-05-29**：新增一次性首启引导，启动数据刷新完成后按 `firstRunCompleted` 判断显示，提供服务器、播放器设置和首页入口；关闭或跳转后持久化完成状态，播放器全屏路由不显示。
-- **2026-05-29**：设置页“同步”从占位改为 Trakt 同步基础面板，持久化同步启用状态、Trakt 用户名和观看记录/评分/收藏同步范围；侧边栏设置分类新增同步入口。
+- **2026-05-31**：设置页“同步”改为只读能力面板，Trakt OAuth、观看记录同步、评分同步、收藏同步和 Douban 评分均显示待接入状态；旧 Trakt 用户名输入和未闭环同步开关已从 UI 移除，避免误导用户以为已经有真实 OAuth / 同步队列。
 - **2026-05-29**：设置页关于面板补齐版本、运行壳、平台、服务器、账号、播放核心和打包产物状态；侧边栏与设置页入口统一显示“关于 Hills Lite”，并继续跳转/展开 `settings?c=about`。
 - **2026-05-29**：设置页移除未接入真实配置后端的“语言 Auto”静态行，以及播放器分组中带箭头但不可展开的“交互”静态行；当前仅保留真实可操作的设置入口。
 - **2026-05-29**：平台层新增普通 Web/Vite 预览回退；无 Electron bridge、无 Tauri runtime 时，设置、服务器、账号、下载、通知和基础媒体列表返回安全空数据，`update_settings` 使用内存合并，首启引导与设置页浏览器验证不再触发 Tauri IPC 错误。设置关于面板在该环境显示 `Web Preview` / `web`。
@@ -409,6 +409,8 @@ npm.cmd run electron:build
 本轮 JAV 番号过滤的 `node --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、行尾空白检查、`npm.cmd run build`、`npm.cmd run electron:build` 已通过。
 
 本轮同步设置基础的 `node --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、行尾空白检查、`npm.cmd run build`、`npm.cmd run electron:build` 已通过。
+
+本轮同步能力面板已接入：设置页“同步”显示 Trakt OAuth、观看记录同步、评分同步、收藏同步和 Douban 评分 5 个待接入能力项，不再提供未闭环的 Trakt 用户名输入或同步范围开关。验证已覆盖 `npm.cmd run build`、行尾空白检查、in-app Browser 1421 干净 dev server 面板目检与 `npm.cmd run electron:build`。
 
 本轮外部播放器基础配置的 `node --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、行尾空白检查、`npm.cmd run build`、`npm.cmd run electron:build` 已通过。
 

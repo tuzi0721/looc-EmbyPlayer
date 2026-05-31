@@ -45,7 +45,6 @@ const editingServerId = ref<string | null>(null);
 const savingServerId = ref<string | null>(null);
 const externalPlayerPathDraft = ref("");
 const externalPlayerArgsDraft = ref("");
-const traktUsernameDraft = ref("");
 const backupBusy = ref<"export" | "import" | null>(null);
 const backupStatus = ref("");
 const backupAvailable = typeof window !== "undefined" && Boolean(window.hillsLite);
@@ -135,14 +134,6 @@ watch(
   { immediate: true },
 );
 
-watch(
-  () => settings.settings.traktUsername,
-  (name) => {
-    traktUsernameDraft.value = name ?? "";
-  },
-  { immediate: true },
-);
-
 onMounted(async () => {
   await Promise.all([settings.refresh(), serverStore.refresh()]);
   platformLabel.value = await platformType().catch(() => "unknown");
@@ -213,14 +204,6 @@ async function pickExternalPlayer() {
     externalPlayerPathDraft.value = selected;
     await saveExternalPlayerPath(selected);
   }
-}
-
-async function saveTraktUsername(value = traktUsernameDraft.value) {
-  const normalized = value.trim() || null;
-  const current = settings.settings.traktUsername ?? null;
-  traktUsernameDraft.value = normalized ?? "";
-  if (normalized === current) return;
-  await save("traktUsername", normalized as any);
 }
 
 async function openWindowsHdrSettings() {
@@ -398,7 +381,15 @@ type AiSubtitleCapability = {
   status: CapabilityStatus;
 };
 
-const enhancementStatusLabel: Record<CapabilityStatus, string> = {
+type SyncCapability = {
+  key: string;
+  label: string;
+  detail: string;
+  icon: string;
+  status: CapabilityStatus;
+};
+
+const capabilityStatusLabel: Record<CapabilityStatus, string> = {
   available: "可用",
   disabled: "禁用",
   planned: "待接入",
@@ -499,10 +490,45 @@ const aiSubtitleCapabilities = computed<AiSubtitleCapability[]>(() => [
   },
 ]);
 
-const syncSummary = computed(() => {
-  if (!settings.settings.traktSyncEnabled) return "未启用";
-  return settings.settings.traktUsername?.trim() || "待授权";
-});
+const syncSummary = computed(() => "待接入");
+
+const syncCapabilities = computed<SyncCapability[]>(() => [
+  {
+    key: "trakt-oauth",
+    label: "Trakt OAuth",
+    detail: "未接入 device flow、token 存储与刷新",
+    icon: "lucide:key-round",
+    status: "planned",
+  },
+  {
+    key: "watched-sync",
+    label: "观看记录同步",
+    detail: "未接入 Trakt 双向同步队列",
+    icon: "lucide:eye",
+    status: "planned",
+  },
+  {
+    key: "rating-sync",
+    label: "评分同步",
+    detail: "未接入评分读取、冲突合并与回写",
+    icon: "lucide:star",
+    status: "planned",
+  },
+  {
+    key: "favorite-sync",
+    label: "收藏同步",
+    detail: "未接入收藏状态映射与批量同步",
+    icon: "lucide:heart",
+    status: "planned",
+  },
+  {
+    key: "douban-rating",
+    label: "Douban 评分",
+    detail: "未接入 Douban 元数据评分 provider",
+    icon: "lucide:badge-star",
+    status: "planned",
+  },
+]);
 
 const externalPlayerSummary = computed(() => {
   const path = settings.settings.externalPlayerPath?.trim();
@@ -800,51 +826,20 @@ const danmakuSummary = computed(() => {
         <span class="value">{{ syncSummary }}</span>
       </button>
       <div v-if="openPanel === 'sync'" class="panel glass">
-        <label class="field field--inline">
-          <span>Trakt 同步</span>
-          <input
-            class="switch"
-            type="checkbox"
-            :checked="settings.settings.traktSyncEnabled"
-            @change="(e: any) => save('traktSyncEnabled', e.target.checked)"
-          />
-        </label>
-        <label class="field">
-          <span>Trakt 用户名</span>
-          <GlassInput
-            v-model="traktUsernameDraft"
-            placeholder="Trakt username"
-            @change="() => saveTraktUsername()"
-            @blur="() => saveTraktUsername()"
-          />
-        </label>
-        <label class="field field--inline">
-          <span>观看记录</span>
-          <input
-            class="switch"
-            type="checkbox"
-            :checked="settings.settings.traktSyncWatched"
-            @change="(e: any) => save('traktSyncWatched', e.target.checked)"
-          />
-        </label>
-        <label class="field field--inline">
-          <span>评分</span>
-          <input
-            class="switch"
-            type="checkbox"
-            :checked="settings.settings.traktSyncRatings"
-            @change="(e: any) => save('traktSyncRatings', e.target.checked)"
-          />
-        </label>
-        <label class="field field--inline">
-          <span>收藏</span>
-          <input
-            class="switch"
-            type="checkbox"
-            :checked="settings.settings.traktSyncFavorites"
-            @change="(e: any) => save('traktSyncFavorites', e.target.checked)"
-          />
-        </label>
+        <ul class="cap-list">
+          <li v-for="cap in syncCapabilities" :key="cap.key" class="cap-row">
+            <div class="cap-row__icon">
+              <Icon :icon="cap.icon" width="16" />
+            </div>
+            <div class="cap-row__main">
+              <strong>{{ cap.label }}</strong>
+              <span>{{ cap.detail }}</span>
+            </div>
+            <span class="cap-status" :class="`cap-status--${cap.status}`">
+              {{ capabilityStatusLabel[cap.status] }}
+            </span>
+          </li>
+        </ul>
       </div>
       <div class="row row--static">
         <span>关闭时最小化到托盘</span>
@@ -1061,7 +1056,7 @@ const danmakuSummary = computed(() => {
               <span>{{ cap.detail }}</span>
             </div>
             <span class="cap-status" :class="`cap-status--${cap.status}`">
-              {{ enhancementStatusLabel[cap.status] }}
+              {{ capabilityStatusLabel[cap.status] }}
             </span>
             <button
               v-if="cap.action === 'windows-hdr'"
@@ -1092,7 +1087,7 @@ const danmakuSummary = computed(() => {
               <span>{{ cap.detail }}</span>
             </div>
             <span class="cap-status" :class="`cap-status--${cap.status}`">
-              {{ enhancementStatusLabel[cap.status] }}
+              {{ capabilityStatusLabel[cap.status] }}
             </span>
           </li>
         </ul>
