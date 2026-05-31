@@ -540,7 +540,7 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
   {
     key: "folder-library",
     label: "文件夹媒体库",
-    detail: "可打开本地文件夹并列出这一层的视频文件",
+    detail: "可打开本地文件夹并列出一层或子目录视频文件",
     icon: "lucide:folder-open",
     status: "available",
   },

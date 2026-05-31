@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（本地文件夹递归扫描）
+> **更新时间**：2026-06-01（本地文件夹搜索筛选）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-0024-local-folder-recursive.md`](./CHANGE_LOG/2026-06-01-0024-local-folder-recursive.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-0032-local-folder-search.md`](./CHANGE_LOG/2026-06-01-0032-local-folder-search.md)
 
 ---
 
@@ -56,6 +56,8 @@
 **2026-06-01**：最近本地文件夹接入客户端本地状态；侧边栏底部显示最近 2 个本地文件夹，`/local-folder` 空状态显示最近 6 个文件夹快捷入口，成功打开或加载文件夹后会写入最近记录。
 
 **2026-06-01**：本地文件夹浏览新增“包含子文件夹”模式；Electron/Tauri `list_local_folder` 可递归扫描子目录并返回相对路径，页面列表显示子目录路径，超过 500 个视频时会截断并提示。
+
+**2026-06-01**：`/local-folder` 新增当前列表搜索筛选；可按文件名、相对路径和扩展名过滤递归扫描结果，计数显示筛选数 / 总数，点击播放时本地队列跟随筛选后的列表。
 
 **2026-05-30**：单集详情页会并行加载季列表与当前季剧集，并通过详情/剧集加载序号避免快速切换 PDP 时旧请求覆盖新页面状态。
 
@@ -484,9 +486,11 @@ npm.cmd run electron:build
 
 本轮本地文件夹递归扫描已闭环：Electron/Tauri `list_local_folder` 支持 `recursive` 参数，递归扫描子目录时返回每个视频的 `relativePath`，并以 500 个视频为上限返回 `truncated` 标记；`/local-folder` 页面新增“包含子文件夹”开关，递归模式下显示相对路径和截断提示，播放队列继续由当前扫描结果生成。Web Preview 仍返回空列表与递归状态，避免假装拥有本地文件权限。验证已覆盖 `cargo fmt --manifest-path src-tauri\Cargo.toml`、`node --check electron\main.mjs`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run build`、行尾空白检查、in-app Browser 目检与 `npm.cmd run electron:build`。
 
+本轮本地文件夹搜索筛选已闭环：`/local-folder` 页面新增搜索框，按文件名、相对路径和扩展名过滤当前扫描结果，计数显示筛选数 / 总数，点击视频时本地播放队列使用筛选后的列表；设置页“文件夹媒体库”说明同步更新为支持一层或子目录视频文件。验证已覆盖 `npm.cmd run build`、行尾空白检查、in-app Browser 搜索框和窄宽布局目检与 `npm.cmd run electron:build`；Browser 自动文本输入受虚拟剪贴板限制，未作为通过项记录。
+
 ---
 
 ## 10. Phase 2 待办
 
 - 播放窗口内嵌已通过本地屏幕像素 smoke；后续仍建议用真实媒体人工走一遍控制栏显示/隐藏、全屏和窗口 resize 体验。
-- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层/递归视频浏览与本地文件夹播放队列、同名字幕自动关联、同名 XML 弹幕自动关联、最近本地文件入口和最近本地文件夹入口；封面/元数据刮削、WebDAV、SMB、Alist/OpenList 和 Plex 仍待后续分阶段接入。
+- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层/递归视频浏览、本地文件夹列表搜索筛选与播放队列、同名字幕自动关联、同名 XML 弹幕自动关联、最近本地文件入口和最近本地文件夹入口；封面/元数据刮削、WebDAV、SMB、Alist/OpenList 和 Plex 仍待后续分阶段接入。

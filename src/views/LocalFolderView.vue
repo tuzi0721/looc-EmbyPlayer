@@ -17,6 +17,7 @@ const listing = ref<LocalFolderListing | null>(null);
 const loading = ref(false);
 const errorText = ref<string | null>(null);
 const recursive = ref(false);
+const searchText = ref("");
 
 const folderPath = computed(() => {
   const value = route.query.folder;
@@ -28,12 +29,25 @@ const folderTitle = computed(() => {
   return fileNameFromPath(folderPath.value) || folderPath.value;
 });
 
-const countLabel = computed(() => {
-  const count = listing.value?.items.length ?? 0;
-  if (listing.value?.truncated) return `${count}+ 个视频`;
-  return `${count} 个视频`;
-});
 const recentFolders = computed(() => localFiles.folderItems.slice(0, 6));
+const normalizedSearchText = computed(() => searchText.value.trim().toLocaleLowerCase());
+const visibleItems = computed(() => {
+  const items = listing.value?.items ?? [];
+  const query = normalizedSearchText.value;
+  if (!query) return items;
+  return items.filter((item) =>
+    [item.name, item.relativePath ?? "", item.extension]
+      .join(" ")
+      .toLocaleLowerCase()
+      .includes(query),
+  );
+});
+const countLabel = computed(() => {
+  const total = listing.value?.items.length ?? 0;
+  const suffix = listing.value?.truncated ? "+" : "";
+  if (normalizedSearchText.value) return `${visibleItems.value.length} / ${total}${suffix} 个视频`;
+  return `${total}${suffix} 个视频`;
+});
 
 function fileNameFromPath(filePath: string): string {
   return filePath.split(/[\\/]/).filter(Boolean).pop() ?? filePath;
@@ -106,7 +120,7 @@ function openFolderPath(folderPath: string) {
 }
 
 function openVideo(item: LocalFolderVideo, index: number) {
-  const items = listing.value?.items ?? [];
+  const items = visibleItems.value;
   player.setLocalQueue(items.map((entry) => entry.filePath), index);
   localFiles.remember(item.filePath);
   router
@@ -118,7 +132,10 @@ function openVideo(item: LocalFolderVideo, index: number) {
     .catch(() => {});
 }
 
-watch(folderPath, (directory) => void loadFolder(directory), { immediate: true });
+watch(folderPath, (directory) => {
+  searchText.value = "";
+  void loadFolder(directory);
+}, { immediate: true });
 watch(recursive, () => {
   if (folderPath.value) void loadFolder();
 });
@@ -175,6 +192,21 @@ watch(recursive, () => {
     </div>
 
     <div v-else class="local-folder__body">
+      <div class="folder-toolbar">
+        <label class="search-box">
+          <Icon icon="lucide:search" width="15" />
+          <input v-model="searchText" type="search" placeholder="搜索文件名或路径" />
+        </label>
+        <button
+          v-if="searchText"
+          class="icon-btn"
+          type="button"
+          title="清空搜索"
+          @click="searchText = ''"
+        >
+          <Icon icon="lucide:x" width="15" />
+        </button>
+      </div>
       <div class="folder-meta">
         <span>{{ countLabel }}</span>
         <span v-if="listing?.recursive">包含子文件夹</span>
@@ -192,13 +224,13 @@ watch(recursive, () => {
         <strong>扫描中</strong>
       </div>
 
-      <div v-else-if="listing && listing.items.length === 0" class="empty glass">
+      <div v-else-if="listing && visibleItems.length === 0" class="empty glass">
         <Icon icon="lucide:file-question" width="32" />
-        <strong>未找到视频文件</strong>
+        <strong>{{ normalizedSearchText ? "未匹配到视频文件" : "未找到视频文件" }}</strong>
       </div>
 
       <ul v-else class="file-list">
-        <li v-for="(item, index) in listing?.items ?? []" :key="item.filePath">
+        <li v-for="(item, index) in visibleItems" :key="item.filePath">
           <button class="file-row" type="button" :title="item.filePath" @click="openVideo(item, index)">
             <span class="file-row__icon">
               <Icon icon="lucide:file-video" width="18" />
@@ -322,6 +354,37 @@ watch(recursive, () => {
   min-height: 0;
   overflow-y: auto;
   padding: 12px var(--content-pad) 32px;
+}
+.folder-toolbar {
+  max-width: 900px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.search-box {
+  min-width: 0;
+  flex: 1;
+  height: 36px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-tertiary);
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+}
+.search-box input {
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg-primary);
+  font: inherit;
+}
+.search-box input::placeholder {
+  color: var(--fg-tertiary);
 }
 .folder-meta {
   display: flex;
