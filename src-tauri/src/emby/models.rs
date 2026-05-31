@@ -274,6 +274,8 @@ pub struct MediaItem {
     pub user_data: Option<UserData>,
     #[serde(default, deserialize_with = "null_to_default")]
     pub people: Vec<MediaPerson>,
+    #[serde(default, deserialize_with = "null_to_default")]
+    pub media_sources: Vec<MediaSource>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -386,6 +388,14 @@ pub struct MediaStream {
     pub path: Option<String>,
     #[serde(default, deserialize_with = "optional_string")]
     pub title: Option<String>,
+    #[serde(default, deserialize_with = "optional_i32")]
+    pub width: Option<i32>,
+    #[serde(default, deserialize_with = "optional_i32")]
+    pub height: Option<i32>,
+    #[serde(default, deserialize_with = "optional_i64")]
+    pub bit_rate: Option<i64>,
+    #[serde(default, deserialize_with = "optional_i32")]
+    pub channels: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

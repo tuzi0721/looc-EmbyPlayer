@@ -10,7 +10,7 @@ import { useLibraryStore } from "@/stores/library";
 import { usePlayerStore } from "@/stores/player";
 import { useServerStore } from "@/stores/server";
 import { useSettingsStore } from "@/stores/settings";
-import type { MediaItem, MediaPerson, NameIdPair, UserData } from "@/types/models";
+import type { MediaItem, MediaPerson, MediaSourceInfo, MediaStreamInfo, NameIdPair, UserData } from "@/types/models";
 import { writeTextToClipboard } from "@/utils/clipboard";
 import { filterJavItems } from "@/utils/javFilter";
 import { mediaImageUrl, mediaItemImageUrl, type MediaImageType } from "@/utils/mediaImages";
@@ -50,6 +50,13 @@ type ExternalLink = {
 };
 
 type BadgeTone = "movie" | "series" | "episode" | "collection" | "folder" | "audio" | "progress" | "watched";
+type MediaInfoRow = {
+  key: string;
+  icon: string;
+  label: string;
+  value: string;
+  detail?: string;
+};
 
 function clampPercent(value: number) {
   if (!Number.isFinite(value)) return 0;
@@ -185,6 +192,151 @@ const metaParts = computed(() => {
   if (runtimeText.value) parts.push(runtimeText.value);
   if (i.OfficialRating) parts.push(i.OfficialRating);
   return parts;
+});
+
+function compactNumber(value?: number | null, fractionDigits = 1) {
+  if (value == null || !Number.isFinite(value) || value <= 0) return "";
+  const rounded = value.toFixed(fractionDigits);
+  return rounded.endsWith(".0") ? rounded.slice(0, -2) : rounded;
+}
+
+function formatBitrate(value?: number | null) {
+  if (value == null || !Number.isFinite(value) || value <= 0) return "";
+  if (value >= 1_000_000) return `${compactNumber(value / 1_000_000, value >= 10_000_000 ? 0 : 1)} Mbps`;
+  if (value >= 1_000) return `${compactNumber(value / 1_000, value >= 10_000 ? 0 : 1)} Kbps`;
+  return `${Math.round(value)} bps`;
+}
+
+function formatBytes(value?: number | null) {
+  if (value == null || !Number.isFinite(value) || value <= 0) return "";
+  if (value >= 1024 ** 3) return `${compactNumber(value / 1024 ** 3, 1)} GB`;
+  if (value >= 1024 ** 2) return `${compactNumber(value / 1024 ** 2, 0)} MB`;
+  if (value >= 1024) return `${compactNumber(value / 1024, 0)} KB`;
+  return `${Math.round(value)} B`;
+}
+
+function streamType(stream: MediaStreamInfo) {
+  return (stream.Type ?? "").toLowerCase();
+}
+
+function streamCodec(stream?: MediaStreamInfo | null) {
+  return stream?.Codec?.trim().toUpperCase() ?? "";
+}
+
+function streamLanguage(stream?: MediaStreamInfo | null) {
+  return stream?.Language?.trim() || "";
+}
+
+function streamResolution(stream?: MediaStreamInfo | null) {
+  const width = stream?.Width ?? 0;
+  const height = stream?.Height ?? 0;
+  return width > 0 && height > 0 ? `${width}×${height}` : "";
+}
+
+function audioChannels(stream?: MediaStreamInfo | null) {
+  const channels = stream?.Channels ?? 0;
+  if (channels <= 0) return "";
+  if (channels === 1) return "Mono";
+  if (channels === 2) return "Stereo";
+  return `${channels}ch`;
+}
+
+function firstMediaStream(source: MediaSourceInfo | null, type: "video" | "audio" | "subtitle") {
+  return (source?.MediaStreams ?? []).find((stream) => streamType(stream) === type) ?? null;
+}
+
+function mediaCapabilityText(source: MediaSourceInfo) {
+  const parts: string[] = [];
+  if (source.SupportsDirectPlay) parts.push("直连");
+  if (source.SupportsDirectStream) parts.push("直流");
+  if (source.SupportsTranscoding) parts.push("转码");
+  return parts.join(" / ");
+}
+
+function pushMediaInfoRow(rows: MediaInfoRow[], row: MediaInfoRow) {
+  if (!row.value) return;
+  rows.push(row);
+}
+
+const primaryMediaSource = computed(() => item.value?.MediaSources?.[0] ?? null);
+
+const mediaInfoRows = computed<MediaInfoRow[]>(() => {
+  const source = primaryMediaSource.value;
+  if (!source) return [];
+
+  const sources = item.value?.MediaSources ?? [];
+  const video = firstMediaStream(source, "video");
+  const audioStreams = (source.MediaStreams ?? []).filter((stream) => streamType(stream) === "audio");
+  const audio = audioStreams.find((stream) => stream.IsDefault) ?? audioStreams[0] ?? null;
+  const subtitles = (source.MediaStreams ?? []).filter((stream) => streamType(stream) === "subtitle");
+  const rows: MediaInfoRow[] = [];
+
+  pushMediaInfoRow(rows, {
+    key: "source",
+    icon: "lucide:layers-3",
+    label: "媒体源",
+    value: sources.length > 1 ? `${sources.length} 个版本` : source.Name?.trim() || source.Id?.trim() || "默认版本",
+    detail: source.Name?.trim() && sources.length > 1 ? source.Name.trim() : undefined,
+  });
+
+  pushMediaInfoRow(rows, {
+    key: "container",
+    icon: "lucide:box",
+    label: "容器",
+    value: source.Container?.trim().toUpperCase() ?? "",
+  });
+
+  pushMediaInfoRow(rows, {
+    key: "video",
+    icon: "lucide:monitor-play",
+    label: "视频",
+    value: [streamCodec(video), streamResolution(video), formatBitrate(video?.BitRate)].filter(Boolean).join(" · "),
+  });
+
+  pushMediaInfoRow(rows, {
+    key: "audio",
+    icon: "lucide:volume-2",
+    label: "音频",
+    value: [streamCodec(audio), streamLanguage(audio), audioChannels(audio), formatBitrate(audio?.BitRate)]
+      .filter(Boolean)
+      .join(" · "),
+    detail: audioStreams.length > 1 ? `${audioStreams.length} 条音轨` : undefined,
+  });
+
+  pushMediaInfoRow(rows, {
+    key: "subtitles",
+    icon: "lucide:captions",
+    label: "字幕",
+    value: subtitles.length ? `${subtitles.length} 条` : "",
+    detail: subtitles
+      .slice(0, 3)
+      .map((stream) => stream.DisplayTitle?.trim() || streamLanguage(stream) || streamCodec(stream))
+      .filter(Boolean)
+      .join(" / "),
+  });
+
+  pushMediaInfoRow(rows, {
+    key: "bitrate",
+    icon: "lucide:gauge",
+    label: "总码率",
+    value: formatBitrate(source.Bitrate),
+  });
+
+  pushMediaInfoRow(rows, {
+    key: "size",
+    icon: "lucide:hard-drive",
+    label: "大小",
+    value: formatBytes(source.Size),
+  });
+
+  pushMediaInfoRow(rows, {
+    key: "capabilities",
+    icon: "lucide:radio",
+    label: "播放能力",
+    value: mediaCapabilityText(source),
+  });
+
+  return rows;
 });
 
 const externalLinks = computed<ExternalLink[]>(() => {
@@ -984,6 +1136,22 @@ async function togglePlayed() {
         <p>{{ item.Overview }}</p>
       </section>
 
+      <section v-if="mediaInfoRows.length" class="media-info">
+        <header class="media-info__head">
+          <h2>媒体信息</h2>
+        </header>
+        <div class="media-info__grid">
+          <div v-for="row in mediaInfoRows" :key="row.key" class="media-info__item">
+            <Icon :icon="row.icon" width="18" />
+            <div>
+              <span>{{ row.label }}</span>
+              <strong>{{ row.value }}</strong>
+              <small v-if="row.detail">{{ row.detail }}</small>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section v-if="seriesId && seasons.length > 0" class="episodes">
         <header class="episodes__head">
           <div class="episodes__left">
@@ -1518,6 +1686,65 @@ async function togglePlayed() {
   font-size: 14px;
   line-height: 1.65;
   color: var(--fg-secondary);
+}
+.media-info {
+  padding: 16px var(--content-pad) 10px;
+  border-bottom: 1px solid var(--separator);
+}
+.media-info__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.media-info__head h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--fg-primary);
+}
+.media-info__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+.media-info__item {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: var(--surface-1);
+}
+.media-info__item > svg {
+  color: var(--fg-tertiary);
+  margin-top: 1px;
+}
+.media-info__item span,
+.media-info__item small {
+  display: block;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 11px;
+  line-height: 1.3;
+}
+.media-info__item strong {
+  display: block;
+  min-width: 0;
+  margin-top: 3px;
+  color: var(--fg-primary);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.media-info__item small {
+  margin-top: 3px;
+  color: var(--fg-secondary);
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 960px) {

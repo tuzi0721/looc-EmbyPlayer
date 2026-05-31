@@ -88,6 +88,40 @@ function normalizePerson(value) {
   };
 }
 
+function normalizeMediaStreamInfo(value) {
+  const stream = value && typeof value === "object" ? value : {};
+  return {
+    Index: numberFrom(stream.Index),
+    Type: stringFrom(stream.Type),
+    Codec: stringFrom(stream.Codec),
+    Language: stringFrom(stream.Language),
+    DisplayTitle: stringFrom(stream.DisplayTitle),
+    Title: stringFrom(stream.Title),
+    Width: numberFrom(stream.Width),
+    Height: numberFrom(stream.Height),
+    BitRate: numberFrom(stream.BitRate),
+    Channels: numberFrom(stream.Channels),
+    IsDefault: Boolean(stream.IsDefault),
+    IsExternal: Boolean(stream.IsExternal),
+    IsForced: Boolean(stream.IsForced),
+  };
+}
+
+function normalizeMediaSourceInfo(value) {
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    Id: stringFrom(source.Id),
+    Name: stringFrom(source.Name),
+    Container: stringFrom(source.Container),
+    Size: numberFrom(source.Size),
+    Bitrate: numberFrom(source.Bitrate),
+    SupportsDirectPlay: source.SupportsDirectPlay == null ? null : Boolean(source.SupportsDirectPlay),
+    SupportsDirectStream: source.SupportsDirectStream == null ? null : Boolean(source.SupportsDirectStream),
+    SupportsTranscoding: source.SupportsTranscoding == null ? null : Boolean(source.SupportsTranscoding),
+    MediaStreams: Array.isArray(source.MediaStreams) ? source.MediaStreams.map(normalizeMediaStreamInfo) : [],
+  };
+}
+
 export function normalizeItem(value) {
   const item = value && typeof value === "object" ? value : {};
   return {
@@ -121,6 +155,7 @@ export function normalizeItem(value) {
               .filter(([, id]) => Boolean(id)),
           )
         : null,
+    MediaSources: Array.isArray(item.MediaSources) ? item.MediaSources.map(normalizeMediaSourceInfo) : [],
   };
 }
 
@@ -540,7 +575,7 @@ export class EmbyClient {
     const value = await this.authedJson("GET", `Users/${account.userId}/Items/${itemId}`, server, account, {
       query: {
         Fields:
-          "Overview,Genres,GenreItems,Studios,People,ProviderIds,CommunityRating,OfficialRating,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo,ProductionYear",
+          "Overview,Genres,GenreItems,Studios,People,ProviderIds,CommunityRating,OfficialRating,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo,ProductionYear,MediaSources",
       },
       context: "get_item",
     });

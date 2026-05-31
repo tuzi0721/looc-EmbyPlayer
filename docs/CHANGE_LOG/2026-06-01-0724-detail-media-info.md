@@ -1,0 +1,23 @@
+# 详情页媒体信息
+
+- **时间**：2026-06-01 07:24 (UTC+8)
+- **动机**：PDP 详情页此前只展示简介、标签、演职人员和相似内容，缺少用户判断播放/下载质量所需的容器、分辨率、编码、码率、字幕和大小信息。
+- **修改文件**：
+  - `src/types/models.ts`：为 `MediaItem` 增加脱敏后的 `MediaSources` / `MediaStreams` 类型。
+  - `electron/backend/emby.mjs`：详情接口请求并规范化 `MediaSources`。
+  - `src/platform/index.ts`：Web Preview 真实服务器 fallback 同步规范化 `MediaSources`。
+  - `src-tauri/src/emby/models.rs`、`src-tauri/src/emby/client.rs`：Tauri 详情模型与字段请求同步接入 `MediaSources`。
+  - `src/views/DetailView.vue`：新增“媒体信息”摘要区，展示媒体源、容器、视频、音频、字幕、总码率、大小和播放能力。
+- **风险**：不同 Emby/Jellyfin 服务端返回的媒体流字段可能不完整；界面会只展示已有字段，不展示完整服务器路径或远端 URL。
+- **回滚**：移除详情接口 `MediaSources` 字段请求、类型/规范化字段和 `DetailView` 媒体信息区即可。
+- **验证步骤**：
+  - `node --check electron\backend\emby.mjs`
+  - `cargo fmt --manifest-path src-tauri\Cargo.toml`
+  - `npm.cmd run build`
+  - `cargo check --manifest-path src-tauri\Cargo.toml --all-targets`
+  - in-app Browser 1420 使用真实测试账号打开真实条目详情页，确认显示 MKV、H264 1440×1080、AAC、字幕数量、总码率和大小。
+  - 页面文本泄漏检查，确认未显示完整 URL、Windows 路径或常见 Unix 媒体路径。
+  - `git diff --check`
+  - 敏感关键字扫描，确认未写入测试账号、密码、token 或完整线路地址。
+  - `npm.cmd run electron:build`
+- **结果**：通过；详情页现在能展示真实媒体技术摘要，同时避免暴露路径/URL。

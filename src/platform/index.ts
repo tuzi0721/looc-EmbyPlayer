@@ -745,6 +745,38 @@ function normalizeUserData(value: any) {
   };
 }
 
+function normalizeMediaStreamInfo(value: any) {
+  return {
+    Index: numberFrom(value?.Index),
+    Type: stringFrom(value?.Type),
+    Codec: stringFrom(value?.Codec),
+    Language: stringFrom(value?.Language),
+    DisplayTitle: stringFrom(value?.DisplayTitle),
+    Title: stringFrom(value?.Title),
+    Width: numberFrom(value?.Width),
+    Height: numberFrom(value?.Height),
+    BitRate: numberFrom(value?.BitRate),
+    Channels: numberFrom(value?.Channels),
+    IsDefault: boolFrom(value?.IsDefault),
+    IsExternal: boolFrom(value?.IsExternal),
+    IsForced: boolFrom(value?.IsForced),
+  };
+}
+
+function normalizeMediaSourceInfo(value: any) {
+  return {
+    Id: stringFrom(value?.Id),
+    Name: stringFrom(value?.Name),
+    Container: stringFrom(value?.Container),
+    Size: numberFrom(value?.Size),
+    Bitrate: numberFrom(value?.Bitrate),
+    SupportsDirectPlay: boolFrom(value?.SupportsDirectPlay),
+    SupportsDirectStream: boolFrom(value?.SupportsDirectStream),
+    SupportsTranscoding: boolFrom(value?.SupportsTranscoding),
+    MediaStreams: Array.isArray(value?.MediaStreams) ? value.MediaStreams.map(normalizeMediaStreamInfo) : [],
+  };
+}
+
 function normalizeMediaItem(value: any): MediaItem {
   return {
     Id: stringFrom(value?.Id) ?? "",
@@ -769,6 +801,7 @@ function normalizeMediaItem(value: any): MediaItem {
     UserData: normalizeUserData(value?.UserData),
     People: Array.isArray(value?.People) ? value.People : null,
     ProviderIds: value?.ProviderIds && typeof value.ProviderIds === "object" ? value.ProviderIds : null,
+    MediaSources: Array.isArray(value?.MediaSources) ? value.MediaSources.map(normalizeMediaSourceInfo) : [],
   };
 }
 
@@ -1196,7 +1229,7 @@ function invokeWebFallback<T>(
       const pair = webActivePair();
       return webAuthedJson("GET", `Users/${pair.account.userId}/Items/${args?.itemId}`, {
         Fields:
-          "Overview,Genres,GenreItems,Studios,People,ProviderIds,CommunityRating,OfficialRating,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo,ProductionYear",
+          "Overview,Genres,GenreItems,Studios,People,ProviderIds,CommunityRating,OfficialRating,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo,ProductionYear,MediaSources",
       }).then(normalizeMediaItem) as Promise<T>;
     }
     case "search":

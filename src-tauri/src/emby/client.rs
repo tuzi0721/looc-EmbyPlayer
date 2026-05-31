@@ -182,7 +182,7 @@ impl EmbyClient {
         let mut url = url;
         url.query_pairs_mut().append_pair(
             "Fields",
-            "Overview,Genres,GenreItems,Studios,People,CommunityRating,OfficialRating,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo,ProductionYear",
+            "Overview,Genres,GenreItems,Studios,People,CommunityRating,OfficialRating,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo,ProductionYear,MediaSources",
         );
         let resp = self
             .authed_request(Method::GET, url, server, account, &line)?

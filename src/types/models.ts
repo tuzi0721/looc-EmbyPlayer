@@ -116,6 +116,34 @@ export interface MediaPerson {
   PrimaryImageTag?: string | null;
 }
 
+export interface MediaStreamInfo {
+  Index?: number | null;
+  Type?: string | null;
+  Codec?: string | null;
+  Language?: string | null;
+  DisplayTitle?: string | null;
+  Title?: string | null;
+  Width?: number | null;
+  Height?: number | null;
+  BitRate?: number | null;
+  Channels?: number | null;
+  IsDefault?: boolean | null;
+  IsExternal?: boolean | null;
+  IsForced?: boolean | null;
+}
+
+export interface MediaSourceInfo {
+  Id?: string | null;
+  Name?: string | null;
+  Container?: string | null;
+  Size?: number | null;
+  Bitrate?: number | null;
+  SupportsDirectPlay?: boolean | null;
+  SupportsDirectStream?: boolean | null;
+  SupportsTranscoding?: boolean | null;
+  MediaStreams?: MediaStreamInfo[] | null;
+}
+
 export interface MediaItem {
   Id: string;
   Name: string;
@@ -139,6 +167,7 @@ export interface MediaItem {
   UserData?: UserData | null;
   People?: MediaPerson[] | null;
   ProviderIds?: Record<string, string | null | undefined> | null;
+  MediaSources?: MediaSourceInfo[] | null;
 }
 
 export interface ItemsResponse {

@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（Web Preview 播放手势兜底）
+> **更新时间**：2026-06-01（详情页媒体信息）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-0714-web-preview-play-gesture-fallback.md`](./CHANGE_LOG/2026-06-01-0714-web-preview-play-gesture-fallback.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-0724-detail-media-info.md`](./CHANGE_LOG/2026-06-01-0724-detail-media-info.md)
 
 ---
 
@@ -74,6 +74,8 @@
 **2026-06-01**：本地文件夹递归浏览新增按子目录分组显示；开启“按文件夹分组”后，列表按视频相对路径的父目录生成分组标题，播放队列仍跟随当前搜索和排序结果。
 
 **2026-06-01**：本地文件夹列表新增侧挂资源提示；Electron/Tauri 返回同名字幕数量和同名 XML 弹幕路径，文件行显示“字幕 N”与“XML 弹幕”，搜索可匹配字幕/弹幕关键词。
+
+**2026-06-01**：详情页新增“媒体信息”摘要区；Emby/Jellyfin 详情接口会请求 `MediaSources`，页面展示媒体源、容器、视频编码/分辨率/码率、音频、字幕数量、总码率、大小和播放能力，且不展示完整服务器路径或远端 URL。
 
 **2026-05-30**：单集详情页会并行加载季列表与当前季剧集，并通过详情/剧集加载序号避免快速切换 PDP 时旧请求覆盖新页面状态。
 
@@ -559,6 +561,8 @@ npm.cmd run electron:build
 本轮真实服务器连接回归已闭环：in-app Browser 1420 当前会话直接使用真实测试账号，设置页仅保留真实服务器 `001`，两条 443 线路测活返回有效延迟并显示为 Emby 已连接；首页媒体库、真实电影媒体库列表、真实条目详情和播放入口均加载成功，播放器创建真实 HTML video 对象，`readyState = 4`，视频尺寸为 1440×1080，页面无播放失败提示。上轮遗留的两个本地 mock 服务器条目已从当前浏览器状态删除，避免后续测试混淆；自动化点击播放按钮未让 HTML video 时间推进，下一阶段继续单独追播放器启动/用户手势链路。验证过程未写入账号、密码、token 或完整线路地址。
 
 本轮 Web Preview 播放手势兜底已闭环：HTML/HLS 播放按钮在 `video.play()` 被浏览器拒绝为缺少用户手势时，会自动切到静音并重试，避免真实视频对象已加载但时间停在 0 秒；真实测试账号会话直接打开真实播放器页后，点击播放按钮将 HTML video 从 `currentTime = 0` 推进到约 10 秒，`paused = false`，视频尺寸保持 1440×1080 且页面无播放失败提示。验证已覆盖 `npm.cmd run build`、in-app Browser 1420 真实播放页回归、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`；Electron/Tauri 内嵌 mpv 路径不受该 Web Preview fallback 影响。
+
+本轮详情页媒体信息已闭环：Emby/Jellyfin 详情请求三端同步补齐 `MediaSources`，PDP 新增“媒体信息”摘要区，真实条目详情页显示媒体源、MKV 容器、H264 1440×1080、AAC 音频、字幕数量、总码率、大小和直连/直流/转码能力；页面文本检查确认未显示完整 URL、Windows 路径或常见 Unix 媒体路径。验证已覆盖 `node --check electron\backend\emby.mjs`、`cargo fmt --manifest-path src-tauri\Cargo.toml`、`npm.cmd run build`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、in-app Browser 1420 真实详情页目检、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`。
 
 ---
 
