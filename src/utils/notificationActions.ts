@@ -1,6 +1,7 @@
 import type { Router } from "vue-router";
 
 import type { AppNotification, NotificationAction } from "@/types/models";
+import { useDownloadsStore } from "@/stores/downloads";
 
 function objectPayload(action: NotificationAction): Record<string, unknown> {
   return action.payload && typeof action.payload === "object"
@@ -30,6 +31,14 @@ export async function runNotificationAction(
           ? { name: "downloads", query: { task: taskId } }
           : { name: "downloads" },
       );
+      break;
+    }
+    case "retry": {
+      const taskId = stringValue(objectPayload(action).taskId) ?? notification.sourceId ?? null;
+      if (taskId) {
+        await useDownloadsStore().resume(taskId);
+        await router.push({ name: "downloads", query: { task: taskId } });
+      }
       break;
     }
     default:

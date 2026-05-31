@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-05-31（画质增强能力面板）
+> **更新时间**：2026-05-31（下载失败通知重试动作）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-05-31-2126-enhancement-capability-panel.md`](./CHANGE_LOG/2026-05-31-2126-enhancement-capability-panel.md)
+> **变更日志**：[`CHANGE_LOG/2026-05-31-2135-download-notification-retry.md`](./CHANGE_LOG/2026-05-31-2135-download-notification-retry.md)
 
 ---
 
@@ -436,6 +436,8 @@ npm.cmd run electron:build
 本轮下载中心操作补齐已接入：下载任务卡新增失败/取消重试、打开所在目录、移除记录、删除文件和记录入口，并显示本地文件名；任务操作带忙碌态和错误提示，操作区改为可换行按钮组以适配窄屏。验证已覆盖 `npm.cmd run build`、`npm.cmd run check:electron-commands`、行尾空白检查与 `npm.cmd run electron:build`；in-app Browser 尝试打开 `http://localhost:1420/downloads` 时被 Browser URL policy 拒绝，因此未做浏览器视觉目检。
 
 本轮下载通知任务定位已接入：Electron 下载完成、失败、取消会写入通知中心；下载完成通知携带 `taskId`，通知中心和 Toast 点击后进入下载页并定位高亮对应任务。验证已覆盖 `node --check electron\backend\store.mjs`、`node --check electron\backend\downloads.mjs`、`node --check electron\main.mjs`、`npm.cmd run check:electron-commands`、`npm.cmd run build`、行尾空白检查、`npm.cmd run electron:build` 与 in-app Browser 下载页空态目检。
+
+本轮下载失败通知重试动作已接入：Electron/Tauri 下载失败通知都会携带“重试”动作和 `taskId`，通知中心与 Toast 共用动作路由会调用下载 store 恢复任务，并跳转到 `/downloads?task=<id>` 定位对应任务。验证已覆盖 `node --check electron\backend\downloads.mjs`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`npm.cmd run check:electron-commands`、行尾空白检查、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run build` 与 `npm.cmd run electron:build`；当前未人工构造真实失败下载任务点击通知。
 
 本轮添加服务器账号入口可见性已修正：账号区移到线路区之前，用户名、密码、端口和自动识别入口在 1280x720 预览首屏同时可见；弹窗内容区补齐 `min-height: 0`，避免底部按钮栏压住输入。验证已覆盖 in-app Browser 目检、`npm.cmd run build` 与本阶段触碰文件行尾空白检查。
 

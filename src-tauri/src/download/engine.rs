@@ -368,6 +368,11 @@ impl DownloadEngine {
                             format!("{} 下载失败", task.title),
                         )
                         .body(error.unwrap_or_else(|| "未知错误".into()))
+                        .action(NotificationAction {
+                            kind: "retry".to_string(),
+                            label: "重试".to_string(),
+                            payload: json!({ "taskId": task.id }),
+                        })
                         .sticky()
                         .source(task.id.clone()),
                     );

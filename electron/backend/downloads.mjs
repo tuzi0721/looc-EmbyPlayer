@@ -325,6 +325,11 @@ export class DownloadManager {
             category: "download",
             title: `${task.title} 下载失败`,
             body: task.error || "未知错误",
+            action: {
+              kind: "retry",
+              label: "重试",
+              payload: { taskId: task.id },
+            },
             sticky: true,
             sourceId: task.id,
           });
