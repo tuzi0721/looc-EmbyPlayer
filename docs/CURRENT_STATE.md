@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-05-31（GitHub 远端内容替换准备）
+> **更新时间**：2026-05-31（Electron 内嵌播放 owned popup 宿主）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-05-31-1200-github-reset-current-worktree.md`](./CHANGE_LOG/2026-05-31-1200-github-reset-current-worktree.md)
+> **变更日志**：[`CHANGE_LOG/2026-05-31-1315-electron-embedded-popup-host.md`](./CHANGE_LOG/2026-05-31-1315-electron-embedded-popup-host.md)
 
 ---
 
@@ -95,6 +95,7 @@
 - IPC 模式：命名管道 `\\.\pipe\hills-lite-mpv-{uuid}`
 - error 123 已修复（`ServerOptions::create(&pipe_path)`）
 - **2026-05-31**：播放窗口内嵌宿主已接线：Electron `embed_*` 不再是 no-op，会创建应用托管宿主窗口并把原生句柄以 `--wid` 传给随包 mpv；Tauri IPC 后端也会在已有宿主窗口时传 `--wid` 并关闭独立窗口强制创建。前端默认在 Electron/Tauri 启用内嵌，Web Preview 关闭；Electron 真实内嵌播放 smoke 已在临时 userData 中完成并返回有效 mpv 时长/轨道/播放状态。
+- **2026-05-31**：Electron 内嵌播放宿主从主窗口内部 Win32 child HWND 改为 owned popup 宿主窗口，绕过 Chromium 合成层遮挡；本地 embedded smoke 的屏幕截图和 mpv 自截图均返回彩色视频像素，`electron:build` 已确认 `resources\electron_mpv_host.exe` 与随包 mpv 一起进入 unpacked 产物。
 - **2026-05-31**：Electron release 随包 `release-electron\win-unpacked\resources\mpv\mpv.exe` 已通过真实线路1播放冒烟；测试条目 `21648` 的 `mpv-direct-static` / `direct-stream` 播放源被 mpv accepted，IPC 快照读到 `durationMs = 866026`、`trackCount = 4`、H.264 视频、AAC 音频、`positionMs = 1250` 且 `paused = false` / `eof = false`。
 - **2026-05-31**：Electron release 随包 mpv 的真实控制项冒烟已覆盖字幕轨切换、Stats OSD 和截图；测试条目 `21648` 快照返回视频轨 1 条、音频轨 1 条、字幕轨 2 条，`sid = 1` 切换与 `sid = no` 关闭均成功，`stats/display-page-1` 成功，`screenshot-to-file` 生成 `6990409` bytes 临时 PNG 并已删除。
 - **2026-05-31**：Electron release 随包 mpv 的真实章节跳转冒烟已通过；章节样本条目 `16240` 的 `chapter-list` 返回 Opening / Story / Ending 三章，跳转到第二章 `90007ms` 后 IPC 快照返回 `positionMs = 90007`、`activeChapter = 1`。
@@ -412,6 +413,8 @@ npm.cmd run electron:build
 
 本轮播放窗口内嵌宿主接线已完成：前端在 Electron/Tauri 运行时启用内嵌，Electron `embed_*` 改为创建应用托管宿主窗口并把原生句柄传给 mpv，Tauri IPC 启动 mpv 时也补齐 `--wid`；控制栏显示时的嵌入 rect 会避开顶部/底部控制区。验证已覆盖 `node --check electron\backend\mpv.mjs`、`node --check electron\main.mjs`、`npm.cmd run check:electron-commands`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run build`、行尾空白检查、Electron 运行时 `embed_*` 命令 smoke、Electron 临时 userData 真实内嵌播放 smoke 与 `npm.cmd run electron:build`；真实播放 smoke 返回有效时长、4 条轨道和播放中状态，验证过程未写入密码、token 或完整播放 URL。
 
+本轮 Electron 内嵌黑屏修复已闭环：原 Win32 child HWND 会被 Chromium 合成层挡住，已改为由主窗口拥有的无边框 popup 宿主窗口；mpv 自截图与屏幕截图均返回彩色视频像素，恢复硬解设置后 smoke 仍通过。验证已覆盖 `node --check electron\backend\mpv.mjs`、`node --check electron\main.mjs`、`node --check scripts\smoke-electron-embedded-local.mjs`、`node --check scripts\check-electron-package.mjs`、`cargo fmt --manifest-path src-tauri\Cargo.toml`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run check:electron-commands`、Electron embedded smoke、`npm.cmd run build:electron-helper` 与 `npm.cmd run electron:build`；Electron unpacked 产物已确认包含 `resources\electron_mpv_host.exe`。
+
 本轮添加服务器账号入口可见性已修正：账号区移到线路区之前，用户名、密码、端口和自动识别入口在 1280x720 预览首屏同时可见；弹窗内容区补齐 `min-height: 0`，避免底部按钮栏压住输入。验证已覆盖 in-app Browser 目检、`npm.cmd run build` 与本阶段触碰文件行尾空白检查。
 
 本轮内嵌视觉临时脚本已清理：删除上一轮遗留的 `scripts/smoke-electron-embedded-visual.mjs`，并确认仓库内未检出测试账号名或密码明文。后续真实联调只使用临时进程参数或环境变量承载敏感字段。
@@ -420,4 +423,4 @@ npm.cmd run electron:build
 
 ## 10. Phase 2 待办
 
-- 播放窗口内嵌仍需人工视觉验收：Electron 真实内嵌播放 smoke 已确认 mpv 以宿主链路加载并播放，但还需要人工目检控制栏遮挡、全屏和 resize 体验。
+- 播放窗口内嵌已通过本地屏幕像素 smoke；后续仍建议用真实媒体人工走一遍控制栏显示/隐藏、全屏和窗口 resize 体验。

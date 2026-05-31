@@ -9,6 +9,8 @@ const sourceMpvDir = path.join(projectRoot, "src-tauri", "resources", "mpv");
 const packagedRoot = path.join(projectRoot, outputDir, "win-unpacked");
 const packagedResourcesDir = path.join(packagedRoot, "resources");
 const packagedMpvDir = path.join(packagedResourcesDir, "mpv");
+const sourceHelperPath = path.join(projectRoot, "src-tauri", "target", "release", "electron_mpv_host.exe");
+const packagedHelperPath = path.join(packagedResourcesDir, "electron_mpv_host.exe");
 
 const requiredRuntimeFiles = new Map([
   ["mpv.exe", 50 * 1024 * 1024],
@@ -56,6 +58,23 @@ const hasBundledMpvResource = extraResources.some((resource) => {
 if (!hasBundledMpvResource) {
   fail('package.json build.extraResources must copy "src-tauri/resources/mpv" to "mpv"');
 }
+const hasElectronMpvHostResource = extraResources.some((resource) => {
+  return (
+    resource?.from === "src-tauri/target/release/electron_mpv_host.exe" &&
+    resource?.to === "electron_mpv_host.exe"
+  );
+});
+if (!hasElectronMpvHostResource) {
+  fail('package.json build.extraResources must copy "electron_mpv_host.exe" to resources');
+}
+
+const sourceHelperStat = assertFile(sourceHelperPath, "source electron mpv host helper", 100 * 1024);
+const packagedHelperStat = assertFile(packagedHelperPath, "packaged electron mpv host helper", 100 * 1024);
+if (sourceHelperStat.size !== packagedHelperStat.size) {
+  fail(
+    `packaged electron mpv host helper size mismatch: source ${sourceHelperStat.size}, packaged ${packagedHelperStat.size}`,
+  );
+}
 
 const sourceFiles = listFiles(sourceMpvDir);
 if (sourceFiles.length === 0) fail("bundled mpv source directory is empty");
@@ -79,5 +98,5 @@ console.log(
   `Electron package integrity ok: ${sourceFiles.length} bundled mpv files copied to ${path.relative(
     projectRoot,
     packagedMpvDir,
-  )} (${totalMiB} MiB), app.asar present.`,
+  )} (${totalMiB} MiB), electron mpv host helper copied, app.asar present.`,
 );

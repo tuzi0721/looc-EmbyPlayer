@@ -235,22 +235,10 @@ function foregroundHillsWindow() {
   run("powershell", ["-NoProfile", "-Command", script]);
 }
 
-function captureAndAnalyze(bounds) {
-  const rect = {
-    x: Math.max(0, Math.round(bounds.x)),
-    y: Math.max(0, Math.round(bounds.y)),
-    width: Math.max(1, Math.round(bounds.width)),
-    height: Math.max(1, Math.round(bounds.height)),
-  };
+function analyzePng(imagePath) {
   const script = `
-    Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
-    $bmp = New-Object System.Drawing.Bitmap(${rect.width}, ${rect.height})
-    $gfx = [System.Drawing.Graphics]::FromImage($bmp)
-    $gfx.CopyFromScreen(${rect.x}, ${rect.y}, 0, 0, $bmp.Size)
-    $bmp.Save(${JSON.stringify(screenshotPath)}, [System.Drawing.Imaging.ImageFormat]::Png)
-    $gfx.Dispose()
-
+    $bmp = New-Object System.Drawing.Bitmap(${JSON.stringify(imagePath)})
     $total = 0
     $bright = 0
     $colorful = 0
@@ -268,18 +256,42 @@ function captureAndAnalyze(bounds) {
         if (($max - $min) -gt 36) { $colorful += 1 }
       }
     }
-    $bmp.Dispose()
     [PSCustomObject]@{
-      screenshotPath = ${JSON.stringify(screenshotPath)}
+      screenshotPath = ${JSON.stringify(imagePath)}
+      width = $bmp.Width
+      height = $bmp.Height
       total = $total
       bright = $bright
       colorful = $colorful
       brightRatio = if ($total -gt 0) { $bright / $total } else { 0 }
       colorfulRatio = if ($total -gt 0) { $colorful / $total } else { 0 }
     } | ConvertTo-Json -Compress
+    $bmp.Dispose()
   `;
   const result = run("powershell", ["-NoProfile", "-Command", script]);
   return JSON.parse(result.stdout);
+}
+
+function captureAndAnalyze(bounds) {
+  const rect = {
+    x: Math.max(0, Math.round(bounds.x)),
+    y: Math.max(0, Math.round(bounds.y)),
+    width: Math.max(1, Math.round(bounds.width)),
+    height: Math.max(1, Math.round(bounds.height)),
+  };
+  const script = `
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    $bmp = New-Object System.Drawing.Bitmap(${rect.width}, ${rect.height})
+    $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+    $gfx.CopyFromScreen(${rect.x}, ${rect.y}, 0, 0, $bmp.Size)
+    $bmp.Save(${JSON.stringify(screenshotPath)}, [System.Drawing.Imaging.ImageFormat]::Png)
+    $gfx.Dispose()
+
+    $bmp.Dispose()
+  `;
+  run("powershell", ["-NoProfile", "-Command", script]);
+  return analyzePng(screenshotPath);
 }
 
 await fsp.mkdir(tmpDir, { recursive: true });
@@ -375,12 +387,23 @@ try {
       await appRouter.push("/player/${itemId}");
       await wait(9000);
       const state = await window.hillsLite.invoke("get_state");
+      let mpvScreenshot = null;
+      let mpvScreenshotError = null;
+      try {
+        mpvScreenshot = await window.hillsLite.invoke("take_screenshot", {
+          payload: { title: "embedded-smoke", includeSubtitles: true },
+        });
+      } catch (error) {
+        mpvScreenshotError = error?.message ?? String(error);
+      }
       const stage = document.querySelector(".player__stage")?.getBoundingClientRect();
       return {
         route: appRouter.currentRoute.value.fullPath,
         bodyText: document.body.innerText.slice(0, 800),
         bounds: { x: window.screenX, y: window.screenY, width: window.outerWidth, height: window.outerHeight },
         stage: stage ? { x: stage.x, y: stage.y, width: stage.width, height: stage.height } : null,
+        mpvScreenshot,
+        mpvScreenshotError,
         state: {
           durationMs: state.durationMs,
           positionMs: state.positionMs,
@@ -395,6 +418,9 @@ try {
   foregroundHillsWindow();
   await wait(500);
   const pixels = captureAndAnalyze(startResult.bounds);
+  const mpvPixels = startResult.mpvScreenshot?.filePath
+    ? analyzePng(startResult.mpvScreenshot.filePath)
+    : null;
 
   await cdpEval(ws, `
     (async () => {
@@ -419,6 +445,9 @@ try {
     bodyText: startResult.bodyText,
     state: startResult.state,
     stage: startResult.stage,
+    mpvScreenshot: startResult.mpvScreenshot,
+    mpvScreenshotError: startResult.mpvScreenshotError,
+    mpvPixels,
     pixels,
   }, null, 2));
 

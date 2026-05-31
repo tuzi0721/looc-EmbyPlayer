@@ -1,4 +1,4 @@
-import { app, BaseWindow, BrowserWindow, dialog, globalShortcut, ipcMain, protocol, screen, shell } from "electron";
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, protocol, screen, shell } from "electron";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -49,9 +49,11 @@ const pendingProtocolUrls = [];
 let mainWindow = null;
 let secondaryBlackoutEnabled = false;
 let secondaryBlackoutWindows = [];
-let embedHostWindow = null;
 let embedHostRect = null;
 let embedHostParent = null;
+let embedHostProcess = null;
+let embedHostHwnd = null;
+let embedHostStdout = "";
 
 function queueProtocolUrl(url) {
   if (desktopIntegration) {
@@ -445,62 +447,122 @@ function detachEmbedHostParentListeners() {
 }
 
 function applyEmbedHostBounds() {
-  if (!embedHostWindow || embedHostWindow.isDestroyed() || !embedHostRect) return;
+  if (!embedHostProcess || !embedHostRect) return;
   const parent = getMainAppWindow();
   if (!parent || parent.isDestroyed()) return;
   const parentBounds = parent.getContentBounds();
-  embedHostWindow.setBounds({
-    x: Math.round(parentBounds.x + embedHostRect.x),
-    y: Math.round(parentBounds.y + embedHostRect.y),
-    width: Math.max(1, Math.round(embedHostRect.width)),
-    height: Math.max(1, Math.round(embedHostRect.height)),
+  sendEmbedHostCommand({
+    type: "rect",
+    x: parentBounds.x + embedHostRect.x,
+    y: parentBounds.y + embedHostRect.y,
+    width: embedHostRect.width,
+    height: embedHostRect.height,
+    scale: embedHostRect.scale ?? 1,
+    top: process.env.HILLS_ELECTRON_MPV_HOST_TOP === "1",
   });
 }
 
-function createEmbedHostWindow() {
-  const parent = getMainAppWindow();
-  if (!parent || parent.isDestroyed()) {
-    throw new Error("main window not ready for embedded mpv");
+function resolveEmbedHostHelperPath() {
+  const name = process.platform === "win32" ? "electron_mpv_host.exe" : "electron_mpv_host";
+  const candidates = [
+    path.join(process.resourcesPath ?? "", name),
+    path.join(rootDir, "src-tauri", "target", "debug", name),
+    path.join(rootDir, "src-tauri", "target", "release", name),
+  ];
+  return candidates.find((candidate) => candidate && fs.existsSync(candidate)) ?? null;
+}
+
+function sendEmbedHostCommand(command) {
+  if (!embedHostProcess?.stdin?.writable) return;
+  embedHostProcess.stdin.write(`${JSON.stringify(command)}\n`);
+}
+
+function startEmbedHostProcess(parent) {
+  if (embedHostProcess && embedHostHwnd) return Promise.resolve(embedHostHwnd);
+
+  const helperPath = resolveEmbedHostHelperPath();
+  if (!helperPath) {
+    throw new Error("electron mpv host helper not found; build src-tauri electron_mpv_host first");
   }
-  if (embedHostWindow && !embedHostWindow.isDestroyed()) return embedHostWindow;
 
   detachEmbedHostParentListeners();
   embedHostParent = parent;
-  embedHostWindow = new BaseWindow({
-    parent,
-    frame: false,
-    show: false,
-    focusable: false,
-    skipTaskbar: true,
-    resizable: false,
-    movable: false,
-    minimizable: false,
-    maximizable: false,
-    hasShadow: false,
-    backgroundColor: "#000000",
+  const parentHandle = nativeWindowHandleDecimal(parent);
+  embedHostProcess = spawn(helperPath, [parentHandle], {
+    windowsHide: true,
+    stdio: ["pipe", "pipe", "pipe"],
   });
-  embedHostWindow.setIgnoreMouseEvents(true, { forward: true });
-  embedHostWindow.once("closed", () => {
-    if (embedHostWindow?.isDestroyed()) embedHostWindow = null;
+  embedHostHwnd = null;
+  embedHostStdout = "";
+
+  embedHostProcess.stderr?.on("data", (chunk) => {
+    console.warn(`[electron_mpv_host] ${String(chunk)}`);
+  });
+  embedHostProcess.once("exit", () => {
+    embedHostProcess = null;
+    embedHostHwnd = null;
   });
   parent.on("move", applyEmbedHostBounds);
   parent.on("resize", applyEmbedHostBounds);
   parent.once("closed", destroyEmbedHostWindow);
-  applyEmbedHostBounds();
-  return embedHostWindow;
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("electron mpv host helper timed out")), 5000);
+    const onData = (chunk) => {
+      embedHostStdout += String(chunk);
+      let index = embedHostStdout.indexOf("\n");
+      while (index >= 0) {
+        const line = embedHostStdout.slice(0, index).trim();
+        embedHostStdout = embedHostStdout.slice(index + 1);
+        if (line) {
+          try {
+            const message = JSON.parse(line);
+            if (message.type === "ready" && message.hwnd) {
+              clearTimeout(timer);
+              embedHostProcess?.stdout?.off("data", onData);
+              embedHostHwnd = String(message.hwnd);
+              applyEmbedHostBounds();
+              resolve(embedHostHwnd);
+              return;
+            }
+          } catch (error) {
+            clearTimeout(timer);
+            reject(error);
+            return;
+          }
+        }
+        index = embedHostStdout.indexOf("\n");
+      }
+    };
+    embedHostProcess?.stdout?.on("data", onData);
+    embedHostProcess?.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
 }
 
 function destroyEmbedHostWindow() {
   detachEmbedHostParentListeners();
-  const win = embedHostWindow;
-  embedHostWindow = null;
+  const child = embedHostProcess;
+  embedHostProcess = null;
+  embedHostHwnd = null;
   embedHostRect = null;
-  if (win && !win.isDestroyed()) win.destroy();
+  if (child) {
+    if (child.stdin?.writable) child.stdin.write(`${JSON.stringify({ type: "destroy" })}\n`);
+    setTimeout(() => {
+      if (!child.killed) child.kill();
+    }, 500);
+  }
 }
 
 async function attachEmbeddedMpvHost() {
-  const host = createEmbedHostWindow();
-  await mpv.setEmbedWindowHandle(nativeWindowHandleDecimal(host));
+  const host = getMainAppWindow();
+  if (!host || host.isDestroyed()) {
+    throw new Error("main window not ready for embedded mpv");
+  }
+  const hwnd = await startEmbedHostProcess(host);
+  await mpv.setEmbedWindowHandle(hwnd);
   return null;
 }
 
@@ -510,19 +572,16 @@ async function setEmbeddedMpvRect(rect = {}) {
     y: Number(rect.y) || 0,
     width: Math.max(1, Number(rect.width) || 1),
     height: Math.max(1, Number(rect.height) || 1),
+    scale: Math.max(0.1, Number(rect.scale) || 1),
   };
   applyEmbedHostBounds();
   return null;
 }
 
 async function setEmbeddedMpvVisible(visible) {
-  if (!embedHostWindow || embedHostWindow.isDestroyed()) return null;
-  if (visible) {
-    applyEmbedHostBounds();
-    embedHostWindow.showInactive();
-  } else {
-    embedHostWindow.hide();
-  }
+  if (!embedHostProcess) return null;
+  sendEmbedHostCommand({ type: "visible", visible: Boolean(visible) });
+  if (visible) applyEmbedHostBounds();
   return null;
 }
 

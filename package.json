@@ -13,11 +13,12 @@
     "check:electron-dist": "node scripts/check-electron-dist.mjs",
     "check:electron-package": "node scripts/check-electron-package.mjs",
     "check:tauri-package": "node scripts/check-tauri-package.mjs",
+    "build:electron-helper": "cargo build --manifest-path src-tauri/Cargo.toml --release --bin electron_mpv_host",
     "preview": "vite preview",
     "electron:dev": "set HILLS_ELECTRON_DEV_SERVER_URL=http://127.0.0.1:1420&& electron electron/main.mjs",
-    "electron:preview": "npm run check:electron-commands && npm run build && electron electron/main.mjs",
-    "electron:build": "set ELECTRON_BUILDER_CACHE=.electron-builder-cache&& npm run check:electron-commands && npm run build && electron-builder --win dir && npm run check:electron-package",
-    "electron:dist": "set ELECTRON_BUILDER_CACHE=.electron-builder-cache&& npm run check:electron-commands && npm run build && electron-builder --win portable && npm run check:electron-package && npm run check:electron-dist",
+    "electron:preview": "npm run check:electron-commands && npm run build && npm run build:electron-helper && electron electron/main.mjs",
+    "electron:build": "set ELECTRON_BUILDER_CACHE=.electron-builder-cache&& npm run check:electron-commands && npm run build && npm run build:electron-helper && electron-builder --win dir && npm run check:electron-package",
+    "electron:dist": "set ELECTRON_BUILDER_CACHE=.electron-builder-cache&& npm run check:electron-commands && npm run build && npm run build:electron-helper && electron-builder --win portable && npm run check:electron-package && npm run check:electron-dist",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build && npm run check:tauri-package"
@@ -57,6 +58,10 @@
       {
         "from": "src-tauri/resources/mpv",
         "to": "mpv"
+      },
+      {
+        "from": "src-tauri/target/release/electron_mpv_host.exe",
+        "to": "electron_mpv_host.exe"
       }
     ],
     "win": {

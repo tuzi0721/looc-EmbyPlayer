@@ -157,6 +157,7 @@ export class MpvController {
     if (this.embedWindowHandle) {
       args.push(`--wid=${this.embedWindowHandle}`);
       args.push("--force-window=no");
+      args.push("--d3d11-flip=no");
     } else {
       args.push("--force-window=yes");
     }
