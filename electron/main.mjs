@@ -2102,6 +2102,13 @@ async function handleInvoke(command, args = {}) {
   if (command === "start_download") {
     return downloads.start(args.payload ?? {});
   }
+  if (command === "open_download_directory") {
+    const dir = await downloads.downloadDirectory();
+    await fs.mkdir(dir, { recursive: true });
+    const error = await shell.openPath(dir);
+    if (error) throw new Error(error);
+    return dir;
+  }
   if (command === "pause_download") {
     await downloads.pause(args.payload?.id);
     return null;

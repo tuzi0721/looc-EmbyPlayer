@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（真实服务器播放回归）
+> **更新时间**：2026-06-01（打开下载目录）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-0649-real-server-playback-smoke.md`](./CHANGE_LOG/2026-06-01-0649-real-server-playback-smoke.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-0658-open-download-directory.md`](./CHANGE_LOG/2026-06-01-0658-open-download-directory.md)
 
 ---
 
@@ -553,6 +553,8 @@ npm.cmd run electron:build
 本轮下载保存目录设置已闭环：设置模型新增 `downloadDirectory`，设置页“下载”面板可填写或在桌面运行时选择保存目录；Electron/Tauri 下载管理器创建新任务时会优先使用该目录，相对目录解析到应用 userData 下，未配置时继续使用默认下载目录。验证已覆盖 `node --check electron\backend\downloads.mjs`、`node --check electron\backend\store.mjs`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`npm.cmd run build`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、in-app Browser 1420 下载设置面板目检、Electron 目录解析 smoke、`npm.cmd run check:electron-commands`、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`。
 
 本轮真实服务器播放回归已闭环：in-app Browser 1420 使用真实测试账号会话打开首页，媒体库卡片加载正常；进入真实电影媒体库和真实条目详情页后点击“播放”，播放器创建真实 HTML 视频对象，`readyState = 4`，视频尺寸为 1440×1080，页面无播放失败提示。验证过程未写入账号、密码、token 或完整线路地址。
+
+本轮打开下载目录入口已闭环：设置页“下载”面板新增“打开”按钮，Electron/Tauri 桌面运行时会确保当前下载目录存在后调用系统文件管理器打开，并在面板内显示结果或错误；Web Preview 继续禁用桌面目录选择/打开/清除能力，避免假按钮。验证已覆盖 `node --check electron\main.mjs`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`npm.cmd run check:electron-commands`、`npm.cmd run build`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、in-app Browser 1420 下载设置面板目检、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`。
 
 ---
 

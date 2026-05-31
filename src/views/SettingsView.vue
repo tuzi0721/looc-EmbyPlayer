@@ -49,6 +49,8 @@ const settingActiveLineId = ref<string | null>(null);
 const externalPlayerPathDraft = ref("");
 const externalPlayerArgsDraft = ref("");
 const downloadDirectoryDraft = ref("");
+const downloadDirectoryBusy = ref(false);
+const downloadDirectoryStatus = ref("");
 const backupBusy = ref<"export" | "import" | null>(null);
 const backupStatus = ref("");
 const appVersion = "0.1.0";
@@ -300,6 +302,20 @@ async function pickDownloadDirectory() {
   if (typeof selected === "string" && selected.length > 0) {
     downloadDirectoryDraft.value = selected;
     await saveDownloadDirectory(selected);
+  }
+}
+
+async function openDownloadDirectory() {
+  if (!canPickDownloadDirectory.value || downloadDirectoryBusy.value) return;
+  downloadDirectoryBusy.value = true;
+  downloadDirectoryStatus.value = "";
+  try {
+    const path = await api.openDownloadDirectory();
+    downloadDirectoryStatus.value = path ? `已打开：${path}` : "已打开";
+  } catch (error) {
+    downloadDirectoryStatus.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    downloadDirectoryBusy.value = false;
   }
 }
 
@@ -1332,6 +1348,15 @@ const danmakuSummary = computed(() => {
           <button
             type="button"
             class="action-btn"
+            :disabled="!canPickDownloadDirectory || downloadDirectoryBusy"
+            @click="openDownloadDirectory"
+          >
+            <Icon icon="lucide:external-link" width="15" />
+            <span>{{ downloadDirectoryBusy ? "打开中" : "打开" }}</span>
+          </button>
+          <button
+            type="button"
+            class="action-btn"
             :disabled="!settings.settings.downloadDirectory"
             @click="downloadDirectoryDraft = ''; saveDownloadDirectory('')"
           >
@@ -1339,6 +1364,7 @@ const danmakuSummary = computed(() => {
             <span>清除</span>
           </button>
         </div>
+        <div v-if="downloadDirectoryStatus" class="status-line">{{ downloadDirectoryStatus }}</div>
       </div>
 
       <button class="row" @click="togglePanel('enhancement')">

@@ -342,6 +342,7 @@ export const api = {
   listDownloads: () => invoke<DownloadTask[]>("list_downloads"),
   startDownload: (payload: { itemId: string; stealth?: boolean; preferDirect?: boolean }) =>
     invoke<DownloadTask>("start_download", { payload }),
+  openDownloadDirectory: () => invoke<string>("open_download_directory"),
   pauseDownload: (id: string) => invoke<void>("pause_download", { payload: { id } }),
   resumeDownload: (id: string) => invoke<void>("resume_download", { payload: { id } }),
   cancelDownload: (id: string) => invoke<void>("cancel_download", { payload: { id } }),

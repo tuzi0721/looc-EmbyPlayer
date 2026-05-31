@@ -127,6 +127,7 @@ pub fn run() {
             commands::danmaku::fetch_danmaku,
             commands::danmaku::import_danmaku_xml,
             commands::download::list_downloads,
+            commands::download::open_download_directory,
             commands::download::start_download,
             commands::download::pause_download,
             commands::download::resume_download,

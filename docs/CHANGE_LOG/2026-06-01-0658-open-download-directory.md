@@ -1,0 +1,24 @@
+# 打开下载目录
+
+- **时间**：2026-06-01 06:58 (UTC+8)
+- **动机**：下载保存目录已经可配置，但设置页缺少直接打开当前下载目录的桌面入口；用户完成配置后还需要能快速确认目录和已下载文件位置。
+- **修改文件**：
+  - `src/api/index.ts`：新增 `openDownloadDirectory` API。
+  - `src/platform/index.ts`：Web Preview 对该命令返回空结果，避免假装具备桌面目录打开能力。
+  - `electron/main.mjs`：新增 `open_download_directory` handler，确保目录存在后调用系统文件管理器打开。
+  - `src-tauri/src/commands/download.rs`：新增 Tauri `open_download_directory` 命令。
+  - `src-tauri/src/lib.rs`：注册 Tauri 下载目录打开命令。
+  - `src/views/SettingsView.vue`：下载设置面板新增“打开”按钮、忙碌态和状态提示。
+- **风险**：Web Preview 中按钮仍按桌面能力禁用；Electron/Tauri 会创建下载目录后再打开，若系统文件管理器拒绝打开会显示错误文案。
+- **回滚**：移除 `open_download_directory` 命令注册、前端 API/按钮和本日志即可恢复到仅能选择/清除下载目录的状态。
+- **验证步骤**：
+  - `node --check electron\main.mjs`
+  - `cargo fmt --manifest-path src-tauri\Cargo.toml --check`
+  - `npm.cmd run check:electron-commands`
+  - `npm.cmd run build`
+  - `cargo check --manifest-path src-tauri\Cargo.toml --all-targets`
+  - in-app Browser 1420 打开 `/settings?c=downloads`，确认 Web Preview 中“选择 / 打开 / 清除”均因非桌面运行时禁用。
+  - `git diff --check`
+  - 敏感关键字扫描，确认未写入测试账号、密码、token 或完整线路地址。
+  - `npm.cmd run electron:build`
+- **结果**：通过；桌面运行时具备一键打开当前下载目录入口，Web Preview 不显示假可用能力。

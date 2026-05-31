@@ -34,6 +34,13 @@ pub async fn list_downloads(state: State<'_, Arc<AppState>>) -> AppResult<Vec<Do
 }
 
 #[tauri::command]
+pub async fn open_download_directory(state: State<'_, Arc<AppState>>) -> AppResult<String> {
+    let dir = state.downloads.download_dir()?;
+    open::that(&dir).map_err(|e| AppError::Other(format!("open download directory: {e}")))?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 pub async fn start_download(
     state: State<'_, Arc<AppState>>,
     payload: StartDownloadPayload,

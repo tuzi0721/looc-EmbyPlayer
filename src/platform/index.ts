@@ -1175,6 +1175,8 @@ function invokeWebFallback<T>(
     case "list_remote_sessions":
     case "list_global_shortcuts":
       return Promise.resolve([] as T);
+    case "open_download_directory":
+      return Promise.resolve("" as T);
     case "unread_count":
       return Promise.resolve(0 as T);
     case "list_views":
