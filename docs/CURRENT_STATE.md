@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（本地文件夹侧挂资源提示）
+> **更新时间**：2026-06-01（Web Preview 配置备份）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-0140-local-folder-sidecar-hints.md`](./CHANGE_LOG/2026-06-01-0140-local-folder-sidecar-hints.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-0346-web-preview-config-backup.md`](./CHANGE_LOG/2026-06-01-0346-web-preview-config-backup.md)
 
 ---
 
@@ -262,6 +262,7 @@
 - **2026-05-29**：设置页开始读取侧边栏传入的 `?c=` 分类参数，服务器、网络、播放器、快捷键、备份、外观、媒体库和关于分类会自动展开对应面板；侧边栏设置分类新增“备份”入口。
 - **2026-05-29**：Electron 设置页“关闭时最小化到托盘”接入真实 `closeToTray` 设置，默认开启；主窗口关闭时会按该设置隐藏到托盘或退出，托盘菜单“退出”仍强制关闭应用。
 - **2026-05-29**：Electron 设置页“备份与还原”接入配置导出/导入，备份文件包含设置、服务器、账号、当前账号和全局快捷键；导入默认合并同 id 项并刷新渲染层状态，不覆盖既有下载任务和通知。
+- **2026-06-01**：Web Preview 补齐配置备份与还原 fallback：`export_config` 会下载与 Electron 同结构的配置 JSON，`import_config` 会打开 JSON 文件选择器并按 `merge` 合并设置、服务器和账号；设置页“备份与还原”在 Electron/Web Preview 中可用，Tauri 未接入文件对话框前继续禁用。
 - **2026-05-29**：Electron 桌面集成接入托盘、`rodelplayer://` 协议入口、single instance 深链转发、关闭隐藏到托盘和播放期间 `powerSaveBlocker` 防息屏；`set_now_playing*` / `clear_now_playing` 不再是空操作，托盘 tooltip 会显示播放状态、活动下载数和未读通知数。
 - **2026-05-29**：Electron 弹幕源接入 DanDanPlay provider，`list_danmaku_providers` 返回真实列表，`fetch_danmaku` 会读取当前媒体详情、按剧集名匹配 DanDanPlay、拉取评论并转换为播放器弹幕格式；Electron 与 Tauri 侧使用一致的弹幕 User-Agent。
 - **2026-05-29**：Electron 下载中心接入基础下载管理器，支持 Emby/Jellyfin 直连下载、Range 断点续写、暂停/继续/取消/移除、本地 mpv 播放和启动后恢复 running 任务；下载任务保存 headers/User-Agent 以便默认无 `api_key` 的鉴权路径可恢复。
@@ -511,6 +512,8 @@ npm.cmd run electron:build
 本轮收藏本地文件已闭环：`localFiles` store 使用独立 `hills-lite:favorite-local-files` 本地 key 保存最多 32 个收藏文件；`/local-folder` 文件行支持星标收藏/取消收藏，侧边栏底部展示收藏本地文件并可清空，最近本地文件列表会避开已收藏项。设置页“文件服务 / 连接器”面板同步将“收藏本地文件”标记为可用。验证已覆盖 `npm.cmd run build`、in-app Browser 设置页与本地文件夹页面目检、`npm.cmd run electron:build`、行尾空白检查与敏感关键字扫描。
 
 本轮本地文件夹同名封面已闭环：Electron/Tauri `list_local_folder` 会为视频返回同名图片或目录级 `poster/cover/folder` 图片；Electron 使用 `hills-image://local/...` 安全读取本地图片，`/local-folder` 文件行显示缩略图并在失败时回退视频图标。设置页“文件服务 / 连接器”面板同步将“同名封面”标记为可用。验证已覆盖 `node --check electron\main.mjs`、`cargo fmt --manifest-path src-tauri\Cargo.toml`、`npm.cmd run build`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、in-app Browser 设置页与本地文件夹页面目检、`npm.cmd run electron:build`。
+
+本轮 Web Preview 配置备份已闭环：Web Preview `export_config` 会下载与 Electron 同结构的配置 JSON，`import_config` 会打开 JSON 文件选择器并按 `merge` 合并设置、服务器和账号；设置页“备份与还原”在 Electron/Web Preview 中可用，Tauri 未接入文件对话框前继续禁用。本轮同时用测试账号做真实服务器回归：临时新增两条 443 线路后自动识别为 Emby，新增服务器为追加而非覆盖，首页拉到 5 个媒体库；临时测试服务器已删除，验证过程未写入密码、token 或完整线路地址。验证已覆盖 `npm.cmd run build`、in-app Browser `/settings?c=backup` 冷刷新目检、行尾空白检查与敏感关键字扫描。
 
 ---
 

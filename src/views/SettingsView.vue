@@ -48,9 +48,10 @@ const externalPlayerPathDraft = ref("");
 const externalPlayerArgsDraft = ref("");
 const backupBusy = ref<"export" | "import" | null>(null);
 const backupStatus = ref("");
-const backupAvailable = typeof window !== "undefined" && Boolean(window.hillsLite);
 const appVersion = "0.1.0";
 const platformLabel = ref("...");
+const isElectronRuntime = typeof window !== "undefined" && Boolean(window.hillsLite);
+const backupAvailable = computed(() => isElectronRuntime || platformLabel.value === "web");
 
 type ServerLineDraft = {
   id?: string;

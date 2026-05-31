@@ -219,6 +219,146 @@ function saveWebPreviewState() {
   }
 }
 
+function webConfigBackup() {
+  return {
+    schema: "hills-lite-config",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    data: {
+      settings: getWebSettings(),
+      servers: clone(webServers),
+      accounts: clone(webAccounts),
+      activeAccountId: webActiveAccountId,
+      globalShortcuts: [],
+    },
+  };
+}
+
+function downloadWebBackup(backup: ReturnType<typeof webConfigBackup>): string {
+  const stamp = new Date().toISOString().slice(0, 10);
+  const fileName = `hills-lite-config-${stamp}.json`;
+  const blob = new Blob([`${JSON.stringify(backup, null, 2)}\n`], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  return fileName;
+}
+
+function pickWebBackupFile(): Promise<File | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    let settled = false;
+    const finish = (file: File | null) => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener("focus", onFocus);
+      input.remove();
+      resolve(file);
+    };
+    const onFocus = () => {
+      window.setTimeout(() => {
+        if (!input.files || input.files.length === 0) finish(null);
+      }, 300);
+    };
+
+    input.type = "file";
+    input.accept = "application/json,.json";
+    input.style.display = "none";
+    input.addEventListener("change", () => finish(input.files?.[0] ?? null), { once: true });
+    window.addEventListener("focus", onFocus, { once: true });
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
+function mergeWebById<T extends { id: string }>(existing: T[], incoming: T[]): T[] {
+  const map = new Map<string, T>();
+  for (const item of existing) {
+    if (item.id) map.set(item.id, item);
+  }
+  for (const item of incoming) {
+    if (item.id) map.set(item.id, item);
+  }
+  return [...map.values()];
+}
+
+function importedWebSettingsPatch(value: unknown): Partial<AppSettings> {
+  if (!value || typeof value !== "object") return {};
+  const patch = value as Partial<AppSettings>;
+  return {
+    ...patch,
+    hiddenServerIds: Array.isArray(patch.hiddenServerIds) ? patch.hiddenServerIds : [],
+  };
+}
+
+function importWebBackupData(parsed: any, mode: "merge" | "replace", filePath: string) {
+  const data = parsed?.data && typeof parsed.data === "object" ? parsed.data : parsed;
+  if (!data || typeof data !== "object") throw new Error("invalid backup file");
+
+  const importedServers = Array.isArray(data.servers)
+    ? data.servers.map(createWebServer)
+    : [];
+  const importedAccounts = Array.isArray(data.accounts)
+    ? data.accounts.map(normalizeWebAccount).filter((account: Account | null): account is Account => Boolean(account))
+    : [];
+  const settingsPatch = importedWebSettingsPatch(data.settings);
+  const normalizedMode = mode === "replace" ? "replace" : "merge";
+
+  if (normalizedMode === "replace") {
+    webSettings = {
+      ...WEB_DEFAULT_SETTINGS,
+      ...settingsPatch,
+      hiddenServerIds: Array.isArray(settingsPatch.hiddenServerIds)
+        ? settingsPatch.hiddenServerIds
+        : [],
+    };
+    webServers = importedServers;
+    webAccounts = importedAccounts;
+  } else {
+    webSettings = {
+      ...WEB_DEFAULT_SETTINGS,
+      ...webSettings,
+      ...settingsPatch,
+      hiddenServerIds: Array.isArray(settingsPatch.hiddenServerIds)
+        ? settingsPatch.hiddenServerIds
+        : webSettings.hiddenServerIds,
+    };
+    webServers = mergeWebById(webServers, importedServers);
+    webAccounts = mergeWebById(webAccounts, importedAccounts);
+  }
+
+  const activeAccountId = stringFrom(data.activeAccountId) ?? stringFrom(data.active_account_id);
+  if (activeAccountId && webAccounts.some((account) => account.id === activeAccountId)) {
+    webActiveAccountId = activeAccountId;
+  } else if (!webAccounts.some((account) => account.id === webActiveAccountId)) {
+    webActiveAccountId = webAccounts[0]?.id ?? null;
+  }
+
+  saveWebPreviewState();
+  return {
+    filePath,
+    mode: normalizedMode,
+    servers: importedServers.length,
+    accounts: importedAccounts.length,
+    shortcuts: 0,
+  };
+}
+
+async function importWebBackup(mode: "merge" | "replace" = "merge") {
+  const file = await pickWebBackupFile();
+  if (!file) return null;
+  const parsed = JSON.parse(await file.text());
+  return importWebBackupData(parsed, mode, file.name);
+}
+
 function detectWebKind(payload: any): ServerKind {
   const lines = Array.isArray(payload?.lines) ? payload.lines : [];
   const haystack = [
@@ -783,9 +923,18 @@ function invokeWebFallback<T>(
         episodeId: String((args?.payload as any)?.filePath ?? "web-preview"),
         comments: [],
       } as T);
-    case "export_config":
+    case "export_config": {
+      const backup = webConfigBackup();
+      const filePath = downloadWebBackup(backup);
+      return Promise.resolve({
+        filePath,
+        servers: backup.data.servers.length,
+        accounts: backup.data.accounts.length,
+        shortcuts: backup.data.globalShortcuts.length,
+      } as T);
+    }
     case "import_config":
-      return Promise.resolve(null as T);
+      return importWebBackup(((args?.payload as any)?.mode ?? "merge") as "merge" | "replace") as Promise<T>;
     case "open_external":
     case "open_path":
     case "show_mpv_stats_osd":
