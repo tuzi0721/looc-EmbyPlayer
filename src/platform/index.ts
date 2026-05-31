@@ -1363,8 +1363,11 @@ function invokeWebFallback<T>(
     case "open_external":
     case "open_path":
     case "show_mpv_stats_osd":
+    case "set_always_on_top":
     case "set_secondary_subtitle_track":
       return Promise.resolve(undefined as T);
+    case "set_secondary_display_blackout":
+      return Promise.resolve({ count: 0 } as T);
     default:
       return Promise.reject(new Error(`Web preview does not implement command: ${command}`));
   }

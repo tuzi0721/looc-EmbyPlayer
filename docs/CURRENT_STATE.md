@@ -172,6 +172,7 @@
 
 ## 6. 播放页可用性
 
+- **2026-06-01**：Web Preview 对播放器窗口类命令补齐安全兜底：`set_always_on_top` 返回成功 no-op，`set_secondary_display_blackout` 返回 `{ count: 0 }`，避免浏览器预览点击“置顶”或触发副屏遮黑清理时误报 `Web preview does not implement command`。真实播放页回归确认“置顶”按钮可切到“取消置顶”且无错误浮层；Electron/Tauri 仍走真实窗口后端。
 - **2026-05-31**：Electron release 随包 mpv 已完成线路1真实播放冒烟：后端构造 `mpv-direct-static` 播放源后，mpv 实际加载媒体并通过 IPC 返回时长、轨道、H.264 / AAC codec、硬解状态和前进中的播放位置，确认播放源切换基础链路不止停留在 URL 构造层。
 - **2026-05-31**：真实播放会话中继续验证了播放器控制面：同一线路1媒体内可通过 mpv IPC 切到字幕轨 `sid = 1` 并关闭字幕，mpv Stats OSD 页面命令可执行，截图命令可生成 PNG 后清理；该媒体没有章节，因此章节跳转仍待有章节样本继续验证。
 - **2026-05-31**：章节样本条目 `16240` 已完成真实跳转验证；mpv `chapter-list` 返回 3 章，播放器章节菜单依赖的章节时间和当前章节索引可从 IPC 快照取得，跳到 Story 章节后位置与目标一致。
