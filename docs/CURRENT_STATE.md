@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（设置页当前线路控制）
+> **更新时间**：2026-06-01（播放器播放按钮可识别）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-0539-settings-active-line-control.md`](./CHANGE_LOG/2026-06-01-0539-settings-active-line-control.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-0553-player-play-toggle-label.md`](./CHANGE_LOG/2026-06-01-0553-player-play-toggle-label.md)
 
 ---
 
@@ -536,6 +536,8 @@ npm.cmd run electron:build
 本轮线路测活自动切线三端对齐已闭环：Electron `test_lines` 与 Web Preview fallback 现在和 Tauri 一样，在 `autoFailover` 未关闭时会从启用且非 down 的线路中按优先级与延迟选择 active line；测活不再只更新健康状态而不影响后续播放线路。验证已覆盖 `node --check electron\main.mjs`、`npm.cmd run build`、in-app Browser Web Preview 真实测试账号临时添加两条 443 线路、自动识别 Emby、登录成功、真实线路测活返回秒级延迟、首页加载 5 个媒体库、详情页继续播放并创建 1920×1080 HTML 视频对象；验证过程未写入账号、密码、token 或完整线路地址。
 
 本轮设置页当前线路控制已闭环：服务器线路列表会在 active line 上显示“当前”，其他启用线路提供“设为当前”按钮并复用现有 `set_active_line` 命令；该入口修改服务器级默认线路，播放器会话级切源仍走播放器内播放源面板。验证已覆盖 `npm.cmd run build`、in-app Browser 使用真实测试账号当前会话打开 `/settings?c=servers`，确认“当前”标记可见，点击“设为当前”后标记移动到目标线路。
+
+本轮播放器播放按钮可识别性已闭环：真实测试账号临时会话在 1420 Web Preview 中确认服务器已连接、媒体库加载、电影列表与详情页可打开，进入播放器后拿到真实 1440×1080 HTML 视频对象；同时修复中央播放/暂停按钮没有可访问名称的问题，现在按钮会随状态暴露“播放”或“暂停”的 `title` / `aria-label`，便于用户悬停、辅助技术识别和自动化回归定位。验证已覆盖 `npm.cmd run build`、播放器页冷刷新按钮名称检查、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`；验证过程未写入账号、密码、token 或完整线路地址。
 
 ---
 

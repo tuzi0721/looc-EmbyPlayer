@@ -1934,7 +1934,13 @@ onBeforeUnmount(async () => {
             >
               <Icon icon="lucide:rotate-ccw" width="19" />
             </button>
-            <button class="iconbtn xl primary" data-control="play-toggle" @click="togglePlay">
+            <button
+              class="iconbtn xl primary"
+              data-control="play-toggle"
+              :title="paused ? '播放' : '暂停'"
+              :aria-label="paused ? '播放' : '暂停'"
+              @click="togglePlay"
+            >
               <Icon :icon="paused ? 'lucide:play' : 'lucide:pause'" width="26" />
             </button>
             <button
