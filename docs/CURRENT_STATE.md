@@ -454,6 +454,8 @@ npm.cmd run electron:build
 
 本轮 Git 同步状态已复核：工作树干净，`main` 本地比 `origin/main` 领先 7 个提交；上轮遗留的 `127.0.0.1:1421` 临时 Vite dev server 已关闭。再次执行 `git push origin main` 仍失败，错误为 `schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS`，当前判断是本机 Git 凭据缺失，不是代码冲突或远端拒绝；凭据恢复后可直接推送。
 
+本轮服务器延迟显示与添加弹窗适配已闭环：线路延迟统一经 `formatLatencyMs` 展示，低于 10ms 的正值显示为 `<10ms`，不再暴露 `1ms` 这类假精度；播放源切换菜单同步复用该格式。添加服务器弹窗改为视口约束宽度并允许底部按钮换行，窄宽度下“保存”按钮保持可见可点。验证已覆盖 `npm.cmd run build`、行尾空白检查、in-app Browser 1422 窄视口目检、本地 mock Emby 连续添加两个服务器并测活显示 `<10ms`，以及 `npm.cmd run electron:build`。
+
 ---
 
 ## 10. Phase 2 待办

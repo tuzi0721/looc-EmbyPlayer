@@ -19,6 +19,7 @@ import { useSettingsStore } from "@/stores/settings";
 import type { DanmakuComment, MediaItem, MpvSnapshot, MpvTrackInfo, PictureMode } from "@/types/models";
 import { writeTextToClipboard } from "@/utils/clipboard";
 import { keyboardBindingsForActions, PLAYER_SHORTCUTS, type PlayerShortcutAction } from "@/utils/keyboardShortcuts";
+import { formatLatencyMs } from "@/utils/latency";
 import { mediaItemImageUrl, type MediaImageType } from "@/utils/mediaImages";
 
 const props = defineProps<{ id: string }>();
@@ -568,7 +569,7 @@ function lineMeta(line: PlaybackLineOption): string {
   if (!line.enabled) return "已停用";
   const parts = [
     line.status && line.status !== "unknown" ? line.status : null,
-    line.latencyMs != null ? `${line.latencyMs} ms` : null,
+    formatLatencyMs(line.latencyMs),
   ].filter(Boolean);
   return parts.join(" · ") || "可用";
 }

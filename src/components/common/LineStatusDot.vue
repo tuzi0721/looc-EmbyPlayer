@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { LineStatus } from "@/types/models";
+import { formatLatencyMs } from "@/utils/latency";
 
 const props = defineProps<{
   status?: LineStatus | null;
@@ -23,12 +24,13 @@ const tone = computed(() => {
       return "var(--line-unknown)";
   }
 });
+const latencyLabel = computed(() => formatLatencyMs(props.latencyMs));
 </script>
 
 <template>
   <span class="line-status" :class="{ 'is-compact': compact }">
     <span class="dot" :style="{ background: tone, boxShadow: `0 0 8px ${tone}` }" />
-    <span v-if="!compact && latencyMs != null" class="lbl">{{ latencyMs }}ms</span>
+    <span v-if="!compact && latencyLabel" class="lbl">{{ latencyLabel }}</span>
   </span>
 </template>
 

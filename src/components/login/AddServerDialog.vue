@@ -302,8 +302,8 @@ async function submit() {
   padding: 24px;
 }
 .modal {
-  width: 600px;
-  max-width: 100%;
+  box-sizing: border-box;
+  width: min(600px, calc(100vw - 48px));
   max-height: 84vh;
   display: flex;
   flex-direction: column;
@@ -334,6 +334,7 @@ async function submit() {
 .modal__foot {
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
   gap: 10px;
   justify-content: flex-end;
   padding: 14px 20px;
@@ -503,6 +504,16 @@ textarea::placeholder {
   color: var(--danger);
 }
 @media (max-width: 620px) {
+  .modal-mask {
+    padding: 12px;
+  }
+  .modal {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
+  .modal__foot {
+    justify-content: stretch;
+  }
   .line-url,
   .account-grid {
     grid-template-columns: 1fr;
