@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-05-31（Electron 内嵌播放 owned popup 宿主）
+> **更新时间**：2026-05-31（GitHub 远端覆盖推送完成）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-05-31-1315-electron-embedded-popup-host.md`](./CHANGE_LOG/2026-05-31-1315-electron-embedded-popup-host.md)
+> **变更日志**：[`CHANGE_LOG/2026-05-31-1323-github-force-push-complete.md`](./CHANGE_LOG/2026-05-31-1323-github-force-push-complete.md)
 
 ---
 
