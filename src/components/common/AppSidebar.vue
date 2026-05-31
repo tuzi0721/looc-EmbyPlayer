@@ -5,6 +5,7 @@ import { Icon } from "@iconify/vue";
 
 import { useAuthStore } from "@/stores/auth";
 import { useDownloadsStore } from "@/stores/downloads";
+import { useLocalFilesStore } from "@/stores/localFiles";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useServerStore } from "@/stores/server";
 import { useSettingsStore } from "@/stores/settings";
@@ -19,6 +20,7 @@ const auth = useAuthStore();
 const serverStore = useServerStore();
 const settings = useSettingsStore();
 const downloads = useDownloadsStore();
+const localFiles = useLocalFilesStore();
 const notifications = useNotificationsStore();
 
 const showAdd = ref(false);
@@ -40,6 +42,7 @@ const activeDownloadsLabel = computed(() =>
 const unreadNotificationsLabel = computed(() =>
   notifications.unread > 99 ? "99+" : String(notifications.unread),
 );
+const recentLocalFiles = computed(() => localFiles.items.slice(0, 3));
 
 function loggedInOn(serverId: string): boolean {
   return auth.accounts.some((a) => a.serverId === serverId);
@@ -92,6 +95,13 @@ function gotoRemote() {
   router.push("/remote").catch(() => {});
 }
 
+function openLocalPath(filePath: string) {
+  localFiles.remember(filePath);
+  router
+    .push({ name: "player", params: { id: "local-file" }, query: { file: filePath } })
+    .catch(() => {});
+}
+
 async function openLocalFile() {
   const selected = await openFileDialog({
     multiple: false,
@@ -117,9 +127,7 @@ async function openLocalFile() {
     ],
   }).catch(() => null);
   if (typeof selected !== "string" || selected.length === 0) return;
-  router
-    .push({ name: "player", params: { id: "local-file" }, query: { file: selected } })
-    .catch(() => {});
+  openLocalPath(selected);
 }
 </script>
 
@@ -287,6 +295,25 @@ async function openLocalFile() {
         <Icon icon="lucide:file-video" width="14" />
         <span>打开本地文件</span>
       </button>
+
+      <div v-if="recentLocalFiles.length > 0" class="local-recent">
+        <div class="local-recent__head">
+          <span>最近本地文件</span>
+          <button class="iconbtn" aria-label="清空最近本地文件" @click="localFiles.clear()">
+            <Icon icon="lucide:x" width="13" />
+          </button>
+        </div>
+        <button
+          v-for="entry in recentLocalFiles"
+          :key="entry.filePath"
+          class="local-recent__item"
+          :title="entry.filePath"
+          @click="openLocalPath(entry.filePath)"
+        >
+          <Icon icon="lucide:file-video" width="14" />
+          <span>{{ entry.name }}</span>
+        </button>
+      </div>
 
       <button
         class="nav-btn settings-btn"
@@ -653,6 +680,54 @@ async function openLocalFile() {
   border-color: var(--accent);
   color: var(--accent);
   background: rgba(10, 132, 255, 0.06);
+}
+
+.local-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 2px 0 5px;
+}
+.local-recent__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 1px 6px;
+  color: var(--fg-tertiary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.local-recent__item {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--fg-secondary);
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+  transition:
+    background 160ms var(--easing-glide),
+    color 160ms var(--easing-glide);
+}
+.local-recent__item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg-primary);
+}
+.local-recent__item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-btn .chev {
