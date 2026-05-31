@@ -170,6 +170,46 @@ async function setActiveLine(serverId: string, lineId: string) {
   }
 }
 
+function lineUrlPreview(baseUrl: string): string {
+  const raw = baseUrl.trim();
+  if (!raw) return "未填写 URL";
+
+  try {
+    const url = new URL(raw);
+    const host = maskHostname(url.hostname);
+    const port = url.port ? `:${url.port}` : "";
+    const pathHint = url.pathname && url.pathname !== "/" ? "/..." : "";
+    return `${url.protocol}//${host}${port}${pathHint}`;
+  } catch {
+    if (raw.length <= 12) return raw;
+    return `${raw.slice(0, 6)}...${raw.slice(-4)}`;
+  }
+}
+
+function maskHostname(hostname: string): string {
+  const lower = hostname.toLowerCase();
+  if (
+    lower === "localhost" ||
+    lower === "127.0.0.1" ||
+    lower === "::1" ||
+    lower === "[::1]" ||
+    /^\d{1,3}(\.\d{1,3}){3}$/.test(lower)
+  ) {
+    return hostname;
+  }
+
+  const labels = hostname.split(".");
+  return labels
+    .map((label, index) => (index === labels.length - 1 ? label : maskHostLabel(label)))
+    .join(".");
+}
+
+function maskHostLabel(label: string): string {
+  if (label.length <= 1) return label;
+  if (label.length <= 3) return `${label[0]}*${label.slice(-1)}`;
+  return `${label.slice(0, 2)}***${label.slice(-1)}`;
+}
+
 async function onServerCreated(_id: string, loggedIn = false) {
   showAdd.value = false;
   openPanel.value = "servers";
@@ -820,7 +860,9 @@ const danmakuSummary = computed(() => {
             <li v-for="l in s.lines" :key="l.id">
               <div>
                 <div>{{ l.name }}</div>
-                <div class="dim">{{ l.baseUrl }}</div>
+                <div class="dim" title="编辑服务器可查看完整 URL">
+                  {{ lineUrlPreview(l.baseUrl) }}
+                </div>
                 <div class="line-meta">
                   <span v-if="l.id === s.activeLineId" class="line-pill active">当前</span>
                   <span v-if="l.userAgent" class="line-pill">UA</span>
