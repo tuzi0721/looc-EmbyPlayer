@@ -3074,6 +3074,13 @@ onBeforeUnmount(async () => {
   [data-hide-below="medium"] {
     display: none;
   }
+  .popup-menu--source {
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    bottom: 96px;
+    width: auto;
+  }
   .controls {
     gap: 8px;
   }
@@ -3100,6 +3107,9 @@ onBeforeUnmount(async () => {
   }
   .player__bottom {
     padding-inline: 12px;
+  }
+  .popup-menu--source {
+    bottom: 132px;
   }
   .controls {
     align-items: stretch;
