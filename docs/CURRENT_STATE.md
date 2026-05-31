@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-05-31（字幕堆叠 / 第二字幕轨）
+> **更新时间**：2026-05-31（截图避让重置）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-05-31-1402-subtitle-stacking.md`](./CHANGE_LOG/2026-05-31-1402-subtitle-stacking.md)
+> **变更日志**：[`CHANGE_LOG/2026-05-31-1411-screenshot-avoidance-reset.md`](./CHANGE_LOG/2026-05-31-1411-screenshot-avoidance-reset.md)
 
 ---
 
@@ -161,6 +161,7 @@
 - **2026-05-29**：截图提示条新增“复制路径”动作，优先使用浏览器 Clipboard API，失败时回退到隐藏文本框复制；复制成功或失败后都会保留本次截图路径，方便继续打开目录或重试。
 - **2026-05-29**：截图保存提示改为显示短文件名，并在播放器提示条内提供“打开目录”动作；Electron 通过 `shell.openPath` 打开目录，Tauri 通过 `open_path` 命令调用系统打开能力。
 - **2026-05-29**：设置页播放器面板和播放器设置菜单新增“截图包含字幕”开关，截图按钮会按该持久设置决定传给 mpv 的 screenshot 模式。
+- **2026-05-31**：播放器截图前会临时收起顶部/底部控制层、关闭临时面板并强制同步 embedded mpv rect，避免截图继承控制栏显示时的内嵌避让区域；截图完成或失败后恢复控制层提示计时。
 - **2026-05-29**：播放器底栏播放按钮两侧新增“后退 10 秒”和“前进 30 秒”按钮，复用现有 seek 逻辑，鼠标/触控操作不再只能依赖键盘左右键。
 - **2026-05-29**：设置页播放器面板新增“自动跳过片头/片尾”开关和片头/片尾秒数；播放器设置菜单占位项改为真实开关，播放页会在每个条目内至多自动跳一次片头，并在片尾且队列有下一项时自动切到下一项。
 - **2026-05-29**：字幕面板的“字幕大小”扩展为“字幕样式”，支持持久化比例、文字/描边颜色、描边宽度、阴影偏移、垂直位置和强制覆盖 ASS；Electron/Tauri 新播放会话会自动把这些设置套用到 mpv。
@@ -420,6 +421,8 @@ npm.cmd run electron:build
 本轮 ASSRT 在线字幕搜索已接入：Electron/Tauri 均新增 `search_online_subtitles` 与 `resolve_online_subtitle`，按 ASSRT 文档使用 `q`、`cnt`、`pos` 搜索并解析 `lang.desc`、`subtype`、评分与文件列表；播放器字幕面板新增 Token 输入、关键词搜索、结果列表和一键加载。验证已覆盖 `node --check electron\main.mjs`、`npm.cmd run check:electron-commands`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run build`、行尾空白检查与敏感关键字扫描；没有用户 ASSRT Token，未做真实 ASSRT 请求，in-app Browser 本轮拒绝打开 `127.0.0.1:1420`，因此未做浏览器视觉目检。
 
 本轮字幕堆叠已接入：Electron/Tauri 均新增 `set_secondary_subtitle_track`，通过 mpv `secondary-sid` / `secondary-sub-visibility` 选择第二字幕轨，播放器快照新增 `secondarySubId`；字幕面板在有多条字幕时显示“第二字幕”区，可关闭或选择第二字幕，并阻止主字幕与第二字幕选择同一轨道。验证已覆盖 `node --check electron\backend\mpv.mjs`、`node --check electron\main.mjs`、`npm.cmd run check:electron-commands`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run build`、行尾空白检查、本地 Vite HTTP 200 检查与 `npm.cmd run electron:build`；in-app Browser 本轮仍被 Browser URL policy 拒绝打开 `127.0.0.1`，因此未做浏览器视觉目检。
+
+本轮截图避让重置已接入：播放器执行截图前会清理控制栏隐藏计时器、关闭临时面板、临时收起顶部/底部控制层、等待渲染帧并强制同步 embedded mpv rect，减少截图继承控制栏显示状态下内嵌视频避让区域的概率；截图成功或失败后恢复控制层提示计时。验证已覆盖 `npm.cmd run build`、行尾空白检查与 `npm.cmd run electron:build`；未做真实播放器截图文件的人工视觉对比。
 
 本轮添加服务器账号入口可见性已修正：账号区移到线路区之前，用户名、密码、端口和自动识别入口在 1280x720 预览首屏同时可见；弹窗内容区补齐 `min-height: 0`，避免底部按钮栏压住输入。验证已覆盖 in-app Browser 目检、`npm.cmd run build` 与本阶段触碰文件行尾空白检查。
 

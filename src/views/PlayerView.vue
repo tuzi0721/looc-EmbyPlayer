@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { CSSProperties } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
@@ -885,9 +885,16 @@ function queueSubtitle(entry: (typeof queueEntries.value)[number]): string {
   return parts.join(" · ");
 }
 
+function clearControlsHideTimer() {
+  if (hideTimer != null) {
+    window.clearTimeout(hideTimer);
+    hideTimer = null;
+  }
+}
+
 function bumpControls() {
   showControls.value = true;
-  if (hideTimer != null) window.clearTimeout(hideTimer);
+  clearControlsHideTimer();
   hideTimer = window.setTimeout(() => (showControls.value = false), 3200);
 }
 
@@ -1168,6 +1175,22 @@ function scheduleEmbedRectSync() {
     embedResizeRaf = 0;
     void syncEmbedRect().catch((error) => console.warn(error));
   });
+}
+
+function nextAnimationFrame() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+}
+
+async function prepareScreenshotFrame() {
+  clearControlsHideTimer();
+  closePlayerPanels();
+  showControls.value = false;
+  await nextTick();
+  await nextAnimationFrame();
+  await syncEmbedRect();
+  await nextAnimationFrame();
 }
 
 async function setupEmbeddedVideoHost() {
@@ -1492,16 +1515,17 @@ async function takeScreenshot() {
   if (screenshotBusy.value) return;
   screenshotBusy.value = true;
   try {
+    await prepareScreenshotFrame();
     const result = await api.takeScreenshot({
       title: item.value?.Name ?? item.value?.SeriesName ?? "Hills Lite",
       includeSubtitles: settings.settings.screenshotIncludeSubtitles,
     });
     showScreenshotMessage(`截图已保存：${fileNameFromPath(result.filePath)}`, result.filePath);
-    showControls.value = true;
+    bumpControls();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     showScreenshotMessage(`截图失败：${message}`);
-    showControls.value = true;
+    bumpControls();
   } finally {
     screenshotBusy.value = false;
   }
@@ -1523,7 +1547,7 @@ onBeforeUnmount(async () => {
   document.removeEventListener("fullscreenchange", onFullscreenChange);
   document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
   blackoutSyncSeq += 1;
-  if (hideTimer != null) window.clearTimeout(hideTimer);
+  clearControlsHideTimer();
   if (screenshotMessageTimer != null) window.clearTimeout(screenshotMessageTimer);
   clearErrorCopyStatus();
   if (useHtmlVideo) {
