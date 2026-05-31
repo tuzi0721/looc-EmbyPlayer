@@ -105,12 +105,15 @@ const specialFeatures = ref<MediaItem[]>([]);
 const loadingSpecialFeatures = ref(false);
 const similarItems = ref<MediaItem[]>([]);
 const loadingSimilar = ref(false);
+const collectionItems = ref<MediaItem[]>([]);
+const loadingCollection = ref(false);
 let detailLoadSeq = 0;
 let episodeLoadSeq = 0;
 let suppressNextSeasonWatch = false;
 
 const isSeries = computed(() => item.value?.Type === "Series");
 const isEpisode = computed(() => item.value?.Type === "Episode");
+const isCollection = computed(() => item.value?.Type === "BoxSet");
 const seriesId = computed(() =>
   isSeries.value ? props.id : item.value?.SeriesId ?? null,
 );
@@ -581,8 +584,10 @@ async function loadDetail() {
   episodes.value = [];
   specialFeatures.value = [];
   similarItems.value = [];
+  collectionItems.value = [];
   loadingSpecialFeatures.value = false;
   loadingSimilar.value = false;
+  loadingCollection.value = false;
   loadingEpisodes.value = false;
   episodeLoadSeq += 1;
   suppressNextSeasonWatch = false;
@@ -592,6 +597,7 @@ async function loadDetail() {
     if (seq !== detailLoadSeq) return;
     if (seq === detailLoadSeq) void loadSpecialFeatures(props.id, seq);
     if (seq === detailLoadSeq) void loadSimilar(props.id, seq);
+    if (detail.Type === "BoxSet" && seq === detailLoadSeq) void loadCollectionItems(props.id, seq);
     if (isSeries.value) {
       const sresp = await api.listSeasons(props.id);
       if (seq !== detailLoadSeq) return;
@@ -656,6 +662,32 @@ async function loadSimilar(itemId: string, seq: number) {
     console.warn(error);
   } finally {
     if (seq === detailLoadSeq) loadingSimilar.value = false;
+  }
+}
+
+async function loadCollectionItems(itemId: string, seq: number) {
+  loadingCollection.value = true;
+  try {
+    const resp = await api.listItems({
+      parentId: itemId,
+      params: [
+        ["Recursive", "false"],
+        ["IncludeItemTypes", "Movie,Series"],
+        ["Fields", "PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo"],
+        ["SortBy", "SortName"],
+        ["SortOrder", "Ascending"],
+        ["Limit", "60"],
+      ],
+    });
+    if (seq === detailLoadSeq) {
+      collectionItems.value = filterJavItems(resp.Items, settings.settings.hideJavCodes).filter(
+        (candidate) => candidate.Id !== itemId,
+      );
+    }
+  } catch {
+    if (seq === detailLoadSeq) collectionItems.value = [];
+  } finally {
+    if (seq === detailLoadSeq) loadingCollection.value = false;
   }
 }
 
@@ -1160,6 +1192,40 @@ async function togglePlayed() {
               <small v-if="row.detail">{{ row.detail }}</small>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section v-if="isCollection && (loadingCollection || collectionItems.length)" class="related related--collection">
+        <header class="related__head">
+          <h2>合集内容</h2>
+        </header>
+
+        <div v-if="loadingCollection" class="related__loading">
+          <Icon icon="lucide:loader" width="18" class="spin" />
+        </div>
+
+        <div v-else class="related__scroll">
+          <button
+            v-for="child in collectionItems"
+            :key="child.Id"
+            type="button"
+            class="related-card"
+            @click="openRelatedItem(child)"
+          >
+            <div class="related-card__art">
+              <img
+                v-if="imageUrl(child, 'Primary', 420)"
+                :src="imageUrl(child, 'Primary', 420)!"
+                :alt="child.Name"
+                loading="lazy"
+                decoding="async"
+              />
+              <div v-else class="related-card__placeholder">{{ child.Name.slice(0, 1) }}</div>
+              <span class="related-card__kind">{{ relatedKindLabel(child) }}</span>
+            </div>
+            <div class="related-card__title">{{ child.Name }}</div>
+            <div class="related-card__sub">{{ relatedSubtitle(child) }}</div>
+          </button>
         </div>
       </section>
 
