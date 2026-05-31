@@ -128,6 +128,8 @@ export interface LocalFolderVideo {
   posterUrl?: string | null;
   nfoPath?: string | null;
   nfo?: LocalNfoMetadata | null;
+  sidecarSubtitleCount?: number;
+  sidecarDanmakuPath?: string | null;
   sizeBytes: number;
   modifiedAtMs?: number | null;
 }

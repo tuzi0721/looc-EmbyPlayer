@@ -86,6 +86,8 @@ pub struct LocalFolderVideo {
     pub poster_url: Option<String>,
     pub nfo_path: Option<String>,
     pub nfo: Option<LocalNfoMetadata>,
+    pub sidecar_subtitle_count: usize,
+    pub sidecar_danmaku_path: Option<String>,
     pub size_bytes: u64,
     pub modified_at_ms: Option<u64>,
 }
@@ -538,6 +540,42 @@ fn sidecar_subtitle_rank(video_stem: &str, subtitle_stem: &str) -> Option<usize>
         .then_some(1)
 }
 
+fn count_sidecar_subtitles(video_stem: &str, entries: &[std::fs::DirEntry]) -> usize {
+    entries
+        .iter()
+        .filter(|entry| entry.path().is_file())
+        .filter_map(|entry| {
+            let path = entry.path();
+            let ext = path.extension()?.to_str()?.to_lowercase();
+            sidecar_subtitle_ext_rank(&ext)?;
+            let subtitle_stem = path.file_stem()?.to_str()?;
+            sidecar_subtitle_rank(video_stem, subtitle_stem)
+        })
+        .take(8)
+        .count()
+}
+
+fn find_sidecar_danmaku_path(video_stem: &str, entries: &[std::fs::DirEntry]) -> Option<PathBuf> {
+    let by_name = entries
+        .iter()
+        .filter(|entry| entry.path().is_file())
+        .filter_map(|entry| {
+            Some((
+                entry.file_name().to_string_lossy().to_ascii_lowercase(),
+                entry.path(),
+            ))
+        })
+        .collect::<HashMap<_, _>>();
+
+    [
+        format!("{video_stem}.xml"),
+        format!("{video_stem}.danmaku.xml"),
+        format!("{video_stem}.comments.xml"),
+    ]
+    .into_iter()
+    .find_map(|candidate| by_name.get(&candidate.to_ascii_lowercase()).cloned())
+}
+
 fn find_sidecar_subtitles(video_path: &Path) -> Vec<SidecarSubtitle> {
     let Some(dir) = video_path.parent() else {
         return Vec::new();
@@ -715,7 +753,7 @@ fn scan_local_folder_dir(
     let (poster_by_stem, folder_poster) = build_local_poster_index(&entries);
     let nfo_by_stem = build_local_nfo_index(&entries);
 
-    for entry in entries {
+    for entry in &entries {
         if *truncated {
             break;
         }
@@ -787,6 +825,9 @@ fn scan_local_folder_dir(
             .as_ref()
             .map(|path| path.to_string_lossy().to_string());
         let nfo = nfo_path.as_deref().and_then(read_local_nfo);
+        let sidecar_subtitle_count = count_sidecar_subtitles(&stem, &entries);
+        let sidecar_danmaku_path = find_sidecar_danmaku_path(&stem, &entries)
+            .map(|path| path.to_string_lossy().to_string());
 
         items.push(LocalFolderVideo {
             file_path: path.to_string_lossy().to_string(),
@@ -797,6 +838,8 @@ fn scan_local_folder_dir(
             poster_url,
             nfo_path: nfo_path_string,
             nfo,
+            sidecar_subtitle_count,
+            sidecar_danmaku_path,
             size_bytes: metadata.len(),
             modified_at_ms,
         });

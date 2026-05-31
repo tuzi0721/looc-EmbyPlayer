@@ -256,6 +256,34 @@ async function findSidecarSubtitles(videoPath) {
     .slice(0, 8);
 }
 
+function countSidecarSubtitles(videoStem, dirents) {
+  return dirents
+    .filter((entry) => entry.isFile())
+    .filter((entry) => {
+      const ext = path.extname(entry.name).toLowerCase();
+      if (!sidecarSubtitleExtensions.has(ext)) return false;
+      const stem = path.basename(entry.name, ext);
+      return sidecarSubtitleRank(videoStem, stem) != null;
+    })
+    .slice(0, 8)
+    .length;
+}
+
+function findSidecarDanmakuPath(currentDir, videoStem, dirents) {
+  const byName = new Map(
+    dirents.filter((entry) => entry.isFile()).map((entry) => [entry.name.toLowerCase(), entry.name]),
+  );
+  for (const candidate of [
+    `${videoStem}.xml`,
+    `${videoStem}.danmaku.xml`,
+    `${videoStem}.comments.xml`,
+  ]) {
+    const fileName = byName.get(candidate.toLowerCase());
+    if (fileName) return path.join(currentDir, fileName);
+  }
+  return null;
+}
+
 async function addSidecarSubtitles(videoPath) {
   const subtitles = await findSidecarSubtitles(videoPath);
   let loaded = 0;
@@ -1054,6 +1082,8 @@ async function listLocalFolder(payload = {}) {
       const posterPath =
         posterIndex.byStem.get(stem)?.filePath ?? posterIndex.folderPoster?.filePath ?? null;
       const nfoPath = nfoIndex.get(stem)?.filePath ?? null;
+      const sidecarSubtitleCount = countSidecarSubtitles(stem, dirents);
+      const sidecarDanmakuPath = findSidecarDanmakuPath(currentDir, stem, dirents);
       items.push({
         filePath: entryPath,
         relativePath,
@@ -1063,6 +1093,8 @@ async function listLocalFolder(payload = {}) {
         posterUrl: posterPath ? localImageProtocolUrl(posterPath) : null,
         nfoPath,
         nfo: nfoPath ? await readLocalNfo(nfoPath) : null,
+        sidecarSubtitleCount,
+        sidecarDanmakuPath,
         sizeBytes: fileStat.size,
         modifiedAtMs: Number(fileStat.mtimeMs.toFixed(0)),
       });

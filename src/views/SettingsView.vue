@@ -554,14 +554,14 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
   {
     key: "sidecar-subtitles",
     label: "同名字幕",
-    detail: "本地播放会自动关联同目录同名字幕",
+    detail: "本地播放会自动关联同目录同名字幕，文件夹列表会提示数量",
     icon: "lucide:subtitles",
     status: "available",
   },
   {
     key: "sidecar-danmaku",
     label: "同名 XML 弹幕",
-    detail: "本地播放会尝试导入同名 XML 弹幕",
+    detail: "本地播放会尝试导入同名 XML 弹幕，文件夹列表会提示",
     icon: "lucide:message-square-text",
     status: "available",
   },

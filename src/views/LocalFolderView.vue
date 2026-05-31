@@ -61,6 +61,8 @@ const visibleItems = computed(() => {
           item.nfo?.title ?? "",
           item.nfo?.year ? String(item.nfo.year) : "",
           item.nfo?.overview ?? "",
+          item.sidecarSubtitleCount ? "字幕" : "",
+          item.sidecarDanmakuPath ? "弹幕 xml" : "",
         ]
           .join(" ")
           .toLocaleLowerCase()
@@ -155,6 +157,13 @@ function metadataSummary(item: LocalFolderVideo): string {
   const summary = [year, overview].filter(Boolean).join(" · ");
   if (summary) return summary;
   return item.nfoPath ? "NFO 元数据" : "";
+}
+
+function sidecarSummary(item: LocalFolderVideo): string {
+  const subtitles = item.sidecarSubtitleCount && item.sidecarSubtitleCount > 0
+    ? `字幕 ${item.sidecarSubtitleCount}`
+    : "";
+  return [subtitles, item.sidecarDanmakuPath ? "XML 弹幕" : ""].filter(Boolean).join(" · ");
 }
 
 function compareText(left: string, right: string): number {
@@ -437,6 +446,9 @@ watch(recursive, () => {
                   <strong>{{ displayTitle(item) }}</strong>
                   <small v-if="metadataSummary(item)" class="file-row__metadata">
                     {{ metadataSummary(item) }}
+                  </small>
+                  <small v-if="sidecarSummary(item)" class="file-row__sidecar">
+                    {{ sidecarSummary(item) }}
                   </small>
                   <small v-if="listing?.recursive && relativePathLabel(item)" class="file-row__path">
                     {{ relativePathLabel(item) }}
@@ -788,6 +800,9 @@ watch(recursive, () => {
 }
 .file-row__main .file-row__metadata {
   color: var(--fg-secondary);
+}
+.file-row__main .file-row__sidecar {
+  color: var(--accent);
 }
 .file-row__play {
   color: var(--fg-tertiary);

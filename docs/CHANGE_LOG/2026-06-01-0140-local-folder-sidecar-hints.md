@@ -1,0 +1,22 @@
+# 本地文件夹侧挂资源提示
+
+- **时间**：2026-06-01 01:40 (UTC+8)
+- **动机**：本地播放器已经会自动加载同名字幕和同名 XML 弹幕，但文件夹列表里看不出哪些视频旁边有这些侧挂资源。列表需要提前给用户可见提示。
+- **修改文件**：
+  - `electron/main.mjs` — `list_local_folder` 返回每个视频的 `sidecarSubtitleCount` 与 `sidecarDanmakuPath`，复用现有同名字幕匹配规则，并按播放器已有 XML 弹幕候选名检测。
+  - `src-tauri/src/commands/player.rs` — Tauri `list_local_folder` 同步返回侧挂字幕数量与 XML 弹幕路径。
+  - `src/api/index.ts` — 本地文件夹视频模型新增侧挂资源提示字段。
+  - `src/views/LocalFolderView.vue` — 文件行显示“字幕 N”和“XML 弹幕”提示，搜索也可匹配字幕/弹幕关键词。
+  - `src/views/SettingsView.vue` — 更新“同名字幕”和“同名 XML 弹幕”的能力说明，明确文件夹列表会提示。
+- **规则**：字幕提示沿用 `.srt/.ass/.ssa/.vtt` 与同名/语言后缀匹配；XML 弹幕提示沿用播放器自动尝试的 `同名.xml`、`同名.danmaku.xml`、`同名.comments.xml`。
+- **风险**：本阶段只做存在性和数量提示，不预览字幕内容、不解析 XML 弹幕，也不改变播放时的自动导入顺序。
+- **回滚**：移除侧挂字段、Electron/Tauri 检测逻辑、文件行提示和设置页说明即可恢复原状。
+- **验证步骤**：
+  - `node --check electron\main.mjs`
+  - `cargo fmt --manifest-path src-tauri\Cargo.toml`
+  - `npm.cmd run build`
+  - `cargo check --manifest-path src-tauri\Cargo.toml --all-targets`
+  - `npm.cmd run electron:build`
+  - `git diff --check`
+  - diff-only 敏感信息扫描
+- **结果**：通过；Electron 命令覆盖检查仍为 93/93，Electron unpacked 包完整性检查通过，仓库 diff 未写入测试账号、密码、token 或完整播放 URL。本阶段 in-app Browser 访问 `127.0.0.1:1420` 被浏览器安全策略拒绝，未执行浏览器目检。
