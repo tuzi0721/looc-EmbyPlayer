@@ -124,6 +124,7 @@ pub enum MpvCommand {
         /// (`--stream-record`) so the user can keep watching while the file is
         /// saved.
         stream_record_path: Option<String>,
+        autoload_subtitles: bool,
     },
     Pause,
     Resume,

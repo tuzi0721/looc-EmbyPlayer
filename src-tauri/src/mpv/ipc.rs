@@ -418,7 +418,13 @@ impl MpvBackend for MpvIpcBackend {
                 user_agent,
                 start_ms,
                 stream_record_path,
+                autoload_subtitles,
             } => {
+                self.set_property(
+                    "sub-auto",
+                    json!(if autoload_subtitles { "fuzzy" } else { "no" }),
+                )
+                .await?;
                 if let Some(ua) = user_agent {
                     self.set_property("user-agent", json!(ua)).await?;
                 }

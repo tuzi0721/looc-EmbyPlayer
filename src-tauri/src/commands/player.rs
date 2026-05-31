@@ -10,6 +10,7 @@ use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
+use crate::mpv::backend::MpvBackend;
 use crate::mpv::{MpvCommand, MpvSnapshot, PictureMode, SubtitleStyle};
 use crate::state::{AppState, CurrentPlaySession};
 
@@ -56,6 +57,17 @@ pub struct PlayFilePayload {
     #[serde(default)]
     pub start_ms: Option<i64>,
 }
+
+#[derive(Debug)]
+struct SidecarSubtitle {
+    path: PathBuf,
+    title: String,
+    rank: usize,
+    ext_rank: usize,
+}
+
+const SIDECAR_SUBTITLE_EXTENSIONS: &[(&str, usize)] =
+    &[("srt", 0), ("ass", 1), ("ssa", 2), ("vtt", 3)];
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -208,6 +220,7 @@ pub async fn play(state: State<'_, Arc<AppState>>, payload: PlayPayload) -> AppR
             user_agent: ua,
             start_ms: payload.start_ms,
             stream_record_path,
+            autoload_subtitles: true,
         })
         .await?;
 
@@ -241,6 +254,98 @@ pub async fn play(state: State<'_, Arc<AppState>>, payload: PlayPayload) -> AppR
     Ok(pb.play_session_id)
 }
 
+fn sidecar_subtitle_ext_rank(ext: &str) -> Option<usize> {
+    SIDECAR_SUBTITLE_EXTENSIONS
+        .iter()
+        .find_map(|(candidate, rank)| (*candidate == ext).then_some(*rank))
+}
+
+fn sidecar_subtitle_rank(video_stem: &str, subtitle_stem: &str) -> Option<usize> {
+    let video = video_stem.to_lowercase();
+    let subtitle = subtitle_stem.to_lowercase();
+    if subtitle == video {
+        return Some(0);
+    }
+    [".", " ", "_", "-"]
+        .iter()
+        .any(|separator| subtitle.starts_with(&format!("{video}{separator}")))
+        .then_some(1)
+}
+
+fn find_sidecar_subtitles(video_path: &Path) -> Vec<SidecarSubtitle> {
+    let Some(dir) = video_path.parent() else {
+        return Vec::new();
+    };
+    let Some(video_stem) = video_path.file_stem().and_then(|value| value.to_str()) else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+
+    let mut subtitles = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let path = entry.path();
+            if !path.is_file() {
+                return None;
+            }
+            let ext = path.extension()?.to_str()?.to_lowercase();
+            let ext_rank = sidecar_subtitle_ext_rank(&ext)?;
+            let subtitle_stem = path.file_stem()?.to_str()?;
+            let rank = sidecar_subtitle_rank(video_stem, subtitle_stem)?;
+            let title = path.file_name()?.to_string_lossy().into_owned();
+            Some(SidecarSubtitle {
+                path,
+                title,
+                rank,
+                ext_rank,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    subtitles.sort_by(|a, b| {
+        a.rank
+            .cmp(&b.rank)
+            .then(a.ext_rank.cmp(&b.ext_rank))
+            .then(a.title.cmp(&b.title))
+    });
+    subtitles.truncate(8);
+    subtitles
+}
+
+async fn add_sidecar_subtitles(backend: &Arc<dyn MpvBackend>, video_path: &Path) -> usize {
+    let subtitles = find_sidecar_subtitles(video_path);
+    let mut loaded = 0usize;
+    for (index, subtitle) in subtitles.into_iter().enumerate() {
+        let Ok(source) = url::Url::from_file_path(&subtitle.path).map(|url| url.to_string()) else {
+            continue;
+        };
+        if let Err(error) = backend
+            .execute(MpvCommand::AddSubtitle {
+                source,
+                title: Some(subtitle.title.clone()),
+                lang: None,
+                select: index == 0,
+            })
+            .await
+        {
+            tracing::warn!(
+                target = "player",
+                title = %subtitle.title,
+                error = %error,
+                "failed to load sidecar subtitle"
+            );
+            continue;
+        }
+        loaded += 1;
+    }
+    if loaded > 0 {
+        tracing::info!(target = "player", loaded, "loaded sidecar subtitles");
+    }
+    loaded
+}
+
 #[tauri::command]
 pub async fn play_file(state: State<'_, Arc<AppState>>, payload: PlayFilePayload) -> AppResult<()> {
     let path = PathBuf::from(&payload.file_path);
@@ -266,6 +371,7 @@ pub async fn play_file(state: State<'_, Arc<AppState>>, payload: PlayFilePayload
             user_agent: None,
             start_ms: payload.start_ms,
             stream_record_path: None,
+            autoload_subtitles: false,
         })
         .await?;
 
@@ -285,6 +391,7 @@ pub async fn play_file(state: State<'_, Arc<AppState>>, payload: PlayFilePayload
     {
         tracing::warn!(target = "player", error = %error, "failed to apply subtitle style");
     }
+    add_sidecar_subtitles(&backend, &path).await;
 
     *state.current_play_session.lock().await = None;
     Ok(())

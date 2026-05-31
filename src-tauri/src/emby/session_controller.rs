@@ -240,6 +240,7 @@ impl SessionController {
                 user_agent: ua,
                 start_ms: Some(start_ticks / 10_000),
                 stream_record_path: None,
+                autoload_subtitles: true,
             })
             .await?;
 

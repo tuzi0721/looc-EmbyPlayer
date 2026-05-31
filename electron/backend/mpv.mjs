@@ -269,8 +269,9 @@ export class MpvController {
     return response.data;
   }
 
-  async load({ url, headers = [], userAgent = null, startMs = null }) {
+  async load({ url, headers = [], userAgent = null, startMs = null, autoloadSubtitles = true }) {
     await this.ensureStarted();
+    await this.setProperty("sub-auto", autoloadSubtitles ? "fuzzy" : "no");
     if (userAgent) await this.setProperty("user-agent", userAgent);
     const headerFields = (Array.isArray(headers) ? headers : [])
       .filter(([key, value]) => key && value != null && value !== "")

@@ -1,0 +1,24 @@
+# 本地文件同名字幕自动关联
+
+- **时间**：2026-05-31 23:05 (UTC+8)
+- **动机**：文件源目标包含自动关联字幕。上一阶段已能打开单个本地视频，但同目录的同名字幕仍需用户手动添加，不符合本地文件播放的自然预期。
+- **修改文件**：
+  - `electron/main.mjs` — 本地文件播放后扫描同目录 `.srt/.ass/.ssa/.vtt`，完全同名优先，带语言/版本后缀的同名字幕次之；首条字幕自动选中，其余加入但不抢当前字幕。
+  - `electron/backend/mpv.mjs` — `load()` 支持 `autoloadSubtitles`，本地文件播放会关闭 mpv 模糊自动字幕扫描，避免和应用侧确定性加载产生重复字幕轨。
+  - `src-tauri/src/commands/player.rs` — Tauri `play_file` 同步扫描并加载同名字幕。
+  - `src-tauri/src/mpv/*.rs`、`src-tauri/src/commands/download.rs`、`src-tauri/src/emby/session_controller.rs` — `MpvCommand::Load` 增加 `autoload_subtitles` 参数；远端播放和下载任务本地回放保持默认自动字幕策略，本地文件入口关闭自动扫描。
+  - `scripts/smoke-electron-local-file.mjs` — smoke 同时生成同名 `.srt`，要求 mpv 快照出现且仅出现一条字幕轨，并验证该字幕被选中。
+- **风险**：当前只关联视频同目录、同文件名前缀的常见字幕格式，不做递归目录扫描，也不解析语言偏好；后续可以在设置里加入选择策略。
+- **回滚**：移除 sidecar 扫描/加载函数，把 `autoloadSubtitles` / `autoload_subtitles` 参数恢复为默认 mpv 行为，并把 smoke 的字幕断言撤回即可。
+- **验证步骤**：
+  - `node --check electron\backend\mpv.mjs`
+  - `node --check electron\main.mjs`
+  - `node --check scripts\smoke-electron-local-file.mjs`
+  - `cargo fmt --manifest-path src-tauri\Cargo.toml`
+  - `npm.cmd run check:electron-commands`
+  - `cargo check --manifest-path src-tauri\Cargo.toml --all-targets`
+  - `npm.cmd run build`
+  - `node scripts\smoke-electron-local-file.mjs`
+  - `git diff --check`
+  - `npm.cmd run electron:build`
+- **结果**：通过；Electron 本地文件 smoke 返回 8 秒视频、3 条总轨道、1 条字幕轨，选中字幕为 `sample-local-file.srt`，未再出现重复字幕轨；Electron unpacked 包完整性检查通过。

@@ -176,6 +176,7 @@ pub async fn play_local(
             user_agent: None,
             start_ms: payload.start_ms,
             stream_record_path: None,
+            autoload_subtitles: true,
         })
         .await?;
     Ok(())

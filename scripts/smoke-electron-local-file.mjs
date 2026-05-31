@@ -3,11 +3,12 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const devServerUrl = process.env.HILLS_SMOKE_DEV_SERVER_URL ?? "http://127.0.0.1:1420";
+const devServerUrl = process.env.HILLS_SMOKE_DEV_SERVER_URL ?? "http://localhost:1420";
 const remotePort = Number(process.env.HILLS_SMOKE_CDP_PORT ?? 9352);
 const tmpDir = path.join(os.tmpdir(), `hills-lite-local-file-${Date.now()}`);
 const userDataDir = path.join(tmpDir, "user-data");
 const videoPath = path.join(tmpDir, "sample-local-file.mp4");
+const subtitlePath = path.join(tmpDir, "sample-local-file.srt");
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -139,6 +140,11 @@ run("ffmpeg", [
   "-shortest",
   videoPath,
 ]);
+await fsp.writeFile(
+  subtitlePath,
+  "1\n00:00:00,000 --> 00:00:07,000\nHills Lite sidecar subtitle smoke\n",
+  "utf8",
+);
 
 const electron = path.resolve("node_modules/electron/dist/electron.exe");
 const child = spawn(electron, [`--remote-debugging-port=${remotePort}`, "electron/main.mjs"], {
@@ -190,6 +196,8 @@ try {
       });
       await wait(7000);
       const state = await window.hillsLite.invoke("get_state");
+      const tracks = Array.isArray(state.tracks) ? state.tracks : [];
+      const subtitleTracks = tracks.filter((track) => track.kind === "subtitle");
       let mpvScreenshot = null;
       let mpvScreenshotError = null;
       try {
@@ -212,7 +220,12 @@ try {
         state: {
           durationMs: state.durationMs,
           positionMs: state.positionMs,
-          trackCount: Array.isArray(state.tracks) ? state.tracks.length : 0,
+          trackCount: tracks.length,
+          subtitleCount: subtitleTracks.length,
+          selectedSubtitleTitle:
+            subtitleTracks.find((track) => track.selected)?.title ??
+            subtitleTracks.find((track) => track.selected)?.lang ??
+            null,
           paused: state.paused,
           eof: state.eof,
         },
@@ -240,7 +253,8 @@ try {
     startResult.routeStartsLocal &&
     startResult.localFileTitle === expectedTitle &&
     startResult.state.durationMs > 0 &&
-    startResult.state.trackCount >= 1 &&
+    startResult.state.trackCount >= 3 &&
+    startResult.state.subtitleCount >= 1 &&
     mpvPixels &&
     mpvPixels.brightRatio > 0.18 &&
     mpvPixels.colorfulRatio > 0.08;

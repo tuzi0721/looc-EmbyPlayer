@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-05-31（本地视频文件播放入口）
+> **更新时间**：2026-05-31（本地文件同名字幕自动关联）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-05-31-2247-local-file-playback.md`](./CHANGE_LOG/2026-05-31-2247-local-file-playback.md)
+> **变更日志**：[`CHANGE_LOG/2026-05-31-2305-local-sidecar-subtitles.md`](./CHANGE_LOG/2026-05-31-2305-local-sidecar-subtitles.md)
 
 ---
 
@@ -458,9 +458,11 @@ npm.cmd run electron:build
 
 本轮本地视频文件播放入口已闭环：侧边栏新增“打开本地文件”，Electron/Tauri 新增 `play_file`，播放器可通过 `/player/local-file?file=...` 直接加载单个本地视频并清空远端会话/队列状态；本地播放标题、桌面媒体状态、截图命名、字幕搜索和错误复制均使用本地文件名。Electron 运行日志仅记录文件名，不写完整本地路径。验证已覆盖 `node --check electron\main.mjs`、`node --check scripts\smoke-electron-local-file.mjs`、`npm.cmd run check:electron-commands`、`cargo fmt --manifest-path src-tauri\Cargo.toml`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run build`、Electron 本地文件 smoke、in-app Browser Web Preview 本地文件路由文案目检与 `npm.cmd run electron:build`。
 
+本轮本地文件同名字幕自动关联已闭环：本地视频播放会扫描同目录 `.srt/.ass/.ssa/.vtt`，完全同名优先，语言/版本后缀次之，首条字幕自动选中，其余加入但不抢当前字幕；本地文件入口会关闭 mpv 模糊自动字幕扫描，避免应用侧加载与 mpv 自动扫描产生重复字幕轨。Tauri `play_file` 同步接入该逻辑，远端播放与下载任务本地回放继续保持默认自动字幕策略。验证已覆盖 `node --check electron\backend\mpv.mjs`、`node --check electron\main.mjs`、`node --check scripts\smoke-electron-local-file.mjs`、`cargo fmt --manifest-path src-tauri\Cargo.toml`、`npm.cmd run check:electron-commands`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run build`、Electron 本地文件同名字幕 smoke、行尾空白检查与 `npm.cmd run electron:build`。
+
 ---
 
 ## 10. Phase 2 待办
 
 - 播放窗口内嵌已通过本地屏幕像素 smoke；后续仍建议用真实媒体人工走一遍控制栏显示/隐藏、全屏和窗口 resize 体验。
-- 文件源能力目前已支持“打开单个本地视频文件”；完整文件夹媒体库、最近本地文件、自动关联同名字幕仍待后续分阶段接入。
+- 文件源能力目前已支持“打开单个本地视频文件”和同名字幕自动关联；完整文件夹媒体库、最近本地文件、同名弹幕自动关联仍待后续分阶段接入。

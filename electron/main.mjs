@@ -179,6 +179,74 @@ function writePlaybackLog(event, details = {}) {
   });
 }
 
+const sidecarSubtitleExtensions = new Map([
+  [".srt", 0],
+  [".ass", 1],
+  [".ssa", 2],
+  [".vtt", 3],
+]);
+
+function sidecarSubtitleRank(videoStem, subtitleStem) {
+  const video = videoStem.toLowerCase();
+  const subtitle = subtitleStem.toLowerCase();
+  if (subtitle === video) return 0;
+  for (const separator of [".", " ", "_", "-"]) {
+    if (subtitle.startsWith(`${video}${separator}`)) return 1;
+  }
+  return null;
+}
+
+async function findSidecarSubtitles(videoPath) {
+  const dir = path.dirname(videoPath);
+  const videoStem = path.basename(videoPath, path.extname(videoPath));
+  const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []);
+  return entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => {
+      const ext = path.extname(entry.name).toLowerCase();
+      if (!sidecarSubtitleExtensions.has(ext)) return null;
+      const stem = path.basename(entry.name, ext);
+      const rank = sidecarSubtitleRank(videoStem, stem);
+      if (rank == null) return null;
+      return {
+        filePath: path.join(dir, entry.name),
+        fileName: entry.name,
+        rank,
+        extRank: sidecarSubtitleExtensions.get(ext) ?? 99,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.rank - b.rank || a.extRank - b.extRank || a.fileName.localeCompare(b.fileName))
+    .slice(0, 8);
+}
+
+async function addSidecarSubtitles(videoPath) {
+  const subtitles = await findSidecarSubtitles(videoPath);
+  let loaded = 0;
+  const loadedFiles = [];
+  for (const [index, subtitle] of subtitles.entries()) {
+    try {
+      await mpv.command([
+        "sub-add",
+        pathToFileURL(subtitle.filePath).toString(),
+        index === 0 ? "select" : "auto",
+        subtitle.fileName,
+      ]);
+      loaded += 1;
+      loadedFiles.push(subtitle.fileName);
+    } catch (error) {
+      console.warn("failed to load sidecar subtitle", subtitle.fileName, error);
+    }
+  }
+  if (loaded > 0) {
+    writePlaybackLog("sidecar_subtitles_loaded", {
+      fileName: path.basename(videoPath),
+      subtitleFiles: loadedFiles,
+    });
+  }
+  return loaded;
+}
+
 function sanitizeFilename(name, fallback = "screenshot") {
   const safe = String(name || fallback)
     .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "_")
@@ -767,9 +835,13 @@ async function playLocalFilePath(filePath, startMs = null) {
     headers: [],
     userAgent: null,
     startMs,
+    autoloadSubtitles: false,
   });
   await applySubtitleStyle(await store.getSettings()).catch((error) => {
     console.warn("failed to apply subtitle style", error);
+  });
+  await addSidecarSubtitles(resolved).catch((error) => {
+    console.warn("failed to scan sidecar subtitles", error);
   });
   currentPlaySession = null;
   writePlaybackLog("play_file_loaded", {

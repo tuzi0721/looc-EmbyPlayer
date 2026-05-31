@@ -82,7 +82,10 @@ impl MpvBackend for MpvEmbeddedBackend {
                 user_agent,
                 start_ms,
                 stream_record_path,
+                autoload_subtitles,
             } => {
+                m.set_property("sub-auto", if autoload_subtitles { "fuzzy" } else { "no" })
+                    .map_err(|e| AppError::Mpv(e.to_string()))?;
                 if let Some(ua) = user_agent {
                     m.set_property("user-agent", ua.as_str())
                         .map_err(|e| AppError::Mpv(e.to_string()))?;
