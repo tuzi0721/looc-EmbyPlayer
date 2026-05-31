@@ -325,11 +325,15 @@ async function exportConfig() {
   }
 }
 
-async function importConfig() {
+async function importConfig(mode: "merge" | "replace" = "merge") {
+  if (mode === "replace") {
+    const confirmed = window.confirm("替换导入会覆盖当前设置、服务器、账号和快捷键，继续吗？");
+    if (!confirmed) return;
+  }
   backupBusy.value = "import";
   backupStatus.value = "";
   try {
-    const result = await api.importConfig("merge");
+    const result = await api.importConfig(mode);
     if (!result) {
       backupStatus.value = "已取消";
       return;
@@ -339,7 +343,8 @@ async function importConfig() {
       serverStore.refresh().catch(() => {}),
       auth.refresh().catch(() => {}),
     ]);
-    backupStatus.value = `已导入：${result.servers} 个服务，${result.accounts} 个账号`;
+    const modeLabel = result.mode === "replace" ? "替换" : "合并";
+    backupStatus.value = `已${modeLabel}导入：${result.servers} 个服务，${result.accounts} 个账号`;
   } catch (error) {
     backupStatus.value = error instanceof Error ? error.message : String(error);
   } finally {
@@ -960,9 +965,13 @@ const danmakuSummary = computed(() => {
             <Icon icon="lucide:download" width="15" />
             <span>{{ backupBusy === "export" ? "导出中" : "导出配置" }}</span>
           </button>
-          <button class="action-btn" :disabled="backupBusy !== null" @click="importConfig">
+          <button class="action-btn" :disabled="backupBusy !== null" @click="importConfig('merge')">
             <Icon icon="lucide:upload" width="15" />
-            <span>{{ backupBusy === "import" ? "导入中" : "导入配置" }}</span>
+            <span>{{ backupBusy === "import" ? "导入中" : "合并导入" }}</span>
+          </button>
+          <button class="action-btn" :disabled="backupBusy !== null" @click="importConfig('replace')">
+            <Icon icon="lucide:file-warning" width="15" />
+            <span>替换导入</span>
           </button>
         </div>
         <div v-if="backupStatus" class="status-line">{{ backupStatus }}</div>
