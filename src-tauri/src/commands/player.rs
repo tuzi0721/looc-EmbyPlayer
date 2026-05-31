@@ -51,6 +51,14 @@ pub struct PlayExternalPayload {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PlayFilePayload {
+    pub file_path: String,
+    #[serde(default)]
+    pub start_ms: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TakeScreenshotPayload {
     #[serde(default)]
     pub title: Option<String>,
@@ -231,6 +239,55 @@ pub async fn play(state: State<'_, Arc<AppState>>, payload: PlayPayload) -> AppR
     });
 
     Ok(pb.play_session_id)
+}
+
+#[tauri::command]
+pub async fn play_file(state: State<'_, Arc<AppState>>, payload: PlayFilePayload) -> AppResult<()> {
+    let path = PathBuf::from(&payload.file_path);
+    if !path.is_file() {
+        return Err(AppError::NotFound(format!(
+            "local file missing: {}",
+            payload.file_path
+        )));
+    }
+    let path = std::fs::canonicalize(&path).map_err(|error| {
+        AppError::InvalidState(format!(
+            "invalid file path: {} ({})",
+            payload.file_path, error
+        ))
+    })?;
+    let url = url::Url::from_file_path(&path)
+        .map_err(|_| AppError::InvalidState(format!("invalid file path: {}", payload.file_path)))?;
+    let backend = state.mpv.backend();
+    backend
+        .execute(MpvCommand::Load {
+            url: url.to_string(),
+            headers: vec![],
+            user_agent: None,
+            start_ms: payload.start_ms,
+            stream_record_path: None,
+        })
+        .await?;
+
+    let settings = state.config.settings();
+    let subtitle_style = SubtitleStyle {
+        scale: settings.subtitle_scale,
+        text_color: settings.subtitle_text_color,
+        outline_color: settings.subtitle_outline_color,
+        outline_size: settings.subtitle_outline_size,
+        shadow_offset: settings.subtitle_shadow_offset,
+        position_pct: settings.subtitle_position_pct,
+        force_style: settings.subtitle_force_style,
+    };
+    if let Err(error) = backend
+        .execute(MpvCommand::SetSubtitleStyle(subtitle_style))
+        .await
+    {
+        tracing::warn!(target = "player", error = %error, "failed to apply subtitle style");
+    }
+
+    *state.current_play_session.lock().await = None;
+    Ok(())
 }
 
 #[tauri::command]

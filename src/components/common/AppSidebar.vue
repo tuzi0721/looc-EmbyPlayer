@@ -8,6 +8,7 @@ import { useDownloadsStore } from "@/stores/downloads";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useServerStore } from "@/stores/server";
 import { useSettingsStore } from "@/stores/settings";
+import { openFileDialog } from "@/platform";
 import LineStatusDot from "@/components/common/LineStatusDot.vue";
 import AddServerDialog from "@/components/login/AddServerDialog.vue";
 import { serverActiveLine, serverKindIcon, serverKindLabel } from "@/utils/serverVisuals";
@@ -89,6 +90,36 @@ function gotoDownloads() {
 }
 function gotoRemote() {
   router.push("/remote").catch(() => {});
+}
+
+async function openLocalFile() {
+  const selected = await openFileDialog({
+    multiple: false,
+    directory: false,
+    title: "打开本地视频",
+    filters: [
+      {
+        name: "Video",
+        extensions: [
+          "mp4",
+          "mkv",
+          "mov",
+          "avi",
+          "wmv",
+          "flv",
+          "webm",
+          "m4v",
+          "ts",
+          "m2ts",
+        ],
+      },
+      { name: "All", extensions: ["*"] },
+    ],
+  }).catch(() => null);
+  if (typeof selected !== "string" || selected.length === 0) return;
+  router
+    .push({ name: "player", params: { id: "local-file" }, query: { file: selected } })
+    .catch(() => {});
 }
 </script>
 
@@ -250,6 +281,11 @@ function gotoRemote() {
       <button class="add-srv" @click="showAdd = true">
         <Icon icon="lucide:plus" width="14" />
         <span>添加服务器</span>
+      </button>
+
+      <button class="add-srv" @click="openLocalFile">
+        <Icon icon="lucide:file-video" width="14" />
+        <span>打开本地文件</span>
       </button>
 
       <button

@@ -13,6 +13,7 @@ export const usePlayerStore = defineStore("player", () => {
   const playbackSource = ref<PlaybackSource | null>(null);
   const playSessionId = ref<string | null>(null);
   const itemId = ref<string | null>(null);
+  const localFileTitle = ref<string | null>(null);
   const queue = ref<string[]>([]);
   const queueIndex = ref(-1);
   let pollHandle: number | null = null;
@@ -34,13 +35,51 @@ export const usePlayerStore = defineStore("player", () => {
     itemId.value = payload.itemId;
     playSessionId.value = sessionId;
     playbackSource.value = source;
+    localFileTitle.value = null;
     lastEof = false;
     void pushNowPlaying();
     startPolling();
     return sessionId;
   }
 
+  function fileNameFromPath(filePath: string): string {
+    return filePath.split(/[\\/]/).filter(Boolean).pop() ?? filePath;
+  }
+
+  async function playFile(payload: {
+    filePath: string;
+    startMs?: number | null;
+    title?: string | null;
+  }) {
+    await api.playFile({ filePath: payload.filePath, startMs: payload.startMs ?? null });
+    itemId.value = null;
+    playSessionId.value = null;
+    playbackSource.value = null;
+    queue.value = [];
+    queueIndex.value = -1;
+    localFileTitle.value = payload.title?.trim() || fileNameFromPath(payload.filePath);
+    lastEof = false;
+    void pushNowPlaying();
+    startPolling();
+  }
+
   async function pushNowPlaying() {
+    if (localFileTitle.value) {
+      try {
+        await api.setNowPlaying({
+          title: localFileTitle.value,
+          subtitle: "本地文件",
+          durationMs: snapshot.value?.durationMs ?? null,
+          positionMs: snapshot.value?.positionMs ?? null,
+          thumbnailUrl: null,
+        });
+        await api.setNowPlayingStatus(snapshot.value?.paused ? "paused" : "playing");
+      } catch {
+        /* SMTC is best-effort */
+      }
+      return;
+    }
+
     if (!itemId.value) return;
     try {
       const lib = useLibraryStore();
@@ -148,6 +187,7 @@ export const usePlayerStore = defineStore("player", () => {
     playbackSource.value = null;
     itemId.value = null;
     playSessionId.value = null;
+    localFileTitle.value = null;
     try {
       await api.clearNowPlaying();
     } catch {
@@ -232,6 +272,18 @@ export const usePlayerStore = defineStore("player", () => {
       pollBusy = true;
       try {
         await refresh();
+        if (snapshot.value && localFileTitle.value) {
+          try {
+            await api.setNowPlayingStatus(snapshot.value.paused ? "paused" : "playing");
+            await api.setNowPlayingPosition({
+              positionMs: snapshot.value.positionMs,
+              durationMs: snapshot.value.durationMs,
+            });
+          } catch {
+            /* ignore */
+          }
+        }
+
         if (snapshot.value && itemId.value && playSessionId.value) {
           try {
             await api.reportPlaybackProgress({
@@ -283,9 +335,11 @@ export const usePlayerStore = defineStore("player", () => {
     playbackSource,
     playSessionId,
     itemId,
+    localFileTitle,
     queue,
     queueIndex,
     play,
+    playFile,
     playQueue,
     nextTrack,
     prevTrack,

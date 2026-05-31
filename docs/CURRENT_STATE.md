@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-05-31（Memory History 深链接冷开）
+> **更新时间**：2026-05-31（本地视频文件播放入口）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-05-31-2201-memory-history-deep-links.md`](./CHANGE_LOG/2026-05-31-2201-memory-history-deep-links.md)
+> **变更日志**：[`CHANGE_LOG/2026-05-31-2247-local-file-playback.md`](./CHANGE_LOG/2026-05-31-2247-local-file-playback.md)
 
 ---
 
@@ -456,8 +456,11 @@ npm.cmd run electron:build
 
 本轮服务器延迟显示与添加弹窗适配已闭环：线路延迟统一经 `formatLatencyMs` 展示，低于 10ms 的正值显示为 `<10ms`，不再暴露 `1ms` 这类假精度；播放源切换菜单同步复用该格式。添加服务器弹窗改为视口约束宽度并允许底部按钮换行，窄宽度下“保存”按钮保持可见可点。验证已覆盖 `npm.cmd run build`、行尾空白检查、in-app Browser 1422 窄视口目检、本地 mock Emby 连续添加两个服务器并测活显示 `<10ms`，以及 `npm.cmd run electron:build`。
 
+本轮本地视频文件播放入口已闭环：侧边栏新增“打开本地文件”，Electron/Tauri 新增 `play_file`，播放器可通过 `/player/local-file?file=...` 直接加载单个本地视频并清空远端会话/队列状态；本地播放标题、桌面媒体状态、截图命名、字幕搜索和错误复制均使用本地文件名。Electron 运行日志仅记录文件名，不写完整本地路径。验证已覆盖 `node --check electron\main.mjs`、`node --check scripts\smoke-electron-local-file.mjs`、`npm.cmd run check:electron-commands`、`cargo fmt --manifest-path src-tauri\Cargo.toml`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run build`、Electron 本地文件 smoke、in-app Browser Web Preview 本地文件路由文案目检与 `npm.cmd run electron:build`。
+
 ---
 
 ## 10. Phase 2 待办
 
 - 播放窗口内嵌已通过本地屏幕像素 smoke；后续仍建议用真实媒体人工走一遍控制栏显示/隐藏、全屏和窗口 resize 体验。
+- 文件源能力目前已支持“打开单个本地视频文件”；完整文件夹媒体库、最近本地文件、自动关联同名字幕仍待后续分阶段接入。

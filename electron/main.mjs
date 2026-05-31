@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, protocol, screen, shell } from "electron";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -753,6 +753,29 @@ async function runMpvIfRunning(action) {
   if (!mpv.isRunning()) return null;
   await action();
   return null;
+}
+
+async function playLocalFilePath(filePath, startMs = null) {
+  if (typeof filePath !== "string" || filePath.trim().length === 0) {
+    throw new Error("file path is required");
+  }
+  const resolved = path.resolve(filePath);
+  const stat = await fs.promises.stat(resolved).catch(() => null);
+  if (!stat?.isFile()) throw new Error(`local file missing: ${resolved}`);
+  await mpv.load({
+    url: pathToFileURL(resolved).toString(),
+    headers: [],
+    userAgent: null,
+    startMs,
+  });
+  await applySubtitleStyle(await store.getSettings()).catch((error) => {
+    console.warn("failed to apply subtitle style", error);
+  });
+  currentPlaySession = null;
+  writePlaybackLog("play_file_loaded", {
+    fileName: path.basename(resolved),
+    startMs: startMs ?? null,
+  });
 }
 
 async function preserveTrackSwitchCache() {
@@ -1717,6 +1740,10 @@ async function handleInvoke(command, args = {}) {
   }
   if (command === "play_local") {
     await downloads.playLocal(args.payload?.id, args.payload?.startMs ?? null);
+    return null;
+  }
+  if (command === "play_file") {
+    await playLocalFilePath(args.payload?.filePath, args.payload?.startMs ?? null);
     return null;
   }
   if (command === "list_notifications") return store.listNotifications();

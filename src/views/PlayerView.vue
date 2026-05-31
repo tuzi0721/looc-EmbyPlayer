@@ -229,7 +229,30 @@ function mergeDanmakuComments(comments: DanmakuComment[]): DanmakuComment[] {
 
 const currentItemId = computed(() => player.itemId ?? props.id);
 const item = computed(() => lib.itemCache[currentItemId.value] ?? lib.itemCache[props.id] ?? null);
+const localFilePath = computed(() => {
+  const value = route.query.file;
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+});
+const localFileTitle = computed(() =>
+  localFilePath.value ? fileNameFromPath(localFilePath.value) : null,
+);
+const isLocalFilePlayback = computed(() => Boolean(localFilePath.value));
+const displayTitle = computed(
+  () =>
+    item.value?.SeriesName ??
+    item.value?.Name ??
+    player.localFileTitle ??
+    localFileTitle.value ??
+    "本地文件",
+);
+const displaySubtitle = computed(() => {
+  if (item.value?.Type === "Episode") {
+    return `S${item.value.ParentIndexNumber ?? 1}:E${item.value.IndexNumber ?? "?"} - ${item.value.Name}`;
+  }
+  return isLocalFilePlayback.value ? "本地文件" : "";
+});
 const subtitleSearchQuery = computed(() => {
+  if (localFileTitle.value) return localFileTitle.value.replace(/\.[^.]+$/, "");
   const target = item.value;
   if (!target) return "";
   const names = [target.SeriesName, target.Name].filter(
@@ -1446,15 +1469,16 @@ function clearErrorCopyStatus() {
 }
 
 function formatPlayerErrorDetails(): string {
-  const title = item.value?.Name ?? item.value?.SeriesName ?? "Unknown";
+  const title = displayTitle.value;
   return [
     "Hills Lite player error",
     `Time: ${new Date().toISOString()}`,
     `ItemId: ${currentItemId.value}`,
     `Title: ${title}`,
+    localFilePath.value ? `File: ${localFilePath.value}` : null,
     "",
     errorText.value ?? "",
-  ].join("\n");
+  ].filter((line): line is string => line != null).join("\n");
 }
 
 async function copyPlayerError() {
@@ -1469,20 +1493,32 @@ async function copyPlayerError() {
 }
 
 async function startCurrentPlayback() {
-  if (!lib.itemCache[props.id]) {
-    await lib.loadItem(props.id);
-  }
-
   const start = Number(route.query.start ?? 0) || 0;
+  const filePath = localFilePath.value;
   const localId = (route.query.local as string | undefined) ?? null;
   const recordWhilePlaying = route.query.record === "1";
   const stealthWhenRecording = route.query.stealth !== "0";
 
-  if (localId) {
+  if (filePath) {
+    await player.playFile({
+      filePath,
+      startMs: start,
+      title: localFileTitle.value,
+    });
+  } else if (localId) {
+    if (!lib.itemCache[props.id]) {
+      await lib.loadItem(props.id);
+    }
     await api.playLocal(localId, start);
   } else if (useHtmlVideo) {
+    if (!lib.itemCache[props.id]) {
+      await lib.loadItem(props.id);
+    }
     await startHtmlPlayback(props.id, start);
   } else {
+    if (!lib.itemCache[props.id]) {
+      await lib.loadItem(props.id);
+    }
     await player.play({
       itemId: props.id,
       startMs: start,
@@ -1518,7 +1554,7 @@ async function takeScreenshot() {
   try {
     await prepareScreenshotFrame();
     const result = await api.takeScreenshot({
-      title: item.value?.Name ?? item.value?.SeriesName ?? "Hills Lite",
+      title: displayTitle.value,
       includeSubtitles: settings.settings.screenshotIncludeSubtitles,
     });
     showScreenshotMessage(`截图已保存：${fileNameFromPath(result.filePath)}`, result.filePath);
@@ -1681,10 +1717,8 @@ onBeforeUnmount(async () => {
             <Icon icon="lucide:chevron-left" width="22" />
           </button>
           <div class="player__title">
-            <h2>{{ item?.SeriesName ?? item?.Name }}</h2>
-            <p v-if="item?.Type === 'Episode'">
-              S{{ item.ParentIndexNumber ?? 1 }}:E{{ item.IndexNumber ?? "?" }} - {{ item.Name }}
-            </p>
+            <h2>{{ displayTitle }}</h2>
+            <p v-if="displaySubtitle">{{ displaySubtitle }}</p>
           </div>
           <div class="player__top-right">
             <div v-if="showNetworkSpeed" class="net-meter" title="网络读取速度">

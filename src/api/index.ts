@@ -321,6 +321,8 @@ export const api = {
     invoke<void>("remove_download", { payload: { id, deleteFile } }),
   playLocal: (id: string, startMs?: number | null) =>
     invoke<void>("play_local", { payload: { id, startMs } }),
+  playFile: (payload: { filePath: string; startMs?: number | null }) =>
+    invoke<void>("play_file", { payload }),
 
   // Notifications
   listNotifications: () => invoke<AppNotification[]>("list_notifications"),

@@ -1,0 +1,24 @@
+# 本地视频文件播放入口
+
+- **时间**：2026-05-31 22:47 (UTC+8)
+- **动机**：目标清单包含本地文件源能力，但当前只有下载任务的本地回放，普通用户无法直接从侧边栏选择一个本地视频并交给内嵌 mpv 播放。
+- **修改文件**：
+  - `src/components/common/AppSidebar.vue` — 侧边栏底部新增“打开本地文件”，通过系统文件选择器选择常见视频格式并进入播放器路由。
+  - `src/api/index.ts`、`src/platform/index.ts`、`src/stores/player.ts` — 新增 `play_file` 调用与本地文件播放态，清空远端播放会话/队列，并把本地文件标题写入桌面媒体状态。
+  - `src/views/PlayerView.vue` — 支持 `/player/local-file?file=...` 路由，跳过远端媒体库加载，顶部标题、截图命名、字幕搜索和错误复制均适配本地文件。
+  - `electron/main.mjs` — 新增本地文件加载逻辑，校验文件存在后以 `file://` URL 交给随包 mpv，并继续应用字幕样式；运行日志仅记录文件名，不记录完整本地路径。
+  - `src-tauri/src/commands/player.rs`、`src-tauri/src/lib.rs` — Tauri 同步新增 `play_file` 命令，规范化本地路径后加载 mpv，并清理当前远端播放会话。
+  - `scripts/smoke-electron-local-file.mjs` — 新增 Electron 本地文件 smoke，临时生成小视频并验证 `play_file` 后的 mpv 状态与截图像素。
+- **风险**：这是直接播放单个本地视频文件，不等同于完整文件源/文件夹媒体库；Web Preview 只展示路由与错误提示，实际本地文件播放需桌面版。
+- **回滚**：移除侧边栏入口、`play_file` API/IPC/命令和播放器本地文件路由分支，删除 smoke 脚本即可回到仅支持远端/下载任务播放的状态。
+- **验证步骤**：
+  - `node --check electron\main.mjs`
+  - `node --check scripts\smoke-electron-local-file.mjs`
+  - `npm.cmd run check:electron-commands`
+  - `cargo fmt --manifest-path src-tauri\Cargo.toml`
+  - `cargo check --manifest-path src-tauri\Cargo.toml --all-targets`
+  - `npm.cmd run build`
+  - `node scripts\smoke-electron-local-file.mjs`
+  - in-app Browser 打开 Web Preview 本地文件路由，确认标题为文件名、副标题为“本地文件”，并显示桌面版限制提示
+  - `npm.cmd run electron:build`
+- **结果**：通过；Electron smoke 返回 8 秒本地视频时长、2 条轨道、播放中状态和有效彩色视频截图像素；Web Preview 路由文案符合预期；Electron unpacked 包完整性检查通过。
