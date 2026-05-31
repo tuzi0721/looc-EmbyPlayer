@@ -1,4 +1,10 @@
-import { createMemoryHistory, createRouter, type RouteRecordRaw } from "vue-router";
+import {
+  createMemoryHistory,
+  createRouter,
+  createWebHistory,
+  type RouterHistory,
+  type RouteRecordRaw,
+} from "vue-router";
 
 const routes: RouteRecordRaw[] = [
   {
@@ -93,7 +99,14 @@ const routes: RouteRecordRaw[] = [
   },
 ];
 
+function createHillsHistory(): RouterHistory {
+  if (typeof window !== "undefined" && window.location.protocol !== "file:") {
+    return createWebHistory();
+  }
+  return createMemoryHistory();
+}
+
 export const router = createRouter({
-  history: createMemoryHistory(),
+  history: createHillsHistory(),
   routes,
 });
