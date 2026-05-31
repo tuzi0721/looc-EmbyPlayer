@@ -764,6 +764,17 @@ function openStudio(studio: StudioEntry) {
   }).catch(() => {});
 }
 
+function openPerson(person: MediaPerson) {
+  const name = person.Name?.trim();
+  if (!name) return;
+  const id = person.Id?.trim() || `name:${name}`;
+  router.push({
+    name: "person-detail",
+    params: { id },
+    query: { name },
+  }).catch(() => {});
+}
+
 function openRelatedItem(target: MediaItem) {
   router.push({
     name: "item-detail",
@@ -1203,7 +1214,13 @@ async function togglePlayed() {
       <section v-if="castPeople.length" class="cast">
         <h2>演职人员</h2>
         <div class="cast__scroll">
-          <div v-for="person in castPeople" :key="person.Id ?? person.Name" class="cast__item">
+          <button
+            v-for="person in castPeople"
+            :key="person.Id ?? person.Name"
+            type="button"
+            class="cast__item"
+            @click="openPerson(person)"
+          >
             <div class="cast__avatar">
               <img
                 v-if="personImageUrl(person)"
@@ -1216,7 +1233,7 @@ async function togglePlayed() {
             </div>
             <span class="cast__name">{{ person.Name }}</span>
             <span v-if="personRole(person)" class="cast__role">{{ personRole(person) }}</span>
-          </div>
+          </button>
         </div>
       </section>
 
@@ -1944,12 +1961,25 @@ async function togglePlayed() {
   overflow-x: auto;
 }
 .cast__item {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
   flex: 0 0 88px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.cast__item:hover .cast__avatar {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+.cast__item:hover .cast__name {
+  color: var(--accent-hover);
 }
 .cast__avatar {
   width: 72px;
@@ -1963,6 +1993,9 @@ async function togglePlayed() {
   color: var(--fg-secondary);
   font-size: 24px;
   font-weight: 700;
+  transition:
+    transform 180ms var(--easing-glide),
+    border-color 180ms var(--easing-glide);
 }
 .cast__avatar img {
   width: 100%;
