@@ -5,6 +5,7 @@ import { Icon } from "@iconify/vue";
 
 import { api } from "@/api";
 import { useAuthStore } from "@/stores/auth";
+import { useDownloadsStore } from "@/stores/downloads";
 import { useLibraryStore } from "@/stores/library";
 import { usePlayerStore } from "@/stores/player";
 import { useServerStore } from "@/stores/server";
@@ -18,6 +19,7 @@ const props = defineProps<{ id: string }>();
 const router = useRouter();
 const lib = useLibraryStore();
 const auth = useAuthStore();
+const downloads = useDownloadsStore();
 const serverStore = useServerStore();
 const playerStore = usePlayerStore();
 const settings = useSettingsStore();
@@ -29,6 +31,7 @@ const actionError = ref<string | null>(null);
 const shareStatus = ref<string | null>(null);
 const userDataUpdating = ref<"favorite" | "played" | null>(null);
 const playNavigating = ref(false);
+const downloadStarting = ref(false);
 const showStudioPopover = ref(false);
 let shareStatusTimer: number | null = null;
 
@@ -392,6 +395,20 @@ const playStateBadge = computed(() => {
   return null;
 });
 
+const desktopDownloadAvailable =
+  typeof window !== "undefined" &&
+  Boolean(window.hillsLite || window.__TAURI_INTERNALS__ || window.__TAURI__);
+
+const downloadTarget = computed(() => (isSeries.value ? continueEpisode.value : item.value));
+const canStartDownload = computed(() => {
+  const target = downloadTarget.value;
+  return (
+    desktopDownloadAvailable &&
+    Boolean(target?.Id) &&
+    (target?.Type === "Movie" || target?.Type === "Episode")
+  );
+});
+
 const activeSeasonName = computed(() => {
   const s = seasons.value.find((x) => x.Id === activeSeasonId.value);
   return s?.Name ?? "第 1 季";
@@ -564,6 +581,21 @@ async function playEpisode(ep: MediaItem) {
   }
   const start = Math.round((ep.UserData?.PlaybackPositionTicks ?? 0) / 10_000);
   await playTarget(ep.Id, start);
+}
+
+async function startDownload() {
+  const target = downloadTarget.value;
+  if (!target?.Id || !canStartDownload.value || downloadStarting.value) return;
+  downloadStarting.value = true;
+  actionError.value = null;
+  try {
+    const task = await downloads.start(target.Id, { preferDirect: true });
+    await router.push({ name: "downloads", query: { task: task.id } });
+  } catch (error) {
+    actionError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    downloadStarting.value = false;
+  }
 }
 
 function goBack() {
@@ -838,6 +870,20 @@ async function togglePlayed() {
                 {{ resumeMs > 0 ? "继续播放" : "播放" }}
               </button>
               <div class="hero__circles">
+                <button
+                  v-if="desktopDownloadAvailable"
+                  class="circle-btn"
+                  :disabled="!canStartDownload || downloadStarting"
+                  :title="downloadStarting ? '创建下载中' : canStartDownload ? '下载' : '当前条目不可下载'"
+                  :aria-label="downloadStarting ? '创建下载中' : canStartDownload ? '下载' : '当前条目不可下载'"
+                  @click="startDownload"
+                >
+                  <Icon
+                    :icon="downloadStarting ? 'lucide:loader' : 'lucide:download'"
+                    width="18"
+                    :class="{ spin: downloadStarting }"
+                  />
+                </button>
                 <button class="circle-btn" :title="shareStatus ?? '复制分享链接'" @click="shareItem">
                   <Icon icon="lucide:share-2" width="18" />
                 </button>
