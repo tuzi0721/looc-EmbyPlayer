@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（线路测活自动切线三端对齐）
+> **更新时间**：2026-06-01（设置页当前线路控制）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-0532-line-failover-parity.md`](./CHANGE_LOG/2026-06-01-0532-line-failover-parity.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-0539-settings-active-line-control.md`](./CHANGE_LOG/2026-06-01-0539-settings-active-line-control.md)
 
 ---
 
@@ -534,6 +534,8 @@ npm.cmd run electron:build
 本轮 Web Preview 路由地址同步已闭环：`src/router/index.ts` 现在按运行协议选择 history，非 `file://` 环境使用 `createWebHistory()`，打包本地文件继续使用 `createMemoryHistory()`。验证已覆盖 `npm.cmd run build`、`npm.cmd run electron:build`、`git diff --check`、in-app Browser 冷开 `/home` 后进入真实详情得到 `/item/16114`，点击继续播放后得到 `/player/16890?start=...&from=...`，播放器路由内 HTML 视频对象保留 1920×1080 媒体宽高；敏感关键字扫描确认未写入测试账号、密码、token 或完整线路地址。
 
 本轮线路测活自动切线三端对齐已闭环：Electron `test_lines` 与 Web Preview fallback 现在和 Tauri 一样，在 `autoFailover` 未关闭时会从启用且非 down 的线路中按优先级与延迟选择 active line；测活不再只更新健康状态而不影响后续播放线路。验证已覆盖 `node --check electron\main.mjs`、`npm.cmd run build`、in-app Browser Web Preview 真实测试账号临时添加两条 443 线路、自动识别 Emby、登录成功、真实线路测活返回秒级延迟、首页加载 5 个媒体库、详情页继续播放并创建 1920×1080 HTML 视频对象；验证过程未写入账号、密码、token 或完整线路地址。
+
+本轮设置页当前线路控制已闭环：服务器线路列表会在 active line 上显示“当前”，其他启用线路提供“设为当前”按钮并复用现有 `set_active_line` 命令；该入口修改服务器级默认线路，播放器会话级切源仍走播放器内播放源面板。验证已覆盖 `npm.cmd run build`、in-app Browser 使用真实测试账号当前会话打开 `/settings?c=servers`，确认“当前”标记可见，点击“设为当前”后标记移动到目标线路。
 
 ---
 

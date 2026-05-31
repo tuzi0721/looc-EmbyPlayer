@@ -44,6 +44,7 @@ const showAdd = ref(false);
 const openPanel = ref<PanelId>(null);
 const editingServerId = ref<string | null>(null);
 const savingServerId = ref<string | null>(null);
+const settingActiveLineId = ref<string | null>(null);
 const externalPlayerPathDraft = ref("");
 const externalPlayerArgsDraft = ref("");
 const backupBusy = ref<"export" | "import" | null>(null);
@@ -157,6 +158,15 @@ async function probe(id: string) {
     await serverStore.testLines(id);
   } finally {
     probing.value = null;
+  }
+}
+
+async function setActiveLine(serverId: string, lineId: string) {
+  settingActiveLineId.value = lineId;
+  try {
+    await serverStore.setActiveLine(serverId, lineId);
+  } finally {
+    settingActiveLineId.value = null;
   }
 }
 
@@ -812,9 +822,19 @@ const danmakuSummary = computed(() => {
                 <div>{{ l.name }}</div>
                 <div class="dim">{{ l.baseUrl }}</div>
                 <div class="line-meta">
+                  <span v-if="l.id === s.activeLineId" class="line-pill active">当前</span>
                   <span v-if="l.userAgent" class="line-pill">UA</span>
                   <span v-if="l.headers?.length" class="line-pill">Headers {{ l.headers.length }}</span>
                   <span v-if="l.enabled === false" class="line-pill muted">禁用</span>
+                  <button
+                    v-if="l.enabled !== false && l.id !== s.activeLineId"
+                    type="button"
+                    class="line-pill line-pill--button"
+                    :disabled="settingActiveLineId === l.id"
+                    @click="setActiveLine(s.id, l.id)"
+                  >
+                    {{ settingActiveLineId === l.id ? "切换中" : "设为当前" }}
+                  </button>
                 </div>
               </div>
               <LineStatusDot :status="l.lastStatus" :latency-ms="l.lastLatencyMs" />
@@ -1676,9 +1696,26 @@ const danmakuSummary = computed(() => {
   font-size: 10px;
   padding: 0 7px;
 }
+.line-pill.active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+}
 .line-pill.muted {
   color: var(--danger);
   border-color: rgba(255, 69, 58, 0.35);
+}
+.line-pill--button {
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+.line-pill--button:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.line-pill--button:disabled {
+  cursor: wait;
+  opacity: 0.58;
 }
 .server-edit {
   display: flex;
