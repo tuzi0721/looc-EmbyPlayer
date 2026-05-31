@@ -57,6 +57,13 @@ type MediaInfoRow = {
   value: string;
   detail?: string;
 };
+type MediaSourceCard = {
+  key: string;
+  title: string;
+  meta: string;
+  detail: string;
+  capabilities: string;
+};
 
 function clampPercent(value: number) {
   if (!Number.isFinite(value)) return 0;
@@ -248,6 +255,12 @@ function firstMediaStream(source: MediaSourceInfo | null, type: "video" | "audio
   return (source?.MediaStreams ?? []).find((stream) => streamType(stream) === type) ?? null;
 }
 
+function safeMediaSourceName(source: MediaSourceInfo, index: number) {
+  const name = source.Name?.trim() || "";
+  if (name && !/[\\/]/.test(name) && !/^https?:\/\//i.test(name)) return name;
+  return `版本 ${index + 1}`;
+}
+
 function mediaCapabilityText(source: MediaSourceInfo) {
   const parts: string[] = [];
   if (source.SupportsDirectPlay) parts.push("直连");
@@ -262,6 +275,40 @@ function pushMediaInfoRow(rows: MediaInfoRow[], row: MediaInfoRow) {
 }
 
 const primaryMediaSource = computed(() => item.value?.MediaSources?.[0] ?? null);
+
+const mediaSourceCards = computed<MediaSourceCard[]>(() => {
+  const sources = item.value?.MediaSources ?? [];
+  return sources.map((source, index) => {
+    const video = firstMediaStream(source, "video");
+    const audioStreams = (source.MediaStreams ?? []).filter((stream) => streamType(stream) === "audio");
+    const audio = audioStreams.find((stream) => stream.IsDefault) ?? audioStreams[0] ?? null;
+    const subtitleCount = (source.MediaStreams ?? []).filter((stream) => streamType(stream) === "subtitle").length;
+    const meta = [
+      source.Container?.trim().toUpperCase(),
+      streamResolution(video),
+      streamCodec(video),
+      streamCodec(audio),
+      formatBitrate(source.Bitrate),
+      formatBytes(source.Size),
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    const detail = [
+      audioStreams.length > 0 ? `${audioStreams.length} 音轨` : "",
+      subtitleCount > 0 ? `${subtitleCount} 字幕` : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    return {
+      key: source.Id?.trim() || `source-${index}`,
+      title: safeMediaSourceName(source, index),
+      meta,
+      detail,
+      capabilities: mediaCapabilityText(source),
+    };
+  });
+});
 
 const mediaInfoRows = computed<MediaInfoRow[]>(() => {
   const source = primaryMediaSource.value;
@@ -1193,6 +1240,16 @@ async function togglePlayed() {
             </div>
           </div>
         </div>
+        <div v-if="mediaSourceCards.length > 1" class="media-info__versions">
+          <article v-for="card in mediaSourceCards" :key="card.key" class="media-info__version">
+            <div>
+              <strong>{{ card.title }}</strong>
+              <span v-if="card.meta">{{ card.meta }}</span>
+              <small v-if="card.detail">{{ card.detail }}</small>
+            </div>
+            <em v-if="card.capabilities">{{ card.capabilities }}</em>
+          </article>
+        </div>
       </section>
 
       <section v-if="isCollection && (loadingCollection || collectionItems.length)" class="related related--collection">
@@ -1828,6 +1885,63 @@ async function togglePlayed() {
   margin-top: 3px;
   color: var(--fg-secondary);
   overflow-wrap: anywhere;
+}
+.media-info__versions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.media-info__version {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+.media-info__version div {
+  min-width: 0;
+}
+.media-info__version strong,
+.media-info__version span,
+.media-info__version small {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.media-info__version strong {
+  color: var(--fg-primary);
+  font-size: 13px;
+  line-height: 1.3;
+}
+.media-info__version span {
+  margin-top: 4px;
+  color: var(--fg-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.media-info__version small {
+  margin-top: 3px;
+  color: var(--fg-tertiary);
+  font-size: 11px;
+  line-height: 1.3;
+}
+.media-info__version em {
+  flex: 0 0 auto;
+  max-width: 96px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(168, 85, 247, 0.36);
+  background: rgba(168, 85, 247, 0.12);
+  color: var(--accent-hover);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.2;
+  text-align: center;
 }
 
 @media (max-width: 960px) {
