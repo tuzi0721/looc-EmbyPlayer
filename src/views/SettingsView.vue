@@ -524,6 +524,13 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
     status: "available",
   },
   {
+    key: "favorite-local-files",
+    label: "收藏本地文件",
+    detail: "当前客户端本地保存常用视频入口",
+    icon: "lucide:star",
+    status: "available",
+  },
+  {
     key: "sidecar-subtitles",
     label: "同名字幕",
     detail: "本地播放会自动关联同目录同名字幕",

@@ -64,6 +64,9 @@ const countLabel = computed(() => {
 const folderFavorited = computed(() =>
   Boolean(folderPath.value && localFiles.isFavoriteFolder(folderPath.value)),
 );
+const favoriteFileKeys = computed(
+  () => new Set(localFiles.favoriteItems.map((entry) => entry.filePath.toLowerCase())),
+);
 
 function fileNameFromPath(filePath: string): string {
   return filePath.split(/[\\/]/).filter(Boolean).pop() ?? filePath;
@@ -156,6 +159,14 @@ function toggleCurrentFolderFavorite() {
   const directory = listing.value?.directory ?? folderPath.value;
   if (!directory) return;
   localFiles.toggleFavoriteFolder(directory);
+}
+
+function isFavoriteVideo(item: LocalFolderVideo): boolean {
+  return favoriteFileKeys.value.has(item.filePath.toLowerCase());
+}
+
+function toggleFavoriteVideo(item: LocalFolderVideo) {
+  localFiles.toggleFavorite(item.filePath);
 }
 
 function openVideo(item: LocalFolderVideo, index: number) {
@@ -309,24 +320,36 @@ watch(recursive, () => {
 
       <ul v-else class="file-list">
         <li v-for="(item, index) in visibleItems" :key="item.filePath">
-          <button class="file-row" type="button" :title="item.filePath" @click="openVideo(item, index)">
-            <span class="file-row__icon">
-              <Icon icon="lucide:file-video" width="18" />
-            </span>
-            <span class="file-row__main">
-              <strong>{{ item.name }}</strong>
-              <small v-if="listing?.recursive && relativePathLabel(item)" class="file-row__path">
-                {{ relativePathLabel(item) }}
-              </small>
-              <small>
-                {{ item.extension.toUpperCase() }} · {{ formatBytes(item.sizeBytes) }}
-                <template v-if="formatDate(item.modifiedAtMs)">
-                  · {{ formatDate(item.modifiedAtMs) }}
-                </template>
-              </small>
-            </span>
-            <Icon icon="lucide:play" width="17" class="file-row__play" />
-          </button>
+          <div class="file-row" :title="item.filePath">
+            <button class="file-row__open" type="button" @click="openVideo(item, index)">
+              <span class="file-row__icon">
+                <Icon icon="lucide:file-video" width="18" />
+              </span>
+              <span class="file-row__main">
+                <strong>{{ item.name }}</strong>
+                <small v-if="listing?.recursive && relativePathLabel(item)" class="file-row__path">
+                  {{ relativePathLabel(item) }}
+                </small>
+                <small>
+                  {{ item.extension.toUpperCase() }} · {{ formatBytes(item.sizeBytes) }}
+                  <template v-if="formatDate(item.modifiedAtMs)">
+                    · {{ formatDate(item.modifiedAtMs) }}
+                  </template>
+                </small>
+              </span>
+              <Icon icon="lucide:play" width="17" class="file-row__play" />
+            </button>
+            <button
+              class="file-row__favorite"
+              :class="{ active: isFavoriteVideo(item) }"
+              type="button"
+              :title="isFavoriteVideo(item) ? '取消收藏文件' : '收藏文件'"
+              :aria-pressed="isFavoriteVideo(item)"
+              @click="toggleFavoriteVideo(item)"
+            >
+              <Icon icon="lucide:star" width="16" />
+            </button>
+          </div>
         </li>
       </ul>
     </div>
@@ -515,13 +538,21 @@ watch(recursive, () => {
   min-width: 0;
 }
 .file-row {
-  appearance: none;
-  border: none;
   border-bottom: 1px solid var(--separator);
   background: transparent;
   color: inherit;
   width: 100%;
   min-height: 58px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  align-items: stretch;
+}
+.file-row__open {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  min-width: 0;
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) 28px;
   align-items: center;
@@ -530,8 +561,21 @@ watch(recursive, () => {
   text-align: left;
   cursor: pointer;
 }
-.file-row:hover {
+.file-row__open:hover,
+.file-row__favorite:hover {
   color: var(--accent);
+}
+.file-row__favorite {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--fg-tertiary);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.file-row__favorite.active {
+  color: #fbbf24;
 }
 .file-row__icon {
   width: 34px;

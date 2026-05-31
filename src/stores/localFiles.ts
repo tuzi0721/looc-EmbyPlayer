@@ -7,6 +7,12 @@ export interface RecentLocalFile {
   openedAt: string;
 }
 
+export interface FavoriteLocalFile {
+  filePath: string;
+  name: string;
+  favoritedAt: string;
+}
+
 export interface RecentLocalFolder {
   folderPath: string;
   name: string;
@@ -20,6 +26,7 @@ export interface FavoriteLocalFolder {
 }
 
 const FILE_STORAGE_KEY = "hills-lite:recent-local-files";
+const FAVORITE_FILE_STORAGE_KEY = "hills-lite:favorite-local-files";
 const FOLDER_STORAGE_KEY = "hills-lite:recent-local-folders";
 const FAVORITE_FOLDER_STORAGE_KEY = "hills-lite:favorite-local-folders";
 const MAX_RECENTS = 8;
@@ -44,6 +51,24 @@ function normalizeEntry(value: unknown): RecentLocalFile | null {
         ? entry.name.trim()
         : fileNameFromPath(entry.filePath),
     openedAt,
+  };
+}
+
+function normalizeFavoriteEntry(value: unknown): FavoriteLocalFile | null {
+  if (!value || typeof value !== "object") return null;
+  const entry = value as Partial<FavoriteLocalFile>;
+  if (typeof entry.filePath !== "string" || entry.filePath.trim().length === 0) return null;
+  const favoritedAt =
+    typeof entry.favoritedAt === "string" && !Number.isNaN(Date.parse(entry.favoritedAt))
+      ? entry.favoritedAt
+      : new Date().toISOString();
+  return {
+    filePath: entry.filePath,
+    name:
+      typeof entry.name === "string" && entry.name.trim().length > 0
+        ? entry.name.trim()
+        : fileNameFromPath(entry.filePath),
+    favoritedAt,
   };
 }
 
@@ -85,11 +110,16 @@ function normalizeFavoriteFolderEntry(value: unknown): FavoriteLocalFolder | nul
 
 export const useLocalFilesStore = defineStore("localFiles", () => {
   const items = ref<RecentLocalFile[]>([]);
+  const favoriteItems = ref<FavoriteLocalFile[]>([]);
   const folderItems = ref<RecentLocalFolder[]>([]);
   const favoriteFolderItems = ref<FavoriteLocalFolder[]>([]);
 
   function saveFiles() {
     window.localStorage.setItem(FILE_STORAGE_KEY, JSON.stringify(items.value));
+  }
+
+  function saveFavoriteFiles() {
+    window.localStorage.setItem(FAVORITE_FILE_STORAGE_KEY, JSON.stringify(favoriteItems.value));
   }
 
   function saveFolders() {
@@ -115,6 +145,19 @@ export const useLocalFilesStore = defineStore("localFiles", () => {
         : [];
     } catch {
       items.value = [];
+    }
+
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(FAVORITE_FILE_STORAGE_KEY) ?? "[]");
+      favoriteItems.value = Array.isArray(parsed)
+        ? parsed
+            .map(normalizeFavoriteEntry)
+            .filter((entry): entry is FavoriteLocalFile => entry != null)
+            .sort((left, right) => Date.parse(right.favoritedAt) - Date.parse(left.favoritedAt))
+            .slice(0, MAX_FAVORITES)
+        : [];
+    } catch {
+      favoriteItems.value = [];
     }
 
     try {
@@ -179,6 +222,38 @@ export const useLocalFilesStore = defineStore("localFiles", () => {
     window.localStorage.removeItem(FILE_STORAGE_KEY);
   }
 
+  function isFavorite(filePath: string) {
+    const key = filePath.trim().toLowerCase();
+    if (!key) return false;
+    return favoriteItems.value.some((item) => item.filePath.toLowerCase() === key);
+  }
+
+  function toggleFavorite(filePath: string) {
+    const text = filePath.trim();
+    if (!text) return;
+    const key = text.toLowerCase();
+    if (isFavorite(text)) {
+      favoriteItems.value = favoriteItems.value.filter(
+        (item) => item.filePath.toLowerCase() !== key,
+      );
+    } else {
+      favoriteItems.value = [
+        {
+          filePath: text,
+          name: fileNameFromPath(text),
+          favoritedAt: new Date().toISOString(),
+        },
+        ...favoriteItems.value.filter((item) => item.filePath.toLowerCase() !== key),
+      ].slice(0, MAX_FAVORITES);
+    }
+    saveFavoriteFiles();
+  }
+
+  function clearFavoriteFiles() {
+    favoriteItems.value = [];
+    window.localStorage.removeItem(FAVORITE_FILE_STORAGE_KEY);
+  }
+
   function clearFolders() {
     folderItems.value = [];
     window.localStorage.removeItem(FOLDER_STORAGE_KEY);
@@ -220,11 +295,15 @@ export const useLocalFilesStore = defineStore("localFiles", () => {
 
   return {
     items,
+    favoriteItems,
     folderItems,
     favoriteFolderItems,
     remember,
     rememberFolder,
     clear,
+    isFavorite,
+    toggleFavorite,
+    clearFavoriteFiles,
     clearFolders,
     isFavoriteFolder,
     toggleFavoriteFolder,

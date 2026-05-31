@@ -42,7 +42,15 @@ const activeDownloadsLabel = computed(() =>
 const unreadNotificationsLabel = computed(() =>
   notifications.unread > 99 ? "99+" : String(notifications.unread),
 );
-const recentLocalFiles = computed(() => localFiles.items.slice(0, 3));
+const favoriteLocalFiles = computed(() => localFiles.favoriteItems.slice(0, 3));
+const favoriteLocalFileKeys = computed(
+  () => new Set(localFiles.favoriteItems.map((entry) => entry.filePath.toLowerCase())),
+);
+const recentLocalFiles = computed(() =>
+  localFiles.items
+    .filter((entry) => !favoriteLocalFileKeys.value.has(entry.filePath.toLowerCase()))
+    .slice(0, 3),
+);
 const favoriteLocalFolders = computed(() => localFiles.favoriteFolderItems.slice(0, 2));
 const favoriteLocalFolderKeys = computed(
   () => new Set(localFiles.favoriteFolderItems.map((entry) => entry.folderPath.toLowerCase())),
@@ -330,6 +338,25 @@ async function openLocalFolder() {
         <Icon icon="lucide:file-video" width="14" />
         <span>打开本地文件</span>
       </button>
+
+      <div v-if="favoriteLocalFiles.length > 0" class="local-recent">
+        <div class="local-recent__head">
+          <span>收藏本地文件</span>
+          <button class="iconbtn" aria-label="清空收藏本地文件" @click="localFiles.clearFavoriteFiles()">
+            <Icon icon="lucide:x" width="13" />
+          </button>
+        </div>
+        <button
+          v-for="entry in favoriteLocalFiles"
+          :key="entry.filePath"
+          class="local-recent__item"
+          :title="entry.filePath"
+          @click="openLocalPath(entry.filePath)"
+        >
+          <Icon icon="lucide:star" width="14" />
+          <span>{{ entry.name }}</span>
+        </button>
+      </div>
 
       <button
         class="add-srv"
