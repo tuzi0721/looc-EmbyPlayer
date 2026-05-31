@@ -101,7 +101,7 @@
 
 **当前实现**：IPC 使用 `--input-ipc-server=<pipe/socket>`（Windows 命名管道：`\\.\pipe\hills-lite-mpv-{uuid}`）；`ensure_started` 会在 mpv 进程死亡后自动重启连接。
 
-**检测与引导**：后端已实现 `detect_mpv` / `open_external`，前端 `MpvBanner` 已在 `App.vue` 挂载用于缺失提示与路径选择。
+**内置资源**：mpv 固定为应用随包播放核心；构建和打包只复制仓库内的 `src-tauri/resources/mpv`。禁止恢复本机 mpv 检测、下载引导、路径选择、`MpvBanner` 或 `detect_mpv` 类用户提示。mpv 更新只随应用版本迭代一起进入随包资源。
 
 ---
 

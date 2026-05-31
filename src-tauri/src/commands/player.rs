@@ -1,10 +1,16 @@
-use std::sync::Arc;
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+    sync::Arc,
+};
 
-use serde::Deserialize;
-use tauri::State;
+use chrono::Local;
+use serde::{Deserialize, Serialize};
+use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
+use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
-use crate::mpv::{MpvCommand, MpvSnapshot};
+use crate::mpv::{MpvCommand, MpvSnapshot, PictureMode, SubtitleStyle};
 use crate::state::{AppState, CurrentPlaySession};
 
 #[derive(Debug, Deserialize)]
@@ -15,6 +21,10 @@ pub struct PlayPayload {
     pub start_ms: Option<i64>,
     #[serde(default)]
     pub prefer_direct: bool,
+    #[serde(default)]
+    pub line_id: Option<String>,
+    #[serde(default)]
+    pub media_source_id: Option<String>,
     /// When true, also create a download task that saves the stream while we
     /// watch. The download is registered with the DownloadManager so the
     /// downloads view shows progress.
@@ -25,8 +35,57 @@ pub struct PlayPayload {
     pub stealth_when_recording: bool,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayExternalPayload {
+    pub item_id: String,
+    #[serde(default)]
+    pub start_ms: Option<i64>,
+    #[serde(default)]
+    pub line_id: Option<String>,
+    #[serde(default)]
+    pub media_source_id: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TakeScreenshotPayload {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default = "default_true_payload")]
+    pub include_subtitles: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenshotResult {
+    pub file_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecondaryDisplayBlackoutResult {
+    pub count: usize,
+}
+
+const SECONDARY_BLACKOUT_LABEL_PREFIX: &str = "secondary-blackout-";
+
 fn default_true_payload() -> bool {
     true
+}
+
+fn default_stats_osd_page() -> u8 {
+    1
+}
+
+fn close_secondary_blackout_windows(app: &tauri::AppHandle) {
+    for (label, window) in app.webview_windows() {
+        if label.starts_with(SECONDARY_BLACKOUT_LABEL_PREFIX) {
+            let _ = window.close();
+        }
+    }
 }
 
 #[tauri::command]
@@ -40,34 +99,42 @@ pub async fn play(state: State<'_, Arc<AppState>>, payload: PlayPayload) -> AppR
         .server(&account.server_id)
         .ok_or_else(|| AppError::NotFound(account.server_id.clone()))?;
 
-    let item = state.emby.get_item(&server, &account, &payload.item_id).await?;
+    let item = state
+        .emby
+        .get_item(&server, &account, &payload.item_id)
+        .await?;
 
     let start_ticks = payload.start_ms.map(|ms| ms * 10_000);
+    let line_id = payload.line_id.as_deref();
     let pb = state
         .emby
-        .playback_info(&server, &account, &payload.item_id, start_ticks)
+        .playback_info_for_line(&server, &account, &payload.item_id, start_ticks, line_id)
         .await?;
-    let source = pb
-        .media_sources
-        .first()
-        .ok_or_else(|| AppError::InvalidState("no media source".into()))?
-        .clone();
+    let source = match payload.media_source_id.as_deref() {
+        Some(id) => pb
+            .media_sources
+            .iter()
+            .find(|source| source.id == id)
+            .ok_or_else(|| AppError::InvalidState(format!("media source not found: {id}")))?
+            .clone(),
+        None => pb
+            .media_sources
+            .first()
+            .ok_or_else(|| AppError::InvalidState("no media source".into()))?
+            .clone(),
+    };
 
-    let url = state
-        .emby
-        .build_stream_url(&server, &account, &item, &source, &pb.play_session_id, payload.prefer_direct)?;
+    let url = state.emby.build_stream_url_for_line(
+        &server,
+        &account,
+        &item,
+        &source,
+        &pb.play_session_id,
+        payload.prefer_direct,
+        line_id,
+    )?;
 
-    let line_id = server
-        .active_line_id
-        .clone()
-        .or_else(|| server.lines.first().map(|l| l.id.clone()))
-        .ok_or_else(|| AppError::NoLine(server.id.clone()))?;
-    let line = server
-        .lines
-        .iter()
-        .find(|l| l.id == line_id)
-        .cloned()
-        .ok_or_else(|| AppError::NoLine(server.id.clone()))?;
+    let line = state.emby.pick_line(&server, line_id)?;
 
     let ua = line
         .user_agent
@@ -75,6 +142,10 @@ pub async fn play(state: State<'_, Arc<AppState>>, payload: PlayPayload) -> AppR
         .or_else(|| server.default_user_agent.clone());
     let mut headers = line.headers.clone();
     headers.push(("X-Emby-Token".into(), account.access_token.clone()));
+    headers.push((
+        "Authorization".into(),
+        format!("MediaBrowser Token=\"{}\"", account.access_token),
+    ));
 
     let mut record_task_id: Option<String> = None;
     let stream_record_path = if payload.record_while_playing {
@@ -96,21 +167,19 @@ pub async fn play(state: State<'_, Arc<AppState>>, payload: PlayPayload) -> AppR
         ));
         let path_str = path.to_string_lossy().to_string();
 
-        let mut task = crate::download::DownloadTask::new(
-            crate::download::DownloadTaskRequest {
-                server_id: server.id.clone(),
-                account_id: account.id.clone(),
-                item_id: item.id.clone(),
-                media_source_id: source.id.clone(),
-                play_session_id: pb.play_session_id.clone(),
-                title: item.name.clone(),
-                file_path: path_str.clone(),
-                stream_url: url.to_string(),
-                container: source.container.clone(),
-                total_bytes: source.size.map(|s| s as u64),
-                stealth: payload.stealth_when_recording,
-            },
-        );
+        let mut task = crate::download::DownloadTask::new(crate::download::DownloadTaskRequest {
+            server_id: server.id.clone(),
+            account_id: account.id.clone(),
+            item_id: item.id.clone(),
+            media_source_id: source.id.clone(),
+            play_session_id: pb.play_session_id.clone(),
+            title: item.name.clone(),
+            file_path: path_str.clone(),
+            stream_url: url.to_string(),
+            container: source.container.clone(),
+            total_bytes: source.size.map(|s| s as u64),
+            stealth: payload.stealth_when_recording,
+        });
         // Watch-while-download: mpv writes the bytes via `--stream-record`,
         // we don't run a separate engine. Mark the task as Running so the
         // downloads view shows it correctly; mpv events update the file on
@@ -134,16 +203,126 @@ pub async fn play(state: State<'_, Arc<AppState>>, payload: PlayPayload) -> AppR
         })
         .await?;
 
+    let settings = state.config.settings();
+    let subtitle_style = SubtitleStyle {
+        scale: settings.subtitle_scale,
+        text_color: settings.subtitle_text_color,
+        outline_color: settings.subtitle_outline_color,
+        outline_size: settings.subtitle_outline_size,
+        shadow_offset: settings.subtitle_shadow_offset,
+        position_pct: settings.subtitle_position_pct,
+        force_style: settings.subtitle_force_style,
+    };
+    if let Err(error) = backend
+        .execute(MpvCommand::SetSubtitleStyle(subtitle_style))
+        .await
+    {
+        tracing::warn!(target = "player", error = %error, "failed to apply subtitle style");
+    }
+
     *state.current_play_session.lock().await = Some(CurrentPlaySession {
         server_id: server.id.clone(),
         account_id: account.id.clone(),
         item_id: item.id.clone(),
         play_session_id: pb.play_session_id.clone(),
         media_source_id: source.id.clone(),
+        line_id: line.id.clone(),
         record_task_id,
     });
 
     Ok(pb.play_session_id)
+}
+
+#[tauri::command]
+pub async fn play_external(
+    state: State<'_, Arc<AppState>>,
+    payload: PlayExternalPayload,
+) -> AppResult<()> {
+    let account = state
+        .config
+        .active_account()
+        .ok_or_else(|| AppError::InvalidState("no active account".into()))?;
+    let server = state
+        .config
+        .server(&account.server_id)
+        .ok_or_else(|| AppError::NotFound(account.server_id.clone()))?;
+
+    let item = state
+        .emby
+        .get_item(&server, &account, &payload.item_id)
+        .await?;
+    let start_ticks = payload.start_ms.map(|ms| ms * 10_000);
+    let line_id = payload.line_id.as_deref();
+    let pb = state
+        .emby
+        .playback_info_for_line(&server, &account, &payload.item_id, start_ticks, line_id)
+        .await?;
+    let source = match payload.media_source_id.as_deref() {
+        Some(id) => pb
+            .media_sources
+            .iter()
+            .find(|source| source.id == id)
+            .ok_or_else(|| AppError::InvalidState(format!("media source not found: {id}")))?
+            .clone(),
+        None => pb
+            .media_sources
+            .first()
+            .ok_or_else(|| AppError::InvalidState("no media source".into()))?
+            .clone(),
+    };
+    let url = state.emby.build_stream_url_for_line(
+        &server,
+        &account,
+        &item,
+        &source,
+        &pb.play_session_id,
+        true,
+        line_id,
+    )?;
+
+    let line = state.emby.pick_line(&server, line_id)?;
+    let user_agent = line
+        .user_agent
+        .clone()
+        .or_else(|| server.default_user_agent.clone());
+    let mut headers = line.headers.clone();
+    headers.push(("X-Emby-Token".into(), account.access_token.clone()));
+    headers.push((
+        "Authorization".into(),
+        format!("MediaBrowser Token=\"{}\"", account.access_token),
+    ));
+
+    let settings = state.config.settings();
+    let Some(player_path) = settings
+        .external_player_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    else {
+        open::that(url.as_str()).map_err(|e| AppError::Other(format!("open stream: {e}")))?;
+        return Ok(());
+    };
+
+    if !Path::new(player_path).exists() {
+        return Err(AppError::Other(format!(
+            "external player not found: {player_path}"
+        )));
+    }
+
+    let args = build_external_player_args(
+        &settings.external_player_args,
+        player_path,
+        url.as_str(),
+        payload.title.as_deref().unwrap_or(&item.name),
+        user_agent.as_deref(),
+        &headers,
+        payload.start_ms.unwrap_or_default(),
+    );
+    Command::new(player_path)
+        .args(args)
+        .spawn()
+        .map_err(|e| AppError::Other(format!("launch external player: {e}")))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -241,10 +420,14 @@ pub async fn set_audio_track(
     state: State<'_, Arc<AppState>>,
     payload: AudioTrackPayload,
 ) -> AppResult<()> {
+    let preserve_cache = state.config.settings().preserve_track_switch_cache;
     state
         .mpv
         .backend()
-        .execute(MpvCommand::SetAudioTrack(payload.track_id))
+        .execute(MpvCommand::SetAudioTrack {
+            id: payload.track_id,
+            preserve_cache,
+        })
         .await
 }
 
@@ -259,10 +442,14 @@ pub async fn set_subtitle_track(
     state: State<'_, Arc<AppState>>,
     payload: SubtitleTrackPayload,
 ) -> AppResult<()> {
+    let preserve_cache = state.config.settings().preserve_track_switch_cache;
     state
         .mpv
         .backend()
-        .execute(MpvCommand::SetSubtitleTrack(payload.track_id))
+        .execute(MpvCommand::SetSubtitleTrack {
+            id: payload.track_id,
+            preserve_cache,
+        })
         .await
 }
 
@@ -296,9 +483,117 @@ pub async fn set_muted(state: State<'_, Arc<AppState>>, payload: MutedPayload) -
         .await
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PictureModePayload {
+    pub mode: PictureMode,
+}
+
+#[tauri::command]
+pub async fn set_picture_mode(
+    state: State<'_, Arc<AppState>>,
+    payload: PictureModePayload,
+) -> AppResult<()> {
+    state
+        .mpv
+        .backend()
+        .execute(MpvCommand::SetPictureMode(payload.mode))
+        .await
+}
+
+fn sanitize_screenshot_title(title: Option<&str>) -> String {
+    let source = title.unwrap_or("Hills Lite");
+    let mut collapsed = String::new();
+    let mut last_space = false;
+    for c in source.chars() {
+        let next = match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            other if other.is_control() => '_',
+            other => other,
+        };
+        if next.is_whitespace() {
+            if !last_space {
+                collapsed.push(' ');
+                last_space = true;
+            }
+        } else {
+            collapsed.push(next);
+            last_space = false;
+        }
+    }
+    let trimmed = collapsed.trim();
+    let limited: String = trimmed.chars().take(80).collect();
+    if limited.is_empty() {
+        "Hills Lite".into()
+    } else {
+        limited
+    }
+}
+
+fn unique_screenshot_path(dir: &Path, title: Option<&str>) -> PathBuf {
+    let base = format!(
+        "{}-{}",
+        sanitize_screenshot_title(title),
+        Local::now().format("%Y%m%d-%H%M%S")
+    );
+    for index in 0..100 {
+        let suffix = if index == 0 {
+            String::new()
+        } else {
+            format!("-{}", index + 1)
+        };
+        let candidate = dir.join(format!("{base}{suffix}.png"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    dir.join(format!("{base}-{}.png", Uuid::new_v4().simple()))
+}
+
+#[tauri::command]
+pub async fn take_screenshot(
+    state: State<'_, Arc<AppState>>,
+    payload: TakeScreenshotPayload,
+) -> AppResult<ScreenshotResult> {
+    let dir = state
+        .handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(format!("data dir: {e}")))?
+        .join("screenshots");
+    std::fs::create_dir_all(&dir)?;
+    let file_path = unique_screenshot_path(&dir, payload.title.as_deref());
+    let file_path_string = file_path.to_string_lossy().to_string();
+    state
+        .mpv
+        .backend()
+        .execute(MpvCommand::ScreenshotToFile {
+            path: file_path_string.clone(),
+            include_subtitles: payload.include_subtitles,
+        })
+        .await?;
+    Ok(ScreenshotResult {
+        file_path: file_path_string,
+    })
+}
+
 #[tauri::command]
 pub async fn get_state(state: State<'_, Arc<AppState>>) -> AppResult<MpvSnapshot> {
     state.mpv.backend().snapshot().await
+}
+
+#[tauri::command]
+pub async fn show_mpv_stats_osd(
+    state: State<'_, Arc<AppState>>,
+    page: Option<u8>,
+) -> AppResult<()> {
+    state
+        .mpv
+        .backend()
+        .execute(MpvCommand::ShowStatsOsd {
+            page: page.unwrap_or_else(default_stats_osd_page).clamp(1, 5),
+        })
+        .await
 }
 
 // ── Embedded MPV (native child window) ──────────────────────────────────────
@@ -306,27 +601,18 @@ pub async fn get_state(state: State<'_, Arc<AppState>>) -> AppResult<MpvSnapshot
 use crate::mpv::{ParentHandle, PlayerRect};
 
 #[tauri::command]
-pub async fn embed_attach(
-    state: State<'_, Arc<AppState>>,
-    window: tauri::Window,
-) -> AppResult<()> {
+pub async fn embed_attach(state: State<'_, Arc<AppState>>, window: tauri::Window) -> AppResult<()> {
     let parent = native_parent_handle(&window)?;
     state.mpv.bind_embedded(parent)
 }
 
 #[tauri::command]
-pub async fn embed_set_rect(
-    state: State<'_, Arc<AppState>>,
-    rect: PlayerRect,
-) -> AppResult<()> {
+pub async fn embed_set_rect(state: State<'_, Arc<AppState>>, rect: PlayerRect) -> AppResult<()> {
     state.mpv.embed_rect(rect)
 }
 
 #[tauri::command]
-pub async fn embed_set_visible(
-    state: State<'_, Arc<AppState>>,
-    visible: bool,
-) -> AppResult<()> {
+pub async fn embed_set_visible(state: State<'_, Arc<AppState>>, visible: bool) -> AppResult<()> {
     state.mpv.embed_show(visible)
 }
 
@@ -352,31 +638,181 @@ fn native_parent_handle(_window: &tauri::Window) -> AppResult<ParentHandle> {
 
 // ── MPV detection / external links ───────────────────────────────────────────
 
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MpvDetectResult {
-    pub found: bool,
-    pub path: String,
-    pub bundled: bool,
+fn parse_argument_template(input: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+
+    for ch in input.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if (ch == '"' || ch == '\'') && quote.map_or(true, |q| q == ch) {
+            quote = if quote.is_some() { None } else { Some(ch) };
+            continue;
+        }
+        if quote.is_none() && ch.is_whitespace() {
+            if !current.is_empty() {
+                args.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+        current.push(ch);
+    }
+    if escaped {
+        current.push('\\');
+    }
+    if !current.is_empty() {
+        args.push(current);
+    }
+    args
 }
 
-#[tauri::command]
-pub async fn detect_mpv(state: State<'_, Arc<AppState>>) -> AppResult<MpvDetectResult> {
-    use crate::mpv::paths::{mpv_exists, resolve_mpv_exe};
+fn mpv_header_args(headers: &[(String, String)]) -> Vec<String> {
+    let fields = headers
+        .iter()
+        .filter(|(key, value)| !key.is_empty() && !value.is_empty())
+        .map(|(key, value)| format!("{key}: {value}"))
+        .collect::<Vec<_>>();
+    if fields.is_empty() {
+        Vec::new()
+    } else {
+        vec![format!("--http-header-fields={}", fields.join(","))]
+    }
+}
 
-    let settings = state.config.settings();
-    let path = resolve_mpv_exe(&settings);
-    let path_str = path.to_string_lossy();
-    let bundled = path_str.contains("resources") || path_str.contains("vendor");
-    Ok(MpvDetectResult {
-        found: mpv_exists(&settings),
-        path: path_str.to_string(),
-        bundled,
-    })
+fn looks_like_mpv(player_path: &str) -> bool {
+    Path::new(player_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| {
+            let name = name.to_ascii_lowercase();
+            name == "mpv" || name == "mpv.exe"
+        })
+        .unwrap_or(false)
+}
+
+fn build_external_player_args(
+    template: &str,
+    player_path: &str,
+    url: &str,
+    title: &str,
+    user_agent: Option<&str>,
+    headers: &[(String, String)],
+    start_ms: i64,
+) -> Vec<String> {
+    let header_args = mpv_header_args(headers);
+    let start_ms = start_ms.max(0);
+    let start_seconds = start_ms as f64 / 1000.0;
+    let template = template.trim();
+    if template.is_empty() {
+        if looks_like_mpv(player_path) {
+            let mut args = vec![format!("--force-media-title={title}")];
+            if start_seconds > 0.0 {
+                args.push(format!("--start={start_seconds:.3}"));
+            }
+            if let Some(ua) = user_agent.filter(|ua| !ua.is_empty()) {
+                args.push(format!("--user-agent={ua}"));
+            }
+            args.extend(header_args);
+            args.push(url.to_string());
+            return args;
+        }
+        return vec![url.to_string()];
+    }
+
+    parse_argument_template(template)
+        .into_iter()
+        .flat_map(|arg| {
+            if arg == "{headers}" {
+                return header_args.clone();
+            }
+            vec![arg
+                .replace("{url}", url)
+                .replace("{title}", title)
+                .replace("{userAgent}", user_agent.unwrap_or_default())
+                .replace("{startMs}", &start_ms.to_string())
+                .replace("{startSeconds}", &format!("{start_seconds:.3}"))]
+        })
+        .collect()
 }
 
 #[tauri::command]
 pub async fn open_external(url: String) -> AppResult<()> {
     open::that(&url).map_err(|e| AppError::Other(format!("open url: {e}")))?;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn open_path(path: String) -> AppResult<()> {
+    open::that(&path).map_err(|e| AppError::Other(format!("open path: {e}")))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_always_on_top(window: tauri::Window, enabled: bool) -> AppResult<()> {
+    window
+        .set_always_on_top(enabled)
+        .map_err(|e| AppError::Other(format!("set always on top: {e}")))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_secondary_display_blackout(
+    app: tauri::AppHandle,
+    window: tauri::Window,
+    enabled: bool,
+) -> AppResult<SecondaryDisplayBlackoutResult> {
+    close_secondary_blackout_windows(&app);
+    if !enabled {
+        return Ok(SecondaryDisplayBlackoutResult { count: 0 });
+    }
+
+    let active_monitor = window
+        .current_monitor()
+        .map_err(|e| AppError::Other(format!("current monitor: {e}")))?;
+    let monitors = window
+        .available_monitors()
+        .map_err(|e| AppError::Other(format!("available monitors: {e}")))?;
+    let mut count = 0usize;
+
+    for (index, monitor) in monitors.into_iter().enumerate() {
+        let is_active = active_monitor.as_ref().is_some_and(|active| {
+            active.position() == monitor.position() && active.size() == monitor.size()
+        });
+        if is_active {
+            continue;
+        }
+
+        let position = monitor.position();
+        let size = monitor.size();
+        let label = format!(
+            "{SECONDARY_BLACKOUT_LABEL_PREFIX}{index}-{}",
+            Uuid::new_v4().simple()
+        );
+        WebviewWindowBuilder::new(&app, label, WebviewUrl::App("blackout.html".into()))
+            .title("Hills Lite Blackout")
+            .decorations(false)
+            .resizable(false)
+            .fullscreen(true)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .shadow(false)
+            .focused(false)
+            .focusable(false)
+            .position(position.x as f64, position.y as f64)
+            .inner_size(size.width as f64, size.height as f64)
+            .build()
+            .map_err(|e| AppError::Other(format!("create blackout window: {e}")))?;
+        count += 1;
+    }
+
+    Ok(SecondaryDisplayBlackoutResult { count })
 }

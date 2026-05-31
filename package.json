@@ -4,28 +4,67 @@
   "version": "0.1.0",
   "type": "module",
   "description": "An iOS-styled Emby/Jellyfin desktop client with MPV core and multi-line racing.",
+  "author": "Hills Lite Contributors",
+  "main": "electron/main.mjs",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
+    "check:electron-commands": "node scripts/check-electron-command-coverage.mjs",
+    "check:electron-dist": "node scripts/check-electron-dist.mjs",
+    "check:electron-package": "node scripts/check-electron-package.mjs",
+    "check:tauri-package": "node scripts/check-tauri-package.mjs",
     "preview": "vite preview",
+    "electron:dev": "set HILLS_ELECTRON_DEV_SERVER_URL=http://127.0.0.1:1420&& electron electron/main.mjs",
+    "electron:preview": "npm run check:electron-commands && npm run build && electron electron/main.mjs",
+    "electron:build": "set ELECTRON_BUILDER_CACHE=.electron-builder-cache&& npm run check:electron-commands && npm run build && electron-builder --win dir && npm run check:electron-package",
+    "electron:dist": "set ELECTRON_BUILDER_CACHE=.electron-builder-cache&& npm run check:electron-commands && npm run build && electron-builder --win portable && npm run check:electron-package && npm run check:electron-dist",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build && npm run check:tauri-package"
   },
-  "dependencies": {
-    "@iconify/vue": "^4.1.2",
-    "pinia": "^2.2.6",
-    "vue": "^3.5.13",
-    "vue-router": "^4.4.5",
-    "@tauri-apps/api": "^2.1.1",
-    "@tauri-apps/plugin-dialog": "^2.0.1",
-    "@tauri-apps/plugin-os": "^2.0.0"
-  },
+  "dependencies": {},
   "devDependencies": {
+    "@iconify/vue": "^4.1.2",
+    "@tauri-apps/api": "^2.1.1",
     "@tauri-apps/cli": "^2.1.0",
+    "@tauri-apps/plugin-dialog": "^2.0.1",
+    "@tauri-apps/plugin-os": "^2.0.0",
     "@vitejs/plugin-vue": "^5.2.1",
+    "electron": "^38.1.0",
+    "electron-builder": "^26.0.12",
+    "hls.js": "^1.6.13",
+    "pinia": "^2.2.6",
     "typescript": "^5.6.3",
     "vite": "^5.4.11",
+    "vue": "^3.5.13",
+    "vue-router": "^4.4.5",
     "vue-tsc": "^2.1.10"
+  },
+  "build": {
+    "appId": "app.hills-lite.player",
+    "productName": "Hills Lite",
+    "directories": {
+      "output": "release-electron"
+    },
+    "electronDist": "node_modules/electron/dist",
+    "beforeBuild": "electron/before-build.mjs",
+    "files": [
+      "dist/**",
+      "electron/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "src-tauri/resources/mpv",
+        "to": "mpv"
+      }
+    ],
+    "win": {
+      "icon": "src-tauri/icons/icon.ico",
+      "signAndEditExecutable": false,
+      "target": [
+        "dir"
+      ]
+    }
   }
 }

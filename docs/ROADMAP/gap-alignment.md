@@ -1,7 +1,7 @@
 # 差距对齐路线图（G1–G9）
 
 来源：[`PROJECT_MEMORY.md`](../PROJECT_MEMORY.md) §4。  
-状态：**文档已建立，代码修复待寸止排期**。
+状态：**2026-05-30 已按当前代码校正；仅 G9 仍等待真实启动日志触发**。
 
 ---
 
@@ -32,15 +32,18 @@
 
 ## G3 — MPV IPC 命名管道（P1）
 
-**目标**：`--input-ipc-server=\\.\pipe\hills-lite-mpv-<uuid>` + 异步连接  
-**现状**：`src-tauri/src/mpv/ipc.rs` 使用 `--input-ipc-client=fd://0` + stdin/stdout
+**状态**：✅ 已完成
 
-**风险**：改动面大，需全量播放回归  
-**依赖**：是否与 G4 内置 mpv 一起做需寸止确认
+**目标**：`--input-ipc-server=\\.\pipe\hills-lite-mpv-<uuid>` + 异步连接
+**现状**：`src-tauri/src/mpv/ipc.rs` 已使用 `--input-ipc-server`，Windows 命名管道为 `\\.\pipe\hills-lite-mpv-{uuid}`；Electron mpv 后端也使用同一随包 mpv 模型。
+
+**验证**：`cargo check --manifest-path src-tauri\Cargo.toml --all-targets` 与 `npm.cmd run electron:build` 已通过。
 
 ---
 
 ## G4 — 内置 MPV（P1）
+
+**状态**：✅ 已完成；不再从本机路径或网络下载 mpv
 
 **目标**：
 - `src-tauri/resources/mpv/mpv.exe`（~120MB）
@@ -48,21 +51,21 @@
 - `tauri.conf.json` `bundle.resources`
 - `resolve_mpv_exe()` 优先查找 bundle 路径
 
-**现状**：仅 `resources/mpv/mpv/fonts.conf`
+**现状**：仓库内 `src-tauri/resources/mpv` 已包含 `mpv.exe`、`libmpv-2.dll`、`d3dcompiler_43.dll` 与 `mpv/fonts.conf`；Tauri `build.rs` 只复制该目录，Electron `extraResources` 复制同一目录到 `resources/mpv`，`check:electron-package` 会在打包后校验完整性。
 
-**需寸止**：
-- mpv.exe 是否 Git LFS / 用户本机放置 / CI 下载？
-- 目标 mpv 版本与构建来源（shinchiro vs gyan.dev）？
+**规则**：mpv 更新只随应用新版本迭代进入随包资源，不恢复本机 mpv 检测、路径选择或构建期下载。
 
 ---
 
 ## G1 — 品牌 Hills Lite（P2）
 
+**状态**：✅ 当前用户可见壳层已统一为 Hills Lite；包名/ crate 名保留历史命名
+
 **范围**：
 - `tauri.conf.json` productName / title
 - `index.html` title
 - `AppSidebar.vue` / `SettingsView.vue` / `tray/mod.rs` / `RemoteControlView.vue`
-- `MpvBanner.vue`（已部分正确）
+- 旧 `MpvBanner.vue` 已移除；不再提供本机 mpv 检测入口
 
 **不做**：Rust crate 重命名（可后续独立任务）
 
@@ -70,7 +73,9 @@
 
 ## G2 — 收藏 / 聚合视界路由（P2）
 
-**现状**：`FavoritesView.vue`、`AggregateView.vue` 已实现列表/占位，router 无 `/favorites` `/aggregate`
+**状态**：✅ 已完成
+
+**现状**：`/favorites`、`/history`、`/aggregate`、`/downloads`、`/remote` 均已注册路由并接入侧边栏主导航。
 
 **改动**：
 - `router/index.ts` 注册路由
@@ -79,6 +84,8 @@
 ---
 
 ## G5 — 构建只产 exe（P2）
+
+**状态**：✅ 已完成
 
 **改动**：`tauri.conf.json`
 
@@ -90,22 +97,24 @@
 
 或 `"targets": []`（视 Tauri 2 行为而定，改前查官方文档）
 
-**验证**：`npm run tauri:build` 后仅有 `target/release/emby-player.exe`，无 `bundle/nsis|msi`
+**现状**：`src-tauri/tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`；发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 ---
 
 ## G8 — Player back() fire-and-forget（P3）
 
+**状态**：✅ 已完成
+
 **目标**：`PlayerView.vue` 返回时不 await `player.stop()`，防 mpv 卡死拖住 UI
 
-**验证**：播放中点返回，UI 立即响应
+**现状**：播放页返回使用 fire-and-forget stop；离开播放页的后台清理改为并行执行。
 
 ---
 
 ## 建议执行顺序
 
 ```
-G9（有日志后）→ G3+G4（MPV 稳定性）→ G5（构建）→ G1+G2（品牌与导航）→ G8
+G9（有真实 crash.log 后）→ 继续按产品路线推进真实联调、可用性清理和视觉验证
 ```
 
 每项完成后：**CHANGE_LOG + 更新 CURRENT_STATE + 寸止反馈**。

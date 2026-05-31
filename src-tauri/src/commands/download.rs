@@ -47,7 +47,10 @@ pub async fn start_download(
         .server(&account.server_id)
         .ok_or_else(|| AppError::NotFound(account.server_id.clone()))?;
 
-    let item = state.emby.get_item(&server, &account, &payload.item_id).await?;
+    let item = state
+        .emby
+        .get_item(&server, &account, &payload.item_id)
+        .await?;
     let pb = state
         .emby
         .playback_info(&server, &account, &payload.item_id, None)
@@ -70,7 +73,12 @@ pub async fn start_download(
     let container = source.container.clone().unwrap_or_else(|| "mkv".into());
     let safe_name = sanitize_filename(&item.name);
     let dir = state.downloads.download_dir()?;
-    let file_path = dir.join(format!("{}-{}.{}", safe_name, Uuid::new_v4().simple(), container));
+    let file_path = dir.join(format!(
+        "{}-{}.{}",
+        safe_name,
+        Uuid::new_v4().simple(),
+        container
+    ));
 
     let task = DownloadTask::new(DownloadTaskRequest {
         server_id: server.id.clone(),

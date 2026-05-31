@@ -1,9 +1,11 @@
 use async_trait::async_trait;
+use reqwest::header::{ACCEPT, CONTENT_TYPE, USER_AGENT};
 use reqwest::Client;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::danmaku::types::{DanmakuComment, DanmakuMode, DanmakuResult};
-use crate::danmaku::DanmakuProvider;
+use crate::danmaku::{DanmakuProvider, DANMAKU_USER_AGENT};
 use crate::emby::models::MediaItem;
 use crate::error::{AppError, AppResult};
 
@@ -22,7 +24,9 @@ struct MatchRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MatchResponse {
+    #[serde(default)]
     is_matched: bool,
+    #[serde(default)]
     matches: Option<Vec<MatchEntry>>,
 }
 
@@ -40,14 +44,18 @@ struct MatchEntry {
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct CommentResponse {
+    #[serde(default)]
     count: i64,
+    #[serde(default)]
     comments: Vec<RawComment>,
 }
 
 #[derive(Debug, Deserialize)]
 struct RawComment {
     /// `<time>,<mode>,<color>,<sender>` style metadata.
+    #[serde(default)]
     p: String,
+    #[serde(default)]
     m: String,
 }
 
@@ -69,14 +77,14 @@ impl DanmakuProvider for DanDanPlay {
         let url = format!("{API_BASE}/api/v2/match");
         let resp = client
             .post(&url)
-            .header("Content-Type", "application/json")
+            .header(USER_AGENT, DANMAKU_USER_AGENT)
+            .header(ACCEPT, "application/json")
+            .header(CONTENT_TYPE, "application/json")
             .json(&body)
             .send()
             .await?;
-        if !resp.status().is_success() {
-            return Err(AppError::Other(format!("dandanplay match http {}", resp.status())));
-        }
-        let parsed: MatchResponse = resp.json().await?;
+        let resp = ensure_success(resp, "dandanplay match").await?;
+        let parsed: MatchResponse = decode_json(resp, "dandanplay match").await?;
         if !parsed.is_matched {
             return Ok(None);
         }
@@ -88,17 +96,17 @@ impl DanmakuProvider for DanDanPlay {
         Ok(id)
     }
 
-    async fn fetch(
-        &self,
-        client: &Client,
-        provider_episode_id: &str,
-    ) -> AppResult<DanmakuResult> {
-        let url = format!("{API_BASE}/api/v2/comment/{provider_episode_id}?withRelated=true&chConvert=0");
-        let resp = client.get(&url).send().await?;
-        if !resp.status().is_success() {
-            return Err(AppError::Other(format!("dandanplay comment http {}", resp.status())));
-        }
-        let parsed: CommentResponse = resp.json().await?;
+    async fn fetch(&self, client: &Client, provider_episode_id: &str) -> AppResult<DanmakuResult> {
+        let url =
+            format!("{API_BASE}/api/v2/comment/{provider_episode_id}?withRelated=true&chConvert=0");
+        let resp = client
+            .get(&url)
+            .header(USER_AGENT, DANMAKU_USER_AGENT)
+            .header(ACCEPT, "application/json")
+            .send()
+            .await?;
+        let resp = ensure_success(resp, "dandanplay comment").await?;
+        let parsed: CommentResponse = decode_json(resp, "dandanplay comment").await?;
         let comments = parsed
             .comments
             .into_iter()
@@ -110,6 +118,49 @@ impl DanmakuProvider for DanDanPlay {
             comments,
         })
     }
+}
+
+async fn ensure_success(resp: reqwest::Response, context: &str) -> AppResult<reqwest::Response> {
+    if resp.status().is_success() {
+        return Ok(resp);
+    }
+
+    let status = resp.status();
+    let url = resp.url().clone();
+    let body = resp.text().await.unwrap_or_default();
+    Err(AppError::Other(format!(
+        "{context}: http {status} from {url}; body preview: {}",
+        body_preview(&body)
+    )))
+}
+
+async fn decode_json<T>(resp: reqwest::Response, context: &str) -> AppResult<T>
+where
+    T: DeserializeOwned,
+{
+    let status = resp.status();
+    let url = resp.url().clone();
+    let body = resp.text().await.map_err(|e| {
+        AppError::Other(format!(
+            "{context}: failed to read response body from {url} (status {status}): {e}"
+        ))
+    })?;
+
+    serde_json::from_str(&body).map_err(|e| {
+        AppError::Other(format!(
+            "{context}: failed to parse JSON from {url} (status {status}): {e}; body preview: {}",
+            body_preview(&body)
+        ))
+    })
+}
+
+fn body_preview(body: &str) -> String {
+    const MAX_CHARS: usize = 1200;
+    let mut preview = body.chars().take(MAX_CHARS).collect::<String>();
+    if body.chars().count() > MAX_CHARS {
+        preview.push_str("...");
+    }
+    preview.replace('\n', "\\n").replace('\r', "\\r")
 }
 
 fn build_file_name(item: &MediaItem) -> String {

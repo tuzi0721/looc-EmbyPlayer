@@ -13,7 +13,9 @@ use tokio::time::timeout;
 
 use crate::config::models::AppSettings;
 use crate::error::{AppError, AppResult};
-use crate::mpv::backend::{MpvBackend, MpvCommand, MpvSnapshot, MpvTrackInfo, TrackKind};
+use crate::mpv::backend::{
+    MpvBackend, MpvChapterInfo, MpvCommand, MpvSnapshot, MpvTrackInfo, PictureMode, TrackKind,
+};
 use crate::mpv::paths::resolve_mpv_exe;
 
 use crate::mpv::window_host::{HostWindow, ParentHandle, PlayerRect};
@@ -185,13 +187,27 @@ impl MpvIpcBackend {
             .await?;
         Ok(())
     }
+
+    async fn drop_buffers_if_requested(&self, preserve_cache: bool) -> AppResult<()> {
+        if preserve_cache {
+            return Ok(());
+        }
+        if let Err(e) = self.send_command(vec![json!("drop-buffers")]).await {
+            tracing::warn!(target = "mpv", error = %e, "drop-buffers failed after track switch");
+        }
+        Ok(())
+    }
 }
 
 async fn spawn_mpv_ipc(
     settings: &AppSettings,
-    _wid: Option<i64>,
-) -> AppResult<(Child, Box<dyn AsyncRead + Unpin + Send>, Box<dyn AsyncWrite + Unpin + Send>)> {
-    let exe = resolve_mpv_exe(settings);
+    wid: Option<i64>,
+) -> AppResult<(
+    Child,
+    Box<dyn AsyncRead + Unpin + Send>,
+    Box<dyn AsyncWrite + Unpin + Send>,
+)> {
+    let exe = resolve_mpv_exe();
     let exe_display = exe.display().to_string();
 
     let mut args: Vec<String> = vec![
@@ -201,7 +217,12 @@ async fn spawn_mpv_ipc(
         "--msg-level=all=warn".into(),
     ];
 
-    args.push("--force-window=yes".into());
+    if let Some(wid) = wid {
+        args.push(format!("--wid={wid}"));
+        args.push("--force-window=no".into());
+    } else {
+        args.push("--force-window=yes".into());
+    }
     args.push("--title=Hills Lite".into());
 
     if settings.hardware_decoding {
@@ -234,10 +255,8 @@ async fn spawn_mpv_ipc(
 
     #[cfg(not(windows))]
     {
-        let socket_path = std::env::temp_dir().join(format!(
-            "hills-lite-mpv-{}.sock",
-            uuid::Uuid::new_v4()
-        ));
+        let socket_path =
+            std::env::temp_dir().join(format!("hills-lite-mpv-{}.sock", uuid::Uuid::new_v4()));
         let _ = std::fs::remove_file(&socket_path);
 
         args.push(format!(
@@ -268,9 +287,13 @@ async fn connect_mpv_pipe(
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
-        if let Some(status) = child.try_wait().map_err(|e| AppError::Mpv(format!("mpv wait: {e}")))?
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|e| AppError::Mpv(format!("mpv wait: {e}")))?
         {
-            return Err(AppError::Mpv(format!("mpv exited before ipc ready: {status}")));
+            return Err(AppError::Mpv(format!(
+                "mpv exited before ipc ready: {status}"
+            )));
         }
         match ClientOptions::new().open(pipe_path) {
             Ok(client) => return Ok(client),
@@ -292,9 +315,13 @@ async fn connect_mpv_socket(
 ) -> AppResult<tokio::net::UnixStream> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
-        if let Some(status) = child.try_wait().map_err(|e| AppError::Mpv(format!("mpv wait: {e}")))?
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|e| AppError::Mpv(format!("mpv wait: {e}")))?
         {
-            return Err(AppError::Mpv(format!("mpv exited before ipc ready: {status}")));
+            return Err(AppError::Mpv(format!(
+                "mpv exited before ipc ready: {status}"
+            )));
         }
         match tokio::net::UnixStream::connect(socket_path).await {
             Ok(conn) => return Ok(conn),
@@ -434,9 +461,29 @@ impl MpvBackend for MpvIpcBackend {
             MpvCommand::SetSpeed(s) => self.set_property("speed", json!(s)).await,
             MpvCommand::SetVolume(v) => self.set_property("volume", json!(v)).await,
             MpvCommand::SetMuted(m) => self.set_property("mute", json!(m)).await,
-            MpvCommand::SetAudioTrack(id) => self.set_property("aid", json!(id)).await,
-            MpvCommand::SetSubtitleTrack(None) => self.set_property("sid", json!("no")).await,
-            MpvCommand::SetSubtitleTrack(Some(id)) => self.set_property("sid", json!(id)).await,
+            MpvCommand::SetPictureMode(mode) => {
+                let (keepaspect, panscan, zoom) = match mode {
+                    PictureMode::Fit => (true, 0.0, 0.0),
+                    PictureMode::Fill => (true, 1.0, 0.0),
+                    PictureMode::Stretch => (false, 0.0, 0.0),
+                    PictureMode::Autocrop => (true, 1.0, 0.16),
+                };
+                self.set_property("keepaspect", json!(keepaspect)).await?;
+                self.set_property("panscan", json!(panscan)).await?;
+                self.set_property("video-zoom", json!(zoom)).await?;
+                self.set_property("video-scale-x", json!(1)).await?;
+                self.set_property("video-scale-y", json!(1)).await?;
+                self.set_property("video-aspect-override", json!(-2)).await
+            }
+            MpvCommand::SetAudioTrack { id, preserve_cache } => {
+                self.set_property("aid", json!(id)).await?;
+                self.drop_buffers_if_requested(preserve_cache).await
+            }
+            MpvCommand::SetSubtitleTrack { id, preserve_cache } => {
+                self.set_property("sid", id.map_or_else(|| json!("no"), |id| json!(id)))
+                    .await?;
+                self.drop_buffers_if_requested(preserve_cache).await
+            }
             MpvCommand::AddSubtitle {
                 source,
                 title,
@@ -458,7 +505,8 @@ impl MpvBackend for MpvIpcBackend {
                 Ok(())
             }
             MpvCommand::RemoveSubtitle(id) => {
-                self.send_command(vec![json!("sub-remove"), json!(id)]).await?;
+                self.send_command(vec![json!("sub-remove"), json!(id)])
+                    .await?;
                 Ok(())
             }
             MpvCommand::SetSubtitleDelay(ms) => {
@@ -466,8 +514,51 @@ impl MpvBackend for MpvIpcBackend {
                     .await
             }
             MpvCommand::SetSubtitleScale(s) => self.set_property("sub-scale", json!(s)).await,
+            MpvCommand::SetSubtitleStyle(style) => {
+                self.set_property("sub-scale", json!(style.scale)).await?;
+                self.set_property("sub-color", json!(style.text_color))
+                    .await?;
+                self.set_property("sub-outline-color", json!(style.outline_color))
+                    .await?;
+                self.set_property("sub-outline-size", json!(style.outline_size))
+                    .await?;
+                self.set_property("sub-shadow-offset", json!(style.shadow_offset))
+                    .await?;
+                self.set_property("sub-pos", json!(style.position_pct))
+                    .await?;
+                let ass_override = if style.force_style { "force" } else { "scale" };
+                self.set_property("sub-ass-override", json!(ass_override))
+                    .await
+            }
             MpvCommand::CycleSubtitle => {
-                self.send_command(vec![json!("cycle"), json!("sub")]).await?;
+                self.send_command(vec![json!("cycle"), json!("sub")])
+                    .await?;
+                Ok(())
+            }
+            MpvCommand::ScreenshotToFile {
+                path,
+                include_subtitles,
+            } => {
+                let mode = if include_subtitles {
+                    "subtitles"
+                } else {
+                    "video"
+                };
+                self.send_command(vec![json!("screenshot-to-file"), json!(path), json!(mode)])
+                    .await?;
+                Ok(())
+            }
+            MpvCommand::ShowStatsOsd { page } => {
+                let page = page.clamp(1, 5);
+                let binding = format!("stats/display-page-{page}");
+                if self
+                    .send_command(vec![json!("script-binding"), json!(binding)])
+                    .await
+                    .is_err()
+                {
+                    self.send_command(vec![json!("script-binding"), json!("stats/display-stats")])
+                        .await?;
+                }
                 Ok(())
             }
         }
@@ -522,11 +613,19 @@ impl MpvBackend for MpvIpcBackend {
             .ok()
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        let tracks_val = self
-            .get_property("track-list")
+        let tracks_val = self.get_property("track-list").await.unwrap_or(Value::Null);
+        let tracks = parse_tracks(&tracks_val);
+        let chapters_val = self
+            .get_property("chapter-list")
             .await
             .unwrap_or(Value::Null);
-        let tracks = parse_tracks(&tracks_val);
+        let chapters = parse_chapters(&chapters_val);
+        let chapter = self
+            .get_property("chapter")
+            .await
+            .ok()
+            .and_then(|v| v.as_i64())
+            .filter(|v| *v >= 0);
         let sub_delay = self
             .get_property("sub-delay")
             .await
@@ -539,6 +638,72 @@ impl MpvBackend for MpvIpcBackend {
             .ok()
             .and_then(|v| v.as_f64())
             .unwrap_or(1.0);
+        let network_bps = self
+            .get_property("cache-speed")
+            .await
+            .ok()
+            .and_then(|v| value_as_f64(&v))
+            .filter(|v| v.is_finite() && *v >= 0.0);
+        let video_codec = self
+            .get_property("video-codec")
+            .await
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string));
+        let audio_codec = self
+            .get_property("audio-codec")
+            .await
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string));
+        let video_params = self
+            .get_property("video-params")
+            .await
+            .ok()
+            .filter(Value::is_object);
+        let audio_params = self
+            .get_property("audio-params")
+            .await
+            .ok()
+            .filter(Value::is_object);
+        let hwdec_current = self
+            .get_property("hwdec-current")
+            .await
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string));
+        let container_fps = self
+            .get_property("container-fps")
+            .await
+            .ok()
+            .and_then(|v| value_as_f64(&v));
+        let estimated_vf_fps = self
+            .get_property("estimated-vf-fps")
+            .await
+            .ok()
+            .and_then(|v| value_as_f64(&v));
+        let video_bitrate = self
+            .get_property("video-bitrate")
+            .await
+            .ok()
+            .and_then(|v| value_as_f64(&v));
+        let audio_bitrate = self
+            .get_property("audio-bitrate")
+            .await
+            .ok()
+            .and_then(|v| value_as_f64(&v));
+        let frame_drop_count = self
+            .get_property("frame-drop-count")
+            .await
+            .ok()
+            .and_then(|v| value_as_f64(&v));
+        let decoder_frame_drop_count = self
+            .get_property("decoder-frame-drop-count")
+            .await
+            .ok()
+            .and_then(|v| value_as_f64(&v));
+        let vo_frame_drop_count = self
+            .get_property("vo-drop-frame-count")
+            .await
+            .ok()
+            .and_then(|v| value_as_f64(&v));
 
         Ok(MpvSnapshot {
             url,
@@ -550,8 +715,23 @@ impl MpvBackend for MpvIpcBackend {
             muted,
             eof,
             tracks,
+            chapters,
+            chapter,
             sub_delay_ms: (sub_delay * 1000.0) as i64,
             sub_scale,
+            network_bps,
+            video_codec,
+            audio_codec,
+            video_params,
+            audio_params,
+            hwdec_current,
+            container_fps,
+            estimated_vf_fps,
+            video_bitrate,
+            audio_bitrate,
+            frame_drop_count,
+            decoder_frame_drop_count,
+            vo_frame_drop_count,
         })
     }
 
@@ -583,14 +763,49 @@ fn parse_tracks(v: &Value) -> Vec<MpvTrackInfo> {
             };
             let title = t.get("title").and_then(|v| v.as_str().map(str::to_string));
             let lang = t.get("lang").and_then(|v| v.as_str().map(str::to_string));
+            let codec = t.get("codec").and_then(|v| v.as_str().map(str::to_string));
+            let external = t.get("external").and_then(Value::as_bool);
+            let default_track = t.get("default").and_then(Value::as_bool);
+            let forced = t.get("forced").and_then(Value::as_bool);
             let selected = t.get("selected").and_then(Value::as_bool).unwrap_or(false);
             Some(MpvTrackInfo {
                 id,
                 kind,
                 title,
                 lang,
+                codec,
+                external,
+                default_track,
+                forced,
                 selected,
             })
         })
         .collect()
+}
+
+fn parse_chapters(v: &Value) -> Vec<MpvChapterInfo> {
+    let Some(arr) = v.as_array() else {
+        return vec![];
+    };
+    arr.iter()
+        .enumerate()
+        .filter_map(|(index, chapter)| {
+            let time = chapter.get("time").and_then(value_as_f64)?;
+            if !time.is_finite() || time < 0.0 {
+                return None;
+            }
+            let title = chapter
+                .get("title")
+                .and_then(|v| v.as_str().map(str::to_string));
+            Some(MpvChapterInfo {
+                index: index as i64,
+                title,
+                time_ms: (time * 1000.0) as i64,
+            })
+        })
+        .collect()
+}
+
+fn value_as_f64(v: &Value) -> Option<f64> {
+    v.as_f64().or_else(|| v.as_i64().map(|n| n as f64))
 }

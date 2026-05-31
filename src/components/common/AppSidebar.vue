@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from "vue";
+import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
 
@@ -10,21 +10,7 @@ import { useServerStore } from "@/stores/server";
 import { useSettingsStore } from "@/stores/settings";
 import LineStatusDot from "@/components/common/LineStatusDot.vue";
 import AddServerDialog from "@/components/login/AddServerDialog.vue";
-
-interface SettingsCategory {
-  id: string;
-  label: string;
-  icon: string;
-}
-
-const SETTINGS_CATEGORIES: SettingsCategory[] = [
-  { id: "servers", label: "服务器", icon: "lucide:server" },
-  { id: "network", label: "网络", icon: "lucide:radio" },
-  { id: "player", label: "播放器", icon: "lucide:play-circle" },
-  { id: "shortcuts", label: "快捷键", icon: "lucide:keyboard" },
-  { id: "appearance", label: "外观", icon: "lucide:palette" },
-  { id: "about", label: "关于", icon: "lucide:info" },
-];
+import { serverActiveLine, serverKindIcon, serverKindLabel } from "@/utils/serverVisuals";
 
 const router = useRouter();
 const route = useRoute();
@@ -36,11 +22,6 @@ const notifications = useNotificationsStore();
 
 const showAdd = ref(false);
 const showVisibility = ref(false);
-const settingsExpanded = ref(false);
-
-onMounted(() => {
-  if (route.name === "settings") settingsExpanded.value = true;
-});
 
 const hiddenIds = computed(() => settings.settings.hiddenServerIds ?? []);
 const visibleServers = computed(() =>
@@ -52,22 +33,12 @@ const activeServerId = computed(() => auth.activeAccount?.serverId ?? null);
 const activeDownloads = computed(
   () => downloads.tasks.filter((t) => t.status === "running" || t.status === "paused").length,
 );
-
-function serverInitial(name: string): string {
-  const trimmed = name.trim();
-  if (!trimmed) return "?";
-  const codePoint = trimmed.codePointAt(0);
-  return codePoint ? String.fromCodePoint(codePoint).toUpperCase() : "?";
-}
-
-function serverActiveLine(
-  s: {
-    activeLineId?: string | null;
-    lines: { id: string; lastStatus?: string | null; lastLatencyMs?: number | null }[];
-  },
-) {
-  return s.lines.find((l) => l.id === s.activeLineId) ?? s.lines[0] ?? null;
-}
+const activeDownloadsLabel = computed(() =>
+  activeDownloads.value > 99 ? "99+" : String(activeDownloads.value),
+);
+const unreadNotificationsLabel = computed(() =>
+  notifications.unread > 99 ? "99+" : String(notifications.unread),
+);
 
 function loggedInOn(serverId: string): boolean {
   return auth.accounts.some((a) => a.serverId === serverId);
@@ -101,22 +72,14 @@ function gotoSettings(category?: string) {
   router.push({ name: "settings", query: { c: category ?? "servers" } }).catch(() => {});
 }
 
-function toggleSettingsExpanded() {
-  settingsExpanded.value = !settingsExpanded.value;
-  if (settingsExpanded.value && route.name !== "settings") gotoSettings();
-}
-
-function isOnSettings(category?: string): boolean {
-  if (route.name !== "settings") return false;
-  if (!category) return true;
-  return (route.query.c as string | undefined) === category;
-}
-
 function gotoHome() {
   router.push("/home").catch(() => {});
 }
 function gotoFavorites() {
   router.push("/favorites").catch(() => {});
+}
+function gotoHistory() {
+  router.push("/history").catch(() => {});
 }
 function gotoAggregate() {
   router.push("/aggregate").catch(() => {});
@@ -157,11 +120,45 @@ function gotoRemote() {
       </button>
       <button
         class="nav-btn"
+        :class="{ active: route.name === 'history' }"
+        @click="gotoHistory"
+      >
+        <Icon icon="lucide:history" width="16" />
+        <span>历史</span>
+      </button>
+      <button
+        class="nav-btn"
         :class="{ active: route.name === 'aggregate' }"
         @click="gotoAggregate"
       >
         <Icon icon="lucide:infinity" width="16" />
         <span>聚合视界</span>
+      </button>
+      <button
+        class="nav-btn"
+        :class="{ active: route.name === 'downloads' }"
+        @click="gotoDownloads"
+      >
+        <Icon icon="lucide:download" width="16" />
+        <span>下载</span>
+        <span v-if="activeDownloads > 0" class="badge">{{ activeDownloadsLabel }}</span>
+      </button>
+      <button
+        class="nav-btn"
+        :class="{ active: notifications.centerOpen }"
+        @click="notifications.toggleCenter"
+      >
+        <Icon icon="lucide:bell" width="16" />
+        <span>通知</span>
+        <span v-if="notifications.unread > 0" class="badge danger">{{ unreadNotificationsLabel }}</span>
+      </button>
+      <button
+        class="nav-btn"
+        :class="{ active: route.name === 'remote' }"
+        @click="gotoRemote"
+      >
+        <Icon icon="lucide:cast" width="16" />
+        <span>遥控</span>
       </button>
     </nav>
 
@@ -203,7 +200,14 @@ function gotoRemote() {
           :class="{ 'is-active': s.id === activeServerId }"
         >
           <button class="srv-row__btn" @click="pickServer(s.id)">
-            <Icon icon="lucide:circle-play" width="18" class="srv-row__play" />
+            <div class="srv-row__avatar" :title="serverKindLabel(s.kind)">
+              <Icon :icon="serverKindIcon(s.kind)" width="16" />
+              <LineStatusDot
+                class="srv-row__dot"
+                :status="serverActiveLine(s)?.lastStatus"
+                :latency-ms="serverActiveLine(s)?.lastLatencyMs"
+              />
+            </div>
             <div class="srv-row__text">
               <div class="srv-row__name" :title="s.name">{{ s.name }}</div>
               <div class="srv-row__sub">
@@ -238,9 +242,9 @@ function gotoRemote() {
     <div class="sb__flex" />
 
     <section class="sb__bottom">
-      <button class="nav-btn pro-btn" type="button">
-        <Icon icon="lucide:crown" width="16" />
-        <span>Hills Lite Pro</span>
+      <button class="nav-btn about-btn" type="button" @click="gotoSettings('about')">
+        <Icon icon="lucide:info" width="16" />
+        <span>关于 Hills Lite</span>
       </button>
 
       <button class="add-srv" @click="showAdd = true">
@@ -262,9 +266,9 @@ function gotoRemote() {
       v-if="showAdd"
       @close="showAdd = false"
       @created="
-        (id) => {
+        (id, loggedIn) => {
           showAdd = false;
-          router.push({ name: 'login', query: { server: id } });
+          router.push(loggedIn ? { name: 'home' } : { name: 'login', query: { server: id } });
         }
       "
     />
@@ -489,10 +493,6 @@ function gotoRemote() {
   display: flex;
   align-items: center;
   gap: 2px;
-}
-.srv-row__play {
-  color: var(--success);
-  flex-shrink: 0;
 }
 .srv-row__minus {
   appearance: none;

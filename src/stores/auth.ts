@@ -17,7 +17,11 @@ export const useAuthStore = defineStore("auth", () => {
   async function refresh() {
     loading.value = true;
     try {
-      accounts.value = await api.listAccounts();
+      const list = await api.listAccounts();
+      accounts.value = list;
+      if (!activeId.value || !list.some((account) => account.id === activeId.value)) {
+        activeId.value = list[0]?.id ?? null;
+      }
     } finally {
       loading.value = false;
     }

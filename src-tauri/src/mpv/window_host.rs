@@ -140,24 +140,22 @@ mod windows_impl {
     }
 
     fn ensure_class_registered() {
-        CLASS_REGISTERED.call_once(|| {
-            unsafe {
-                let class_name = class_name_wide();
-                let brush: HBRUSH = HBRUSH(GetStockObject(BLACK_BRUSH).0);
-                let wc = WNDCLASSW {
-                    style: Default::default(),
-                    lpfnWndProc: Some(wnd_proc),
-                    cbClsExtra: 0,
-                    cbWndExtra: 0,
-                    hInstance: Default::default(),
-                    hIcon: Default::default(),
-                    hCursor: Default::default(),
-                    hbrBackground: brush,
-                    lpszMenuName: PCWSTR::null(),
-                    lpszClassName: PCWSTR(class_name.as_ptr()),
-                };
-                let _ = RegisterClassW(&wc);
-            }
+        CLASS_REGISTERED.call_once(|| unsafe {
+            let class_name = class_name_wide();
+            let brush: HBRUSH = HBRUSH(GetStockObject(BLACK_BRUSH).0);
+            let wc = WNDCLASSW {
+                style: Default::default(),
+                lpfnWndProc: Some(wnd_proc),
+                cbClsExtra: 0,
+                cbWndExtra: 0,
+                hInstance: Default::default(),
+                hIcon: Default::default(),
+                hCursor: Default::default(),
+                hbrBackground: brush,
+                lpszMenuName: PCWSTR::null(),
+                lpszClassName: PCWSTR(class_name.as_ptr()),
+            };
+            let _ = RegisterClassW(&wc);
         });
     }
 
@@ -191,7 +189,15 @@ mod windows_impl {
             // Keep the mpv host *behind* the WebView2 sibling so HTML controls stay
             // clickable and visible on top of the video hole.
             unsafe {
-                let _ = SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
+                let _ = SetWindowPos(
+                    hwnd,
+                    HWND_BOTTOM,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+                );
             }
 
             Ok(Self { hwnd })
@@ -206,18 +212,8 @@ mod windows_impl {
             let y = (rect.y as f64 * rect.scale) as i32;
             let w = (rect.width as f64 * rect.scale) as i32;
             let h = (rect.height as f64 * rect.scale) as i32;
-            unsafe {
-                SetWindowPos(
-                    self.hwnd,
-                    HWND_BOTTOM,
-                    x,
-                    y,
-                    w,
-                    h,
-                    SWP_NOACTIVATE,
-                )
-            }
-            .map_err(|e| AppError::Mpv(format!("SetWindowPos: {e}")))?;
+            unsafe { SetWindowPos(self.hwnd, HWND_BOTTOM, x, y, w, h, SWP_NOACTIVATE) }
+                .map_err(|e| AppError::Mpv(format!("SetWindowPos: {e}")))?;
             Ok(())
         }
 

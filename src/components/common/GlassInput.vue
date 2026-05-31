@@ -17,6 +17,8 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (e: "update:modelValue", v: string): void;
+  (e: "change", v: string): void;
+  (e: "blur", v: string): void;
   (e: "rightIconClick"): void;
 }>();
 
@@ -24,6 +26,18 @@ const v = computed({
   get: () => props.modelValue,
   set: (val: string) => emit("update:modelValue", val),
 });
+
+function inputValue(event: Event): string {
+  return (event.target as HTMLInputElement).value;
+}
+
+function onChange(event: Event) {
+  emit("change", inputValue(event));
+}
+
+function onBlur(event: FocusEvent) {
+  emit("blur", inputValue(event));
+}
 </script>
 
 <template>
@@ -36,6 +50,8 @@ const v = computed({
       :placeholder="placeholder"
       :autocomplete="autocomplete"
       v-model="v"
+      @change="onChange"
+      @blur="onBlur"
     />
     <button
       v-if="rightIcon"

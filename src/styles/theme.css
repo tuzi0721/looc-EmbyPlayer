@@ -42,7 +42,7 @@
   --header-h: 52px;
   --topbar-h: 44px;
   --nav-h: 56px;
-  --content-pad: 24px;
+  --content-pad: clamp(18px, 2.4vw, 64px);
   --sidebar-w: 220px;
 
   /* Reference player surfaces */

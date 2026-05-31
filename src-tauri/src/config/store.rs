@@ -65,7 +65,12 @@ impl ConfigStore {
     }
 
     pub fn server(&self, id: &str) -> Option<Server> {
-        self.inner.read().servers.iter().find(|s| s.id == id).cloned()
+        self.inner
+            .read()
+            .servers
+            .iter()
+            .find(|s| s.id == id)
+            .cloned()
     }
 
     pub fn upsert_server(&self, server: Server) -> AppResult<()> {
@@ -102,7 +107,12 @@ impl ConfigStore {
     }
 
     pub fn account(&self, id: &str) -> Option<Account> {
-        self.inner.read().accounts.iter().find(|a| a.id == id).cloned()
+        self.inner
+            .read()
+            .accounts
+            .iter()
+            .find(|a| a.id == id)
+            .cloned()
     }
 
     pub fn upsert_account(&self, account: Account) -> AppResult<()> {
@@ -162,7 +172,12 @@ impl ConfigStore {
     }
 
     pub fn download(&self, id: &str) -> Option<DownloadTask> {
-        self.inner.read().downloads.iter().find(|d| d.id == id).cloned()
+        self.inner
+            .read()
+            .downloads
+            .iter()
+            .find(|d| d.id == id)
+            .cloned()
     }
 
     pub fn upsert_download(&self, task: DownloadTask) -> AppResult<()> {

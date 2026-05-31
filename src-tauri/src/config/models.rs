@@ -134,6 +134,8 @@ pub struct AppSettings {
     #[serde(default = "default_global_ua")]
     pub default_user_agent: String,
     #[serde(default)]
+    pub first_run_completed: bool,
+    #[serde(default)]
     pub theme: Theme,
     #[serde(default = "default_blur_strength")]
     pub blur_strength: u32,
@@ -142,7 +144,9 @@ pub struct AppSettings {
     #[serde(default)]
     pub mpv_backend: MpvBackendKind,
     #[serde(default)]
-    pub mpv_executable_path: Option<String>,
+    pub external_player_path: Option<String>,
+    #[serde(default)]
+    pub external_player_args: String,
     #[serde(default = "default_true")]
     pub hardware_decoding: bool,
     #[serde(default = "default_cache_mb")]
@@ -151,6 +155,64 @@ pub struct AppSettings {
     /// They still exist in the store, they're just filtered out of the primary nav.
     #[serde(default)]
     pub hidden_server_ids: Vec<String>,
+    #[serde(default)]
+    pub hide_jav_codes: bool,
+    #[serde(default)]
+    pub show_network_speed: bool,
+    #[serde(default)]
+    pub stats_overlay_mode: StatsOverlayMode,
+    #[serde(default)]
+    pub blackout_other_displays: bool,
+    #[serde(default = "default_true")]
+    pub preserve_track_switch_cache: bool,
+    #[serde(default)]
+    pub skip_intro_outro_enabled: bool,
+    #[serde(default = "default_skip_intro_seconds")]
+    pub skip_intro_seconds: u32,
+    #[serde(default = "default_skip_outro_seconds")]
+    pub skip_outro_seconds: u32,
+    #[serde(default = "default_true")]
+    pub screenshot_include_subtitles: bool,
+    #[serde(default)]
+    pub append_auth_query: bool,
+    #[serde(default)]
+    pub home_hero_style: HomeHeroStyle,
+    #[serde(default = "default_true")]
+    pub close_to_tray: bool,
+    #[serde(default)]
+    pub trakt_sync_enabled: bool,
+    #[serde(default)]
+    pub trakt_username: Option<String>,
+    #[serde(default = "default_true")]
+    pub trakt_sync_watched: bool,
+    #[serde(default = "default_true")]
+    pub trakt_sync_ratings: bool,
+    #[serde(default)]
+    pub trakt_sync_favorites: bool,
+    #[serde(default = "default_danmaku_opacity")]
+    pub danmaku_opacity: f32,
+    #[serde(default = "default_danmaku_speed")]
+    pub danmaku_speed: f32,
+    #[serde(default = "default_danmaku_font_size")]
+    pub danmaku_font_size: u32,
+    #[serde(default = "default_true")]
+    pub danmaku_avoid_subtitles: bool,
+    #[serde(default = "default_danmaku_bottom_reserve_pct")]
+    pub danmaku_bottom_reserve_pct: u32,
+    #[serde(default = "default_subtitle_scale")]
+    pub subtitle_scale: f64,
+    #[serde(default = "default_subtitle_text_color")]
+    pub subtitle_text_color: String,
+    #[serde(default = "default_subtitle_outline_color")]
+    pub subtitle_outline_color: String,
+    #[serde(default = "default_subtitle_outline_size")]
+    pub subtitle_outline_size: f64,
+    #[serde(default)]
+    pub subtitle_shadow_offset: f64,
+    #[serde(default = "default_subtitle_position_pct")]
+    pub subtitle_position_pct: u32,
+    #[serde(default)]
+    pub subtitle_force_style: bool,
 }
 
 impl Default for AppSettings {
@@ -161,14 +223,45 @@ impl Default for AppSettings {
             race_timeout_ms: default_race_timeout_ms(),
             request_timeout_ms: default_request_timeout_ms(),
             default_user_agent: default_global_ua(),
+            first_run_completed: false,
             theme: Theme::default(),
             blur_strength: default_blur_strength(),
             enable_window_vibrancy: true,
             mpv_backend: MpvBackendKind::default(),
-            mpv_executable_path: None,
+            external_player_path: None,
+            external_player_args: String::new(),
             hardware_decoding: true,
             mpv_cache_mb: default_cache_mb(),
             hidden_server_ids: Vec::new(),
+            hide_jav_codes: false,
+            show_network_speed: false,
+            stats_overlay_mode: StatsOverlayMode::default(),
+            blackout_other_displays: false,
+            preserve_track_switch_cache: true,
+            skip_intro_outro_enabled: false,
+            skip_intro_seconds: default_skip_intro_seconds(),
+            skip_outro_seconds: default_skip_outro_seconds(),
+            screenshot_include_subtitles: true,
+            append_auth_query: false,
+            home_hero_style: HomeHeroStyle::default(),
+            close_to_tray: true,
+            trakt_sync_enabled: false,
+            trakt_username: None,
+            trakt_sync_watched: true,
+            trakt_sync_ratings: true,
+            trakt_sync_favorites: false,
+            danmaku_opacity: default_danmaku_opacity(),
+            danmaku_speed: default_danmaku_speed(),
+            danmaku_font_size: default_danmaku_font_size(),
+            danmaku_avoid_subtitles: true,
+            danmaku_bottom_reserve_pct: default_danmaku_bottom_reserve_pct(),
+            subtitle_scale: default_subtitle_scale(),
+            subtitle_text_color: default_subtitle_text_color(),
+            subtitle_outline_color: default_subtitle_outline_color(),
+            subtitle_outline_size: default_subtitle_outline_size(),
+            subtitle_shadow_offset: 0.0,
+            subtitle_position_pct: default_subtitle_position_pct(),
+            subtitle_force_style: false,
         }
     }
 }
@@ -184,6 +277,32 @@ pub enum Theme {
 impl Default for Theme {
     fn default() -> Self {
         Self::Dark
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HomeHeroStyle {
+    Classic,
+    Cinema,
+}
+
+impl Default for HomeHeroStyle {
+    fn default() -> Self {
+        Self::Classic
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StatsOverlayMode {
+    Winui,
+    MpvOsd,
+}
+
+impl Default for StatsOverlayMode {
+    fn default() -> Self {
+        Self::Winui
     }
 }
 
@@ -220,4 +339,37 @@ fn default_blur_strength() -> u32 {
 }
 fn default_cache_mb() -> u32 {
     256
+}
+fn default_danmaku_opacity() -> f32 {
+    0.85
+}
+fn default_danmaku_speed() -> f32 {
+    1.0
+}
+fn default_danmaku_font_size() -> u32 {
+    22
+}
+fn default_danmaku_bottom_reserve_pct() -> u32 {
+    18
+}
+fn default_subtitle_scale() -> f64 {
+    1.0
+}
+fn default_subtitle_text_color() -> String {
+    "#FFFFFF".to_string()
+}
+fn default_subtitle_outline_color() -> String {
+    "#000000".to_string()
+}
+fn default_subtitle_outline_size() -> f64 {
+    1.65
+}
+fn default_subtitle_position_pct() -> u32 {
+    100
+}
+fn default_skip_intro_seconds() -> u32 {
+    90
+}
+fn default_skip_outro_seconds() -> u32 {
+    90
 }

@@ -24,7 +24,7 @@ const lib = useLibraryStore();
 
 
 
-const sortBy = ref<"SortName" | "PremiereDate" | "DateCreated" | "CommunityRating">("SortName");
+const sortBy = ref<"SortName" | "PremiereDate" | "DateCreated" | "CommunityRating" | "Bitrate">("SortName");
 
 const sortOrder = ref<"Ascending" | "Descending">("Ascending");
 
@@ -41,6 +41,10 @@ const PAGE_SIZE = 48;
 
 
 const items = computed(() => lib.itemsByParent[props.id] ?? []);
+
+const currentView = computed(() => lib.views.find((view) => view.Id === props.id) ?? null);
+
+const libraryTitle = computed(() => currentView.value?.Name?.trim() || "媒体库");
 
 const total = computed(() => lib.totalByParent[props.id] ?? items.value.length);
 
@@ -62,7 +66,7 @@ function baseParams(): [string, string][] {
 
     ["Recursive", "true"],
 
-    ["IncludeItemTypes", "Movie,Series"],
+    ["IncludeItemTypes", "Movie,Series,BoxSet"],
 
     ["Fields", "PrimaryImageAspectRatio,Overview,ProductionYear"],
 
@@ -80,7 +84,10 @@ async function load() {
 
   try {
 
-    await lib.loadParent(props.id, baseParams());
+    await Promise.all([
+      lib.loadParent(props.id, baseParams()),
+      lib.views.length === 0 ? lib.refreshHome().catch(() => {}) : Promise.resolve(),
+    ]);
 
   } finally {
 
@@ -166,7 +173,9 @@ function openItem(id: string) {
 
     <GlassNavBar show-back>
 
-      <template #title>媒体库</template>
+      <template #title>
+        <span class="library-title" :title="libraryTitle">{{ libraryTitle }}</span>
+      </template>
 
       <template #right>
 
@@ -181,6 +190,8 @@ function openItem(id: string) {
             <option value="DateCreated">添加日期</option>
 
             <option value="CommunityRating">评分</option>
+
+            <option value="Bitrate">比特率</option>
 
           </select>
 
@@ -275,6 +286,20 @@ function openItem(id: string) {
   flex-direction: column;
 
   min-height: 0;
+
+}
+
+.library-title {
+
+  display: block;
+
+  max-width: min(42vw, 360px);
+
+  overflow: hidden;
+
+  text-overflow: ellipsis;
+
+  white-space: nowrap;
 
 }
 

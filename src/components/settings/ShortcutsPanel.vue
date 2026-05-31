@@ -4,33 +4,12 @@ import { Icon } from "@iconify/vue";
 
 import GlassButton from "@/components/common/GlassButton.vue";
 import { api } from "@/api";
-
-interface LocalShortcut {
-  combo: string;
-  description: string;
-}
+import { PLAYER_SHORTCUT_SUMMARY } from "@/utils/keyboardShortcuts";
 
 interface GlobalShortcut {
   action: string;
   accelerator: string;
 }
-
-const LOCAL_SHORTCUTS: LocalShortcut[] = [
-  { combo: "Space / K", description: "播放 / 暂停" },
-  { combo: "← / J", description: "后退 10 秒" },
-  { combo: "→ / L", description: "前进 10 秒" },
-  { combo: "Shift + ← / →", description: "后退 / 前进 60 秒" },
-  { combo: "↑ / ↓", description: "音量 ±5" },
-  { combo: "M", description: "静音 / 取消静音" },
-  { combo: "F", description: "切换全屏" },
-  { combo: "S", description: "字幕面板" },
-  { combo: "C", description: "切换字幕轨道" },
-  { combo: "D", description: "切换弹幕" },
-  { combo: "+ / -", description: "速度 ±0.1" },
-  { combo: "[ / ]", description: "字幕延迟 ±100ms" },
-  { combo: "0 ~ 9", description: "跳到 0% ~ 90%" },
-  { combo: "Esc", description: "关闭面板 / 退出全屏" },
-];
 
 const ACTION_LABELS: Record<string, string> = {
   play_pause: "播放 / 暂停",
@@ -136,7 +115,7 @@ onBeforeUnmount(stopRecord);
 
     <h4>播放页内</h4>
     <div class="local">
-      <div v-for="row in LOCAL_SHORTCUTS" :key="row.combo" class="local__row">
+      <div v-for="row in PLAYER_SHORTCUT_SUMMARY" :key="row.combo" class="local__row">
         <kbd>{{ row.combo }}</kbd>
         <span>{{ row.description }}</span>
       </div>
@@ -170,6 +149,8 @@ onBeforeUnmount(stopRecord);
             v-if="byAction[action]"
             size="sm"
             variant="danger"
+            title="解绑快捷键"
+            :aria-label="`解绑 ${ACTION_LABELS[action]} 快捷键`"
             @click="clearOne(action)"
           >
             <Icon icon="lucide:x" width="14" />

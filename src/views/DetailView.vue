@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
 
@@ -8,7 +8,11 @@ import { useAuthStore } from "@/stores/auth";
 import { useLibraryStore } from "@/stores/library";
 import { usePlayerStore } from "@/stores/player";
 import { useServerStore } from "@/stores/server";
-import type { MediaItem } from "@/types/models";
+import { useSettingsStore } from "@/stores/settings";
+import type { MediaItem, MediaPerson, NameIdPair, UserData } from "@/types/models";
+import { writeTextToClipboard } from "@/utils/clipboard";
+import { filterJavItems } from "@/utils/javFilter";
+import { mediaImageUrl, mediaItemImageUrl, type MediaImageType } from "@/utils/mediaImages";
 
 const props = defineProps<{ id: string }>();
 const router = useRouter();
@@ -16,15 +20,84 @@ const lib = useLibraryStore();
 const auth = useAuthStore();
 const serverStore = useServerStore();
 const playerStore = usePlayerStore();
+const settings = useSettingsStore();
 
 const item = computed(() => lib.itemCache[props.id] ?? null);
 const loading = ref(false);
 const loadError = ref<string | null>(null);
+const actionError = ref<string | null>(null);
+const shareStatus = ref<string | null>(null);
+const userDataUpdating = ref<"favorite" | "played" | null>(null);
+const playNavigating = ref(false);
+const showStudioPopover = ref(false);
+let shareStatusTimer: number | null = null;
+
+const STUDIO_VISIBLE_LIMIT = 3;
+
+type StudioEntry = {
+  key: string;
+  id?: string | null;
+  name: string;
+};
+
+type ExternalLink = {
+  key: string;
+  label: string;
+  url: string;
+};
+
+type BadgeTone = "movie" | "series" | "episode" | "collection" | "folder" | "audio" | "progress" | "watched";
+
+function clampPercent(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, value));
+}
+
+function itemProgress(target?: MediaItem | null) {
+  const explicit = target?.UserData?.PlayedPercentage;
+  if (explicit != null) return clampPercent(explicit);
+  const position = target?.UserData?.PlaybackPositionTicks ?? 0;
+  const runtime = target?.RunTimeTicks ?? 0;
+  if (position <= 0 || runtime <= 0) return 0;
+  return clampPercent((position / runtime) * 100);
+}
+
+const loadErrorTitle = computed(() => {
+  const message = loadError.value ?? "";
+  if (/parse JSON|error decoding|expected .* at line/i.test(message)) return "详情数据解析失败";
+  if (/network error|timeout|failed to fetch/i.test(message)) return "网络请求失败";
+  return "详情加载失败";
+});
+
+const friendlyLoadError = computed(() => {
+  const message = (loadError.value ?? "").replace(/\s+/g, " ").trim();
+  if (!message) return "";
+  if (/parse JSON|error decoding|expected .* at line/i.test(message)) {
+    return "服务器返回了非标准详情字段，Hills Lite 会尽量兼容。请重试，或先返回上一页。";
+  }
+  if (/network error|timeout|failed to fetch/i.test(message)) {
+    return "连接服务器失败，请检查服务器线路和网络状态后重试。";
+  }
+  return message.length > 220 ? `${message.slice(0, 220)}...` : message;
+});
+
+const loadErrorDetail = computed(() => {
+  const message = (loadError.value ?? "").replace(/\s+/g, " ").trim();
+  if (!message || message === friendlyLoadError.value) return "";
+  return message.length > 720 ? `${message.slice(0, 720)}...` : message;
+});
 
 const seasons = ref<MediaItem[]>([]);
 const activeSeasonId = ref<string | null>(null);
 const episodes = ref<MediaItem[]>([]);
 const loadingEpisodes = ref(false);
+const specialFeatures = ref<MediaItem[]>([]);
+const loadingSpecialFeatures = ref(false);
+const similarItems = ref<MediaItem[]>([]);
+const loadingSimilar = ref(false);
+let detailLoadSeq = 0;
+let episodeLoadSeq = 0;
+let suppressNextSeasonWatch = false;
 
 const isSeries = computed(() => item.value?.Type === "Series");
 const isEpisode = computed(() => item.value?.Type === "Episode");
@@ -37,23 +110,42 @@ const activeServer = computed(() => {
   return a ? serverStore.byId(a.serverId) ?? null : null;
 });
 
-function imageUrl(
-  target: MediaItem,
-  imageType: "Backdrop" | "Primary" = "Backdrop",
+function itemImageUrl(
+  itemId: string,
+  imageType: MediaImageType = "Primary",
+  tag?: string | null,
   maxWidth = 1600,
 ): string | null {
+  return mediaImageUrl(activeServer.value, itemId, imageType, {
+    maxWidth,
+    quality: 82,
+    format: "webp",
+    tag,
+  });
+}
+
+function activeLineBaseUrl(): string | null {
   const s = activeServer.value;
   if (!s) return null;
   const line = s.lines.find((l) => l.id === s.activeLineId) ?? s.lines[0];
-  if (!line) return null;
-  const tag =
-    imageType === "Backdrop"
-      ? target.BackdropImageTags?.[0] ?? target.ImageTags?.Primary
-      : target.ImageTags?.Primary;
-  const sep = line.baseUrl.endsWith("/") ? "" : "/";
-  const params = new URLSearchParams({ maxWidth: String(maxWidth), quality: "82", format: "webp" });
-  if (tag) params.set("tag", tag);
-  return `${line.baseUrl}${sep}Items/${target.Id}/Images/${imageType}?${params.toString()}`;
+  return line?.baseUrl ?? null;
+}
+
+function providerId(ids: MediaItem["ProviderIds"], ...names: string[]): string | null {
+  if (!ids) return null;
+  const expected = new Set(names.map((name) => name.toLowerCase()));
+  for (const [key, value] of Object.entries(ids)) {
+    if (expected.has(key.toLowerCase()) && value) return String(value);
+  }
+  return null;
+}
+
+function imageUrl(
+  target: MediaItem,
+  imageType: MediaImageType = "Backdrop",
+  maxWidth = 1600,
+): string | null {
+  return mediaItemImageUrl(activeServer.value, target, imageType, maxWidth);
 }
 
 const backdropUrl = computed(() => (item.value ? imageUrl(item.value) : null));
@@ -92,6 +184,60 @@ const metaParts = computed(() => {
   return parts;
 });
 
+const externalLinks = computed<ExternalLink[]>(() => {
+  const i = item.value;
+  if (!i) return [];
+  const links: ExternalLink[] = [];
+  const baseUrl = activeLineBaseUrl();
+  if (baseUrl) {
+    const sep = baseUrl.endsWith("/") ? "" : "/";
+    links.push({
+      key: "server",
+      label: activeServer.value?.kind === "jellyfin" ? "Jellyfin" : "Emby",
+      url: `${baseUrl}${sep}web/index.html#!/item?id=${encodeURIComponent(i.Id)}`,
+    });
+  }
+
+  const imdb = providerId(i.ProviderIds, "Imdb", "IMDb");
+  if (imdb) {
+    links.push({
+      key: "imdb",
+      label: "IMDb",
+      url: `https://www.imdb.com/title/${encodeURIComponent(imdb)}/`,
+    });
+  }
+
+  const tmdb = providerId(i.ProviderIds, "Tmdb", "TMDb");
+  if (tmdb) {
+    const kind = i.Type === "Movie" ? "movie" : "tv";
+    links.push({
+      key: "tmdb",
+      label: "TMDB",
+      url: `https://www.themoviedb.org/${kind}/${encodeURIComponent(tmdb)}`,
+    });
+  }
+
+  const tvdb = providerId(i.ProviderIds, "Tvdb", "TVDb");
+  if (tvdb) {
+    links.push({
+      key: "tvdb",
+      label: "TVDB",
+      url: `https://thetvdb.com/dereferrer/series/${encodeURIComponent(tvdb)}`,
+    });
+  }
+
+  const douban = providerId(i.ProviderIds, "Douban");
+  if (douban) {
+    links.push({
+      key: "douban",
+      label: "豆瓣",
+      url: `https://movie.douban.com/subject/${encodeURIComponent(douban)}/`,
+    });
+  }
+
+  return links;
+});
+
 const itemTypeLabel = computed(() => {
   switch (item.value?.Type) {
     case "Movie":
@@ -115,6 +261,58 @@ const itemTypeLabel = computed(() => {
   }
 });
 
+const itemTypeIcon = computed(() => {
+  switch (item.value?.Type) {
+    case "Movie":
+      return "lucide:film";
+    case "Series":
+      return "lucide:tv";
+    case "Episode":
+      return "lucide:clapperboard";
+    case "Season":
+      return "lucide:layers-3";
+    case "Audio":
+    case "MusicAlbum":
+      return "lucide:music";
+    case "BoxSet":
+      return "lucide:package";
+    case "Folder":
+      return "lucide:folder";
+    default:
+      return "lucide:tag";
+  }
+});
+
+const itemTypeTone = computed<BadgeTone>(() => {
+  switch (item.value?.Type) {
+    case "Movie":
+      return "movie";
+    case "Series":
+    case "Season":
+      return "series";
+    case "Episode":
+      return "episode";
+    case "Audio":
+    case "MusicAlbum":
+      return "audio";
+    case "BoxSet":
+      return "collection";
+    case "Folder":
+      return "folder";
+    default:
+      return "folder";
+  }
+});
+
+const typeBadge = computed(() => {
+  if (!itemTypeLabel.value) return null;
+  return {
+    icon: itemTypeIcon.value,
+    label: itemTypeLabel.value,
+    tone: itemTypeTone.value,
+  };
+});
+
 const genreLabels = computed(() => {
   const i = item.value;
   if (!i) return [];
@@ -126,9 +324,40 @@ const genreLabels = computed(() => {
 });
 
 const heroTags = computed(() => {
-  const tags = [itemTypeLabel.value, ...genreLabels.value].filter(Boolean);
-  return Array.from(new Set(tags)).slice(0, 7);
+  return Array.from(new Set(genreLabels.value)).slice(0, 6);
 });
+
+function normalizeStudio(studio: NameIdPair): StudioEntry | null {
+  const name = studio.Name?.trim();
+  if (!name) return null;
+  const id = studio.Id?.trim() || null;
+  return {
+    key: id ? `id:${id}` : `name:${name.toLowerCase()}`,
+    id,
+    name,
+  };
+}
+
+const studioEntries = computed(() => {
+  const seen = new Set<string>();
+  const entries: StudioEntry[] = [];
+  for (const studio of item.value?.Studios ?? []) {
+    const entry = normalizeStudio(studio);
+    if (!entry || seen.has(entry.key)) continue;
+    seen.add(entry.key);
+    entries.push(entry);
+  }
+  return entries;
+});
+
+const visibleStudioEntries = computed(() => studioEntries.value.slice(0, STUDIO_VISIBLE_LIMIT));
+const hiddenStudioEntries = computed(() => studioEntries.value.slice(STUDIO_VISIBLE_LIMIT));
+
+const castPeople = computed(() =>
+  (item.value?.People ?? [])
+    .filter((person) => person.Name?.trim())
+    .slice(0, 18),
+);
 
 const resumeMs = computed(() => {
   const target = continueEpisode.value ?? item.value;
@@ -145,52 +374,143 @@ const continueEpisode = computed(() => {
   return inProgress ?? episodes.value[0] ?? null;
 });
 
+const resumePercent = computed(() => itemProgress(continueEpisode.value ?? item.value));
+
+const playStateBadge = computed(() => {
+  const target = continueEpisode.value ?? item.value;
+  if (!target) return null;
+  if (target.UserData?.Played) {
+    return { icon: "lucide:check", label: "已看", tone: "watched" as BadgeTone };
+  }
+  if (resumePercent.value > 0 && resumePercent.value < 100) {
+    return {
+      icon: "lucide:clock-3",
+      label: `已看 ${Math.round(resumePercent.value)}%`,
+      tone: "progress" as BadgeTone,
+    };
+  }
+  return null;
+});
+
 const activeSeasonName = computed(() => {
   const s = seasons.value.find((x) => x.Id === activeSeasonId.value);
   return s?.Name ?? "第 1 季";
 });
 
-const versionLabel = ref("WEB-DL · 1080p · H264");
-const audioLabel = ref("Japanese · AAC stereo (默认)");
-const subLabel = ref("Chinese Simplified (默认 SUBRIP)");
-
 onMounted(() => void loadDetail());
+onBeforeUnmount(() => clearShareStatus());
 watch(() => props.id, () => void loadDetail());
+watch(studioEntries, () => {
+  showStudioPopover.value = false;
+});
 
 async function loadDetail() {
+  const seq = ++detailLoadSeq;
   loading.value = true;
   loadError.value = null;
   seasons.value = [];
   episodes.value = [];
+  specialFeatures.value = [];
+  similarItems.value = [];
+  loadingSpecialFeatures.value = false;
+  loadingSimilar.value = false;
+  loadingEpisodes.value = false;
+  episodeLoadSeq += 1;
+  suppressNextSeasonWatch = false;
   activeSeasonId.value = null;
   try {
-    await lib.loadItem(props.id);
+    const detail = await lib.loadItem(props.id);
+    if (seq !== detailLoadSeq) return;
+    if (seq === detailLoadSeq) void loadSpecialFeatures(props.id, seq);
+    if (seq === detailLoadSeq) void loadSimilar(props.id, seq);
     if (isSeries.value) {
       const sresp = await api.listSeasons(props.id);
+      if (seq !== detailLoadSeq) return;
       seasons.value = sresp.Items;
       if (sresp.Items[0]) activeSeasonId.value = sresp.Items[0].Id;
-    } else if (isEpisode.value && item.value?.SeasonId) {
-      activeSeasonId.value = item.value.SeasonId;
-      if (seriesId.value) {
-        const sresp = await api.listSeasons(seriesId.value);
+    } else if (detail.Type === "Episode" && detail.SeasonId && detail.SeriesId) {
+      const requestSeasonId = detail.SeasonId;
+      const requestSeriesId = detail.SeriesId;
+      const episodesSeq = ++episodeLoadSeq;
+      loadingEpisodes.value = true;
+      try {
+        const [sresp, eresp] = await Promise.all([
+          api.listSeasons(requestSeriesId),
+          api.listEpisodes({ seriesId: requestSeriesId, seasonId: requestSeasonId }),
+        ]);
+        if (seq !== detailLoadSeq || episodesSeq !== episodeLoadSeq) return;
         seasons.value = sresp.Items;
+        episodes.value = eresp.Items;
+        suppressNextSeasonWatch = true;
+        activeSeasonId.value = requestSeasonId;
+      } finally {
+        if (seq === detailLoadSeq && episodesSeq === episodeLoadSeq) {
+          loadingEpisodes.value = false;
+        }
       }
     }
   } catch (e) {
-    loadError.value = String(e);
+    if (seq === detailLoadSeq) loadError.value = String(e);
   } finally {
-    loading.value = false;
+    if (seq === detailLoadSeq) loading.value = false;
+  }
+}
+
+async function loadSpecialFeatures(itemId: string, seq: number) {
+  loadingSpecialFeatures.value = true;
+  try {
+    const resp = await api.specialFeatures(itemId, 18);
+    if (seq !== detailLoadSeq) return;
+    specialFeatures.value = filterJavItems(
+      resp.Items.filter((candidate) => candidate.Id !== itemId),
+      settings.settings.hideJavCodes,
+    ).slice(0, 18);
+  } catch (error) {
+    if (seq === detailLoadSeq) specialFeatures.value = [];
+    console.warn(error);
+  } finally {
+    if (seq === detailLoadSeq) loadingSpecialFeatures.value = false;
+  }
+}
+
+async function loadSimilar(itemId: string, seq: number) {
+  loadingSimilar.value = true;
+  try {
+    const resp = await api.similarItems(itemId, 18);
+    if (seq !== detailLoadSeq) return;
+    similarItems.value = filterJavItems(
+      resp.Items.filter((candidate) => candidate.Id !== itemId),
+      settings.settings.hideJavCodes,
+    ).slice(0, 18);
+  } catch (error) {
+    if (seq === detailLoadSeq) similarItems.value = [];
+    console.warn(error);
+  } finally {
+    if (seq === detailLoadSeq) loadingSimilar.value = false;
   }
 }
 
 watch(activeSeasonId, async (sid) => {
   if (!sid || !seriesId.value) return;
+  if (suppressNextSeasonWatch) {
+    suppressNextSeasonWatch = false;
+    return;
+  }
+  const requestSeriesId = seriesId.value;
+  const seq = detailLoadSeq;
+  const episodesSeq = ++episodeLoadSeq;
   loadingEpisodes.value = true;
   try {
-    const resp = await api.listEpisodes({ seriesId: seriesId.value, seasonId: sid });
+    const resp = await api.listEpisodes({ seriesId: requestSeriesId, seasonId: sid });
+    if (seq !== detailLoadSeq || episodesSeq !== episodeLoadSeq || requestSeriesId !== seriesId.value) {
+      return;
+    }
     episodes.value = resp.Items;
+  } catch (error) {
+    if (seq === detailLoadSeq && episodesSeq === episodeLoadSeq) episodes.value = [];
+    console.warn(error);
   } finally {
-    loadingEpisodes.value = false;
+    if (seq === detailLoadSeq && episodesSeq === episodeLoadSeq) loadingEpisodes.value = false;
   }
 });
 
@@ -202,15 +522,21 @@ watch(
   { immediate: true },
 );
 
-function playTarget(id: string, startMs: number) {
-  router.push({
-    name: "player",
-    params: { id },
-    query: { start: String(startMs), from: props.id },
-  });
+async function playTarget(id: string, startMs: number) {
+  if (playNavigating.value) return;
+  playNavigating.value = true;
+  try {
+    await router.push({
+      name: "player",
+      params: { id },
+      query: { start: String(startMs), from: props.id },
+    });
+  } finally {
+    playNavigating.value = false;
+  }
 }
 
-function continuePlay() {
+async function continuePlay() {
   if (isSeries.value) {
     const ep = continueEpisode.value;
     if (!ep) return;
@@ -222,13 +548,13 @@ function continuePlay() {
       );
     }
     const start = Math.round((ep.UserData?.PlaybackPositionTicks ?? 0) / 10_000);
-    playTarget(ep.Id, start);
+    await playTarget(ep.Id, start);
     return;
   }
-  playTarget(props.id, resumeMs.value > 0 ? resumeMs.value : 0);
+  await playTarget(props.id, resumeMs.value > 0 ? resumeMs.value : 0);
 }
 
-function playEpisode(ep: MediaItem) {
+async function playEpisode(ep: MediaItem) {
   const idx = episodes.value.findIndex((e) => e.Id === ep.Id);
   if (idx >= 0) {
     playerStore.setQueue(
@@ -237,12 +563,82 @@ function playEpisode(ep: MediaItem) {
     );
   }
   const start = Math.round((ep.UserData?.PlaybackPositionTicks ?? 0) / 10_000);
-  playTarget(ep.Id, start);
+  await playTarget(ep.Id, start);
 }
 
 function goBack() {
   if (window.history.length > 1) router.back();
   else router.push("/home").catch(() => {});
+}
+
+function openStudio(studio: StudioEntry) {
+  const routeId = studio.id ?? `name:${studio.name}`;
+  router.push({
+    name: "studio-detail",
+    params: { id: routeId },
+    query: { name: studio.name },
+  }).catch(() => {});
+}
+
+function openRelatedItem(target: MediaItem) {
+  router.push({
+    name: "item-detail",
+    params: { id: target.Id },
+  }).catch(() => {});
+}
+
+async function playSpecialFeature(target: MediaItem) {
+  await playTarget(target.Id, 0);
+}
+
+async function openExternalLink(link: ExternalLink) {
+  try {
+    await api.openExternal(link.url);
+  } catch (error) {
+    actionError.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+function clearShareStatus() {
+  shareStatus.value = null;
+  if (shareStatusTimer) {
+    window.clearTimeout(shareStatusTimer);
+    shareStatusTimer = null;
+  }
+}
+
+function showShareStatus(message: string) {
+  shareStatus.value = message;
+  if (shareStatusTimer) {
+    window.clearTimeout(shareStatusTimer);
+  }
+  shareStatusTimer = window.setTimeout(() => {
+    shareStatus.value = null;
+    shareStatusTimer = null;
+  }, 2400);
+}
+
+function sharePayload() {
+  const serverLink = externalLinks.value.find((link) => link.key === "server");
+  if (serverLink) {
+    return { text: serverLink.url, status: "分享链接已复制" };
+  }
+  const title = item.value?.Name ?? item.value?.SeriesName ?? "Hills Lite";
+  return {
+    text: [`${title}`, `ItemId: ${props.id}`].join("\n"),
+    status: "条目信息已复制",
+  };
+}
+
+async function shareItem() {
+  try {
+    actionError.value = null;
+    const payload = sharePayload();
+    await writeTextToClipboard(payload.text);
+    showShareStatus(payload.status);
+  } catch (error) {
+    actionError.value = error instanceof Error ? error.message : String(error);
+  }
 }
 
 function isCurrentEpisode(ep: MediaItem) {
@@ -252,17 +648,128 @@ function isCurrentEpisode(ep: MediaItem) {
 }
 
 function episodeProgress(ep: MediaItem) {
-  const explicit = ep.UserData?.PlayedPercentage;
-  if (explicit != null) return Math.max(0, Math.min(100, explicit));
-  const position = ep.UserData?.PlaybackPositionTicks ?? 0;
-  const runtime = ep.RunTimeTicks ?? 0;
-  if (position <= 0 || runtime <= 0) return 0;
-  return Math.max(0, Math.min(100, (position / runtime) * 100));
+  return itemProgress(ep);
+}
+
+function episodeProgressWidth(ep: MediaItem) {
+  if (ep.UserData?.Played) return 100;
+  return episodeProgress(ep);
 }
 
 function hasEpisodeProgress(ep: MediaItem) {
+  return episodeProgressWidth(ep) > 0;
+}
+
+function episodeProgressLabel(ep: MediaItem) {
+  if (ep.UserData?.Played) return "已看";
   const progress = episodeProgress(ep);
-  return progress > 0 && progress < 100 && !ep.UserData?.Played;
+  if (progress > 0 && progress < 100) return `${Math.round(progress)}%`;
+  return "";
+}
+
+function episodeIndexLabel(ep: MediaItem) {
+  const season = ep.ParentIndexNumber;
+  const episode = ep.IndexNumber;
+  if (season != null && episode != null) return `S${season}E${episode}`;
+  if (episode != null) return `E${episode}`;
+  return "";
+}
+
+function relatedKindLabel(target: MediaItem) {
+  if (target.Type === "Movie") return "电影";
+  if (target.Type === "Series") return "剧集";
+  if (target.Type === "Episode") return "单集";
+  if (target.Type === "BoxSet") return "合集";
+  return target.Type ?? "媒体";
+}
+
+function specialFeatureKindLabel(target: MediaItem) {
+  if (target.Type === "Trailer") return "预告片";
+  if (target.Type === "BehindTheScenes") return "幕后";
+  if (target.Type === "DeletedScene") return "删减片段";
+  if (target.Type === "Interview") return "访谈";
+  if (target.Type === "Scene" || target.Type === "Clip") return "片段";
+  return relatedKindLabel(target);
+}
+
+function relatedSubtitle(target: MediaItem) {
+  if (target.Type === "Episode" && target.SeriesName) {
+    const season = target.ParentIndexNumber == null ? "?" : String(target.ParentIndexNumber).padStart(2, "0");
+    const episode = target.IndexNumber == null ? "?" : String(target.IndexNumber).padStart(2, "0");
+    return `${target.SeriesName} · S${season}E${episode}`;
+  }
+  if (target.ProductionYear) return String(target.ProductionYear);
+  return relatedKindLabel(target);
+}
+
+function personRole(person: MediaPerson) {
+  return person.Role || person.Type || "";
+}
+
+function personImageUrl(person: MediaPerson) {
+  if (!person.Id || !person.PrimaryImageTag) return null;
+  return itemImageUrl(person.Id, "Primary", person.PrimaryImageTag, 220);
+}
+
+function mergedUserData(patch: Partial<UserData>): UserData {
+  const cur = item.value?.UserData;
+  return {
+    PlayedPercentage: cur?.PlayedPercentage ?? null,
+    PlaybackPositionTicks: cur?.PlaybackPositionTicks ?? null,
+    Played: cur?.Played ?? false,
+    IsFavorite: cur?.IsFavorite ?? false,
+    PlayCount: cur?.PlayCount ?? 0,
+    ...patch,
+  };
+}
+
+async function toggleFavorite() {
+  const current = item.value;
+  if (!current || userDataUpdating.value) return;
+
+  const next = !current.UserData?.IsFavorite;
+  actionError.value = null;
+  userDataUpdating.value = "favorite";
+  lib.updateItemUserData(current.Id, mergedUserData({ IsFavorite: next }));
+
+  try {
+    const userData = await api.setItemFavorite({ itemId: current.Id, value: next });
+    lib.updateItemUserData(current.Id, userData);
+  } catch (e) {
+    actionError.value = next ? "收藏失败，请稍后重试" : "取消收藏失败，请稍后重试";
+    await lib.loadItem(current.Id).catch(() => {});
+    console.warn(e);
+  } finally {
+    userDataUpdating.value = null;
+  }
+}
+
+async function togglePlayed() {
+  const current = item.value;
+  if (!current || userDataUpdating.value) return;
+
+  const next = !current.UserData?.Played;
+  actionError.value = null;
+  userDataUpdating.value = "played";
+  lib.updateItemUserData(
+    current.Id,
+    mergedUserData({
+      Played: next,
+      PlayedPercentage: next ? 100 : 0,
+      PlaybackPositionTicks: next ? current.RunTimeTicks ?? 0 : 0,
+    }),
+  );
+
+  try {
+    const userData = await api.setItemPlayed({ itemId: current.Id, value: next });
+    lib.updateItemUserData(current.Id, userData);
+  } catch (e) {
+    actionError.value = next ? "标记已看失败，请稍后重试" : "取消已看失败，请稍后重试";
+    await lib.loadItem(current.Id).catch(() => {});
+    console.warn(e);
+  } finally {
+    userDataUpdating.value = null;
+  }
 }
 </script>
 
@@ -273,11 +780,18 @@ function hasEpisodeProgress(ep: MediaItem) {
       <span>加载中…</span>
     </div>
 
-    <div v-else-if="loadError && !item" class="detail__loading">
-      <Icon icon="lucide:triangle-alert" width="24" />
-      <span>{{ loadError }}</span>
-      <button class="detail__retry" @click="loadDetail">重试</button>
-      <button class="detail__retry" @click="goBack">返回</button>
+    <div v-else-if="loadError && !item" class="detail__loading detail__loading--error">
+      <Icon icon="lucide:triangle-alert" width="28" class="detail__error-icon" />
+      <strong>{{ loadErrorTitle }}</strong>
+      <p>{{ friendlyLoadError }}</p>
+      <details v-if="loadErrorDetail" class="detail__error-detail">
+        <summary>错误详情</summary>
+        <code>{{ loadErrorDetail }}</code>
+      </details>
+      <div class="detail__error-actions">
+        <button class="detail__retry" @click="loadDetail">重试</button>
+        <button class="detail__retry" @click="goBack">返回</button>
+      </div>
     </div>
 
     <template v-else-if="item">
@@ -295,28 +809,63 @@ function hasEpisodeProgress(ep: MediaItem) {
 
         <div class="hero__body">
           <div class="hero__main">
+            <div v-if="typeBadge || playStateBadge" class="hero__badges">
+              <span
+                v-if="typeBadge"
+                class="media-badge"
+                :class="`media-badge--${typeBadge.tone}`"
+              >
+                <Icon :icon="typeBadge.icon" width="14" />
+                {{ typeBadge.label }}
+              </span>
+              <span
+                v-if="playStateBadge"
+                class="media-badge"
+                :class="`media-badge--${playStateBadge.tone}`"
+              >
+                <Icon :icon="playStateBadge.icon" width="14" />
+                {{ playStateBadge.label }}
+              </span>
+            </div>
+
             <div class="hero__actions">
-              <button class="hero__play" @click="continuePlay">
-                <Icon icon="lucide:play" width="20" />
+              <button class="hero__play" :disabled="playNavigating" @click="continuePlay">
+                <Icon
+                  :icon="playNavigating ? 'lucide:loader' : 'lucide:play'"
+                  width="20"
+                  :class="{ spin: playNavigating }"
+                />
                 {{ resumeMs > 0 ? "继续播放" : "播放" }}
               </button>
               <div class="hero__circles">
-                <button class="circle-btn" title="分享">
+                <button class="circle-btn" :title="shareStatus ?? '复制分享链接'" @click="shareItem">
                   <Icon icon="lucide:share-2" width="18" />
                 </button>
                 <button
                   class="circle-btn"
                   :class="{ active: item.UserData?.IsFavorite }"
-                  title="收藏"
+                  :disabled="userDataUpdating === 'favorite'"
+                  :title="item.UserData?.IsFavorite ? '取消收藏' : '收藏'"
+                  @click="toggleFavorite"
                 >
-                  <Icon icon="lucide:heart" width="18" />
+                  <Icon
+                    :icon="userDataUpdating === 'favorite' ? 'lucide:loader' : 'lucide:heart'"
+                    width="18"
+                    :class="{ spin: userDataUpdating === 'favorite' }"
+                  />
                 </button>
                 <button
                   class="circle-btn"
                   :class="{ active: item.UserData?.Played }"
-                  title="已看"
+                  :disabled="userDataUpdating === 'played'"
+                  :title="item.UserData?.Played ? '取消已看' : '标记已看'"
+                  @click="togglePlayed"
                 >
-                  <Icon icon="lucide:check" width="18" />
+                  <Icon
+                    :icon="userDataUpdating === 'played' ? 'lucide:loader' : 'lucide:check'"
+                    width="18"
+                    :class="{ spin: userDataUpdating === 'played' }"
+                  />
                 </button>
               </div>
             </div>
@@ -331,31 +880,57 @@ function hasEpisodeProgress(ep: MediaItem) {
             <div v-if="metaParts.length" class="hero__meta">
               <span v-for="(p, i) in metaParts" :key="i">{{ p }}</span>
             </div>
+
+            <div v-if="studioEntries.length" class="hero__studios">
+              <span class="hero__studios-label">制作公司</span>
+              <div class="hero__studios-row">
+                <button
+                  v-for="studio in visibleStudioEntries"
+                  :key="studio.key"
+                  type="button"
+                  class="hero__studio-pill"
+                  @click="openStudio(studio)"
+                >
+                  {{ studio.name }}
+                </button>
+                <button
+                  v-if="hiddenStudioEntries.length"
+                  type="button"
+                  class="hero__studio-more"
+                  :aria-expanded="showStudioPopover"
+                  @click.stop="showStudioPopover = !showStudioPopover"
+                >
+                  +{{ hiddenStudioEntries.length }}
+                </button>
+              </div>
+              <div v-if="showStudioPopover && hiddenStudioEntries.length" class="hero__studio-popover">
+                <button
+                  v-for="studio in hiddenStudioEntries"
+                  :key="studio.key"
+                  type="button"
+                  class="hero__studio-popover-item"
+                  @click="openStudio(studio)"
+                >
+                  {{ studio.name }}
+                </button>
+              </div>
+            </div>
+            <div v-if="externalLinks.length" class="hero__links">
+              <button
+                v-for="link in externalLinks"
+                :key="link.key"
+                type="button"
+                class="hero__link"
+                @click="openExternalLink(link)"
+              >
+                <Icon icon="lucide:external-link" width="13" />
+                {{ link.label }}
+              </button>
+            </div>
+            <p v-if="actionError" class="hero__action-error">{{ actionError }}</p>
+            <p v-if="shareStatus" class="hero__action-status">{{ shareStatus }}</p>
           </div>
 
-          <div class="hero__pickers">
-            <label class="picker">
-              <span>版本</span>
-              <select v-model="versionLabel">
-                <option>WEB-DL · 1080p · H264</option>
-                <option>BluRay · 1080p · HEVC</option>
-              </select>
-            </label>
-            <label class="picker">
-              <span>音频</span>
-              <select v-model="audioLabel">
-                <option>Japanese · AAC stereo (默认)</option>
-                <option>Chinese · AAC stereo</option>
-              </select>
-            </label>
-            <label class="picker">
-              <span>字幕</span>
-              <select v-model="subLabel">
-                <option>Chinese Simplified (默认 SUBRIP)</option>
-                <option>关闭</option>
-              </select>
-            </label>
-          </div>
         </div>
       </section>
 
@@ -371,7 +946,6 @@ function hasEpisodeProgress(ep: MediaItem) {
               <option v-for="s in seasons" :key="s.Id" :value="s.Id">{{ s.Name }}</option>
             </select>
           </div>
-          <button class="link-btn">查看全部</button>
         </header>
 
         <div v-if="loadingEpisodes" class="episodes__loading">
@@ -383,13 +957,28 @@ function hasEpisodeProgress(ep: MediaItem) {
             :key="ep.Id"
             class="ep-card"
             :class="{ 'is-current': isCurrentEpisode(ep) }"
+            :disabled="playNavigating"
             @click="playEpisode(ep)"
           >
             <div class="ep-card__thumb">
               <img v-if="imageUrl(ep, 'Primary', 480)" :src="imageUrl(ep, 'Primary', 480)!" :alt="ep.Name" />
               <div v-else class="ep-card__placeholder">{{ ep.IndexNumber ?? "?" }}</div>
-              <div v-if="hasEpisodeProgress(ep)" class="ep-card__progress">
-                <span :style="{ width: episodeProgress(ep) + '%' }" />
+              <span v-if="episodeIndexLabel(ep)" class="ep-card__index">
+                {{ episodeIndexLabel(ep) }}
+              </span>
+              <span
+                v-if="episodeProgressLabel(ep)"
+                class="ep-card__state"
+                :class="{ 'ep-card__state--watched': ep.UserData?.Played }"
+              >
+                {{ episodeProgressLabel(ep) }}
+              </span>
+              <div
+                v-if="hasEpisodeProgress(ep)"
+                class="ep-card__progress"
+                :class="{ 'ep-card__progress--watched': ep.UserData?.Played }"
+              >
+                <span :style="{ width: episodeProgressWidth(ep) + '%' }" />
               </div>
             </div>
             <div class="ep-card__title">{{ ep.Name }}</div>
@@ -397,14 +986,91 @@ function hasEpisodeProgress(ep: MediaItem) {
         </div>
       </section>
 
-      <!-- Phase 2: load People API; hide empty placeholders for now -->
-      <section v-if="false" class="cast">
+      <section v-if="castPeople.length" class="cast">
         <h2>演职人员</h2>
         <div class="cast__scroll">
-          <div v-for="n in 6" :key="n" class="cast__item">
-            <div class="cast__avatar" />
-            <span class="cast__name">—</span>
+          <div v-for="person in castPeople" :key="person.Id ?? person.Name" class="cast__item">
+            <div class="cast__avatar">
+              <img
+                v-if="personImageUrl(person)"
+                :src="personImageUrl(person)!"
+                :alt="person.Name"
+                loading="lazy"
+                decoding="async"
+              />
+              <span v-else>{{ person.Name.slice(0, 1) }}</span>
+            </div>
+            <span class="cast__name">{{ person.Name }}</span>
+            <span v-if="personRole(person)" class="cast__role">{{ personRole(person) }}</span>
           </div>
+        </div>
+      </section>
+
+      <section v-if="loadingSpecialFeatures || specialFeatures.length" class="related related--extras">
+        <header class="related__head">
+          <h2>附加内容</h2>
+        </header>
+
+        <div v-if="loadingSpecialFeatures" class="related__loading">
+          <Icon icon="lucide:loader" width="18" class="spin" />
+        </div>
+
+        <div v-else class="related__scroll">
+          <button
+            v-for="feature in specialFeatures"
+            :key="feature.Id"
+            type="button"
+            class="related-card"
+            @click="playSpecialFeature(feature)"
+          >
+            <div class="related-card__art">
+              <img
+                v-if="imageUrl(feature, 'Primary', 420)"
+                :src="imageUrl(feature, 'Primary', 420)!"
+                :alt="feature.Name"
+                loading="lazy"
+                decoding="async"
+              />
+              <div v-else class="related-card__placeholder">{{ feature.Name.slice(0, 1) }}</div>
+              <span class="related-card__kind">{{ specialFeatureKindLabel(feature) }}</span>
+            </div>
+            <div class="related-card__title">{{ feature.Name }}</div>
+            <div class="related-card__sub">{{ relatedSubtitle(feature) }}</div>
+          </button>
+        </div>
+      </section>
+
+      <section v-if="loadingSimilar || similarItems.length" class="related">
+        <header class="related__head">
+          <h2>相似内容</h2>
+        </header>
+
+        <div v-if="loadingSimilar" class="related__loading">
+          <Icon icon="lucide:loader" width="18" class="spin" />
+        </div>
+
+        <div v-else class="related__scroll">
+          <button
+            v-for="related in similarItems"
+            :key="related.Id"
+            type="button"
+            class="related-card"
+            @click="openRelatedItem(related)"
+          >
+            <div class="related-card__art">
+              <img
+                v-if="imageUrl(related, related.Type === 'Episode' ? 'Backdrop' : 'Primary', 360)"
+                :src="imageUrl(related, related.Type === 'Episode' ? 'Backdrop' : 'Primary', 360)!"
+                :alt="related.Name"
+                loading="lazy"
+                decoding="async"
+              />
+              <div v-else class="related-card__placeholder">{{ related.Name.slice(0, 1) }}</div>
+              <span class="related-card__kind">{{ relatedKindLabel(related) }}</span>
+            </div>
+            <div class="related-card__title">{{ related.Name }}</div>
+            <div class="related-card__sub">{{ relatedSubtitle(related) }}</div>
+          </button>
         </div>
       </section>
     </template>
@@ -427,6 +1093,57 @@ function hasEpisodeProgress(ep: MediaItem) {
   font-size: 13px;
   padding: 24px;
   text-align: center;
+}
+.detail__loading--error {
+  align-content: center;
+  justify-items: center;
+  overflow: hidden;
+}
+.detail__error-icon {
+  color: var(--fg-tertiary);
+}
+.detail__loading--error strong {
+  color: var(--fg-primary);
+  font-size: 16px;
+}
+.detail__loading--error p {
+  width: min(680px, 100%);
+  margin: 0;
+  color: var(--fg-secondary);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.detail__error-detail {
+  width: min(760px, 100%);
+  text-align: left;
+  color: var(--fg-tertiary);
+}
+.detail__error-detail summary {
+  cursor: pointer;
+  text-align: center;
+  font-size: 12px;
+}
+.detail__error-detail code {
+  display: block;
+  max-height: 160px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--separator);
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.detail__error-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 .detail__retry {
   appearance: none;
@@ -488,12 +1205,60 @@ function hasEpisodeProgress(ep: MediaItem) {
   z-index: 1;
   padding: 0 var(--content-pad) 24px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 20px;
+  grid-template-columns: minmax(0, 1fr);
   align-items: end;
 }
 .hero__main {
   min-width: 0;
+}
+.hero__badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.media-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--fg-primary);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+.media-badge--movie {
+  border-color: rgba(10, 132, 255, 0.42);
+  background: rgba(10, 132, 255, 0.16);
+}
+.media-badge--series,
+.media-badge--episode {
+  border-color: rgba(48, 209, 88, 0.36);
+  background: rgba(48, 209, 88, 0.14);
+}
+.media-badge--collection {
+  border-color: rgba(255, 214, 10, 0.4);
+  background: rgba(255, 214, 10, 0.13);
+}
+.media-badge--audio {
+  border-color: rgba(191, 90, 242, 0.42);
+  background: rgba(191, 90, 242, 0.15);
+}
+.media-badge--folder {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+.media-badge--progress {
+  border-color: rgba(255, 159, 10, 0.42);
+  background: rgba(255, 159, 10, 0.15);
+}
+.media-badge--watched {
+  border-color: rgba(10, 132, 255, 0.5);
+  background: rgba(10, 132, 255, 0.2);
 }
 .hero__actions {
   display: flex;
@@ -518,6 +1283,10 @@ function hasEpisodeProgress(ep: MediaItem) {
   box-shadow: 0 8px 24px rgba(168, 85, 247, 0.35);
   flex-shrink: 0;
 }
+.hero__play:disabled {
+  cursor: progress;
+  opacity: 0.76;
+}
 .hero__circles {
   display: flex;
   gap: 10px;
@@ -539,11 +1308,15 @@ function hasEpisodeProgress(ep: MediaItem) {
   background: var(--accent-soft);
   color: var(--accent-hover);
 }
+.circle-btn:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
 .hero__title {
   margin: 0;
-  font-size: clamp(20px, 2.4vw, 28px);
+  font-size: 28px;
   font-weight: 800;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   line-height: 1.25;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -578,6 +1351,117 @@ function hasEpisodeProgress(ep: MediaItem) {
   font-size: 13px;
   color: var(--fg-secondary);
 }
+.hero__studios {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(680px, 100%);
+  margin-top: 10px;
+  min-width: 0;
+}
+.hero__studios-label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--fg-tertiary);
+}
+.hero__studios-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.hero__studio-pill,
+.hero__studio-more,
+.hero__studio-popover-item {
+  appearance: none;
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg-secondary);
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 12px;
+  line-height: 1;
+}
+.hero__studio-pill,
+.hero__studio-popover-item {
+  cursor: pointer;
+}
+.hero__studio-pill:hover,
+.hero__studio-popover-item:hover {
+  color: var(--fg-primary);
+  border-color: rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.13);
+}
+.hero__studio-more {
+  flex: 0 0 auto;
+  cursor: pointer;
+  color: var(--accent);
+  border-color: rgba(168, 85, 247, 0.42);
+  background: rgba(168, 85, 247, 0.14);
+}
+.hero__studio-popover {
+  position: absolute;
+  left: 70px;
+  top: calc(100% + 8px);
+  z-index: 5;
+  width: min(420px, calc(100vw - 48px));
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(18, 18, 22, 0.96);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(18px);
+}
+.hero__studio-popover-item {
+  max-width: 100%;
+}
+.hero__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+.hero__link {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.hero__link:hover {
+  border-color: rgba(255, 255, 255, 0.26);
+  color: var(--fg-primary);
+  background: rgba(255, 255, 255, 0.13);
+}
+.hero__action-error {
+  margin: 10px 0 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+.hero__action-status {
+  margin: 10px 0 0;
+  color: var(--fg-secondary);
+  font-size: 12px;
+}
 .overview-block {
   padding: 16px var(--content-pad) 8px;
   border-bottom: 1px solid var(--separator);
@@ -590,34 +1474,20 @@ function hasEpisodeProgress(ep: MediaItem) {
   color: var(--fg-secondary);
 }
 
-.hero__pickers {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  width: min(280px, 100%);
-}
-
 @media (max-width: 960px) {
   .hero__body {
     grid-template-columns: 1fr;
     gap: 16px;
     align-items: stretch;
   }
-  .hero__pickers {
-    width: 100%;
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-  .picker {
-    flex: 1 1 calc(33.333% - 8px);
-    min-width: 140px;
-  }
 }
 
 @media (max-width: 640px) {
   .hero {
     min-height: 300px;
+  }
+  .hero__title {
+    font-size: 22px;
   }
   .hero__actions {
     flex-direction: column;
@@ -629,8 +1499,16 @@ function hasEpisodeProgress(ep: MediaItem) {
   .hero__circles {
     justify-content: center;
   }
-  .picker {
-    flex: 1 1 100%;
+  .hero__studios {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .hero__studios-row {
+    width: 100%;
+  }
+  .hero__studio-popover {
+    left: 0;
   }
   .episodes__head {
     flex-direction: column;
@@ -640,30 +1518,6 @@ function hasEpisodeProgress(ep: MediaItem) {
     flex: 0 0 140px;
   }
 }
-.picker {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-.picker span {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--fg-tertiary);
-}
-.picker select {
-  appearance: none;
-  border: none;
-  background: transparent;
-  color: var(--fg-primary);
-  font-size: 12px;
-  cursor: pointer;
-}
-
 .episodes {
   padding: 8px var(--content-pad) 24px;
 }
@@ -695,17 +1549,6 @@ function hasEpisodeProgress(ep: MediaItem) {
   padding: 6px 10px;
   font-size: 12px;
 }
-.link-btn {
-  appearance: none;
-  border: none;
-  background: transparent;
-  color: var(--fg-secondary);
-  font-size: 13px;
-  cursor: pointer;
-}
-.link-btn:hover {
-  color: var(--accent);
-}
 .episodes__loading {
   padding: 24px;
   display: flex;
@@ -726,6 +1569,10 @@ function hasEpisodeProgress(ep: MediaItem) {
   text-align: left;
   cursor: pointer;
   padding: 0;
+}
+.ep-card:disabled {
+  cursor: progress;
+  opacity: 0.72;
 }
 .ep-card__thumb {
   position: relative;
@@ -754,19 +1601,50 @@ function hasEpisodeProgress(ep: MediaItem) {
   font-weight: 700;
   color: var(--fg-tertiary);
 }
+.ep-card__index,
+.ep-card__state {
+  position: absolute;
+  top: 8px;
+  z-index: 1;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+.ep-card__index {
+  left: 8px;
+}
+.ep-card__state {
+  right: 8px;
+  color: var(--accent-hover);
+}
+.ep-card__state--watched {
+  color: #6ee7b7;
+}
 .ep-card__progress {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  height: 4px;
-  background: rgba(255, 255, 255, 0.18);
+  height: 5px;
+  background: rgba(0, 0, 0, 0.46);
 }
 .ep-card__progress span {
   display: block;
   height: 100%;
   border-radius: 999px;
   background: var(--accent);
+}
+.ep-card__progress--watched span {
+  background: #6ee7b7;
 }
 .ep-card__title {
   margin-top: 8px;
@@ -780,7 +1658,7 @@ function hasEpisodeProgress(ep: MediaItem) {
 }
 
 .cast {
-  padding: 0 var(--content-pad) 32px;
+  padding: 4px var(--content-pad) 32px;
 }
 .cast h2 {
   margin: 0 0 14px;
@@ -793,21 +1671,166 @@ function hasEpisodeProgress(ep: MediaItem) {
   overflow-x: auto;
 }
 .cast__item {
-  flex: 0 0 72px;
+  flex: 0 0 88px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 .cast__avatar {
-  width: 64px;
-  height: 64px;
+  width: 72px;
+  height: 72px;
   border-radius: 999px;
-  background: var(--surface-3);
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--glass-border);
+  color: var(--fg-secondary);
+  font-size: 24px;
+  font-weight: 700;
+}
+.cast__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 .cast__name {
+  max-width: 100%;
+  font-size: 12px;
+  color: var(--fg-primary);
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.cast__role {
+  max-width: 100%;
+  margin-top: -4px;
   font-size: 11px;
   color: var(--fg-tertiary);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.related {
+  padding: 0 var(--content-pad) 36px;
+}
+.related__head {
+  display: flex;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.related__head h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+.related__loading {
+  min-height: 92px;
+  display: grid;
+  place-items: center;
+  color: var(--fg-tertiary);
+}
+.related__scroll {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+.related-card {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  flex: 0 0 138px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+.related--extras .related-card {
+  flex-basis: 190px;
+}
+.related-card__art {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.05);
+  transition:
+    transform 180ms var(--easing-glide),
+    border-color 180ms var(--easing-glide);
+}
+.related--extras .related-card__art {
+  aspect-ratio: 16 / 9;
+}
+.related-card:hover .related-card__art {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.24);
+}
+.related-card__art img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+.related-card__placeholder {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--fg-tertiary);
+  font-size: 36px;
+  font-weight: 700;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.03));
+}
+.related-card__kind {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  max-width: calc(100% - 16px);
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.58);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.related-card__title {
+  margin-top: 8px;
+  color: var(--fg-primary);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.related-card__sub {
+  margin-top: 3px;
+  color: var(--fg-tertiary);
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .spin {

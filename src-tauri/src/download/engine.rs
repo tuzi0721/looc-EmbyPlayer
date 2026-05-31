@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use chrono::Utc;
 use futures::StreamExt;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, RANGE, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, RANGE, USER_AGENT};
 use reqwest::StatusCode;
 use tauri::{AppHandle, Emitter};
 use tokio::fs::{File, OpenOptions};
@@ -101,7 +101,11 @@ impl DownloadEngine {
                 account.clone(),
                 task.item_id.clone(),
                 task.play_session_id.clone(),
-                self.config.settings().heartbeat_interval_secs.min(20).max(5),
+                self.config
+                    .settings()
+                    .heartbeat_interval_secs
+                    .min(20)
+                    .max(5),
             ))
         } else {
             None
@@ -131,7 +135,9 @@ impl DownloadEngine {
                     self.update_status(
                         &mut task,
                         DownloadStatus::Running,
-                        Some(format!("retry {transient_failures}/{MAX_TRANSIENT_RETRIES}: {err}")),
+                        Some(format!(
+                            "retry {transient_failures}/{MAX_TRANSIENT_RETRIES}: {err}"
+                        )),
                     )
                     .await?;
                     if sleep_with_cancel(&mut control_rx, Duration::from_millis(delay_ms)).await {
@@ -167,10 +173,7 @@ impl DownloadEngine {
                         self.update_status(
                             &mut task,
                             DownloadStatus::Failed,
-                            Some(format!(
-                                "truncated: got {}, expected {}",
-                                got, expected
-                            )),
+                            Some(format!("truncated: got {}, expected {}", got, expected)),
                         )
                         .await?;
                         return Ok(());
@@ -428,6 +431,11 @@ fn build_headers(
     h.insert(
         HeaderName::from_static("x-emby-token"),
         HeaderValue::from_str(&account.access_token).map_err(|e| AppError::Other(e.to_string()))?,
+    );
+    h.insert(
+        AUTHORIZATION,
+        HeaderValue::from_str(&format!("MediaBrowser Token=\"{}\"", account.access_token))
+            .map_err(|e| AppError::Other(e.to_string()))?,
     );
     for (k, v) in &line.headers {
         let name = HeaderName::from_bytes(k.as_bytes())

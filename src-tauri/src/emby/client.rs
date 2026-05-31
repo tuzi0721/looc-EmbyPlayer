@@ -1,7 +1,11 @@
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, USER_AGENT};
+use reqwest::header::{
+    HeaderMap, HeaderName, HeaderValue, ACCEPT_ENCODING, AUTHORIZATION, USER_AGENT,
+};
 use reqwest::{Client, Method, RequestBuilder, Response, StatusCode};
+use serde::de::DeserializeOwned;
+use serde_json::Value;
 use url::Url;
 
 use crate::config::models::{Account, Line, LineStatus, Server, ServerKind};
@@ -55,8 +59,7 @@ impl EmbyClient {
         };
 
         let kind = server.kind;
-        let enabled_lines: Vec<Line> =
-            server.lines.iter().filter(|l| l.enabled).cloned().collect();
+        let enabled_lines: Vec<Line> = server.lines.iter().filter(|l| l.enabled).cloned().collect();
         if enabled_lines.is_empty() {
             return Err(AppError::NoLine(server.id.clone()));
         }
@@ -69,28 +72,26 @@ impl EmbyClient {
                 let http = self.http.clone();
                 let default_ua = default_ua.clone();
                 let id = line.id.clone();
-                (
-                    id,
-                    move || async move {
-                        let url = endpoints::join(&line_cloned.base_url, endpoints::authenticate_by_name())?;
-                        let headers = build_headers(
-                            kind,
-                            &default_ua,
-                            line_cloned.user_agent.as_deref(),
-                            &line_cloned.headers,
-                            None,
-                        )?;
-                        let resp = http
-                            .request(Method::POST, url)
-                            .headers(headers)
-                            .json(&body)
-                            .send()
-                            .await?;
-                        let resp = ensure_ok(resp).await?;
-                        let r: AuthenticationResult = resp.json().await?;
-                        Ok::<_, AppError>((r, line_cloned))
-                    },
-                )
+                (id, move || async move {
+                    let url =
+                        endpoints::join(&line_cloned.base_url, endpoints::authenticate_by_name())?;
+                    let headers = build_headers(
+                        kind,
+                        &default_ua,
+                        line_cloned.user_agent.as_deref(),
+                        &line_cloned.headers,
+                        None,
+                    )?;
+                    let resp = http
+                        .request(Method::POST, url)
+                        .headers(headers)
+                        .json(&body)
+                        .send()
+                        .await?;
+                    let resp = ensure_ok(resp).await?;
+                    let r: AuthenticationResult = decode_json(resp, "authenticate").await?;
+                    Ok::<_, AppError>((r, line_cloned))
+                })
             })
             .collect::<Vec<_>>();
 
@@ -109,21 +110,28 @@ impl EmbyClient {
         Ok(resp.status().is_success())
     }
 
-    pub async fn system_info_public(&self, line: &Line, default_ua: &str) -> AppResult<SystemInfoPublic> {
+    pub async fn system_info_public(
+        &self,
+        line: &Line,
+        default_ua: &str,
+    ) -> AppResult<SystemInfoPublic> {
         let url = endpoints::join(&line.base_url, endpoints::system_info_public())?;
         let mut headers = HeaderMap::new();
-        let ua = line.user_agent.clone().unwrap_or_else(|| default_ua.to_string());
-        headers.insert(USER_AGENT, HeaderValue::from_str(&ua).map_err(|e| AppError::Other(e.to_string()))?);
+        let ua = line
+            .user_agent
+            .clone()
+            .unwrap_or_else(|| default_ua.to_string());
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_str(&ua).map_err(|e| AppError::Other(e.to_string()))?,
+        );
+        headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
         let resp = self.http.get(url).headers(headers).send().await?;
         let resp = ensure_ok(resp).await?;
-        Ok(resp.json().await?)
+        decode_json(resp, "system_info_public").await
     }
 
-    pub async fn list_views(
-        &self,
-        server: &Server,
-        account: &Account,
-    ) -> AppResult<ViewsResponse> {
+    pub async fn list_views(&self, server: &Server, account: &Account) -> AppResult<ViewsResponse> {
         let line = self.pick_active_line(server)?;
         let url = endpoints::join(&line.base_url, &endpoints::user_views(&account.user_id))?;
         let resp = self
@@ -131,7 +139,7 @@ impl EmbyClient {
             .send()
             .await?;
         let resp = ensure_ok(resp).await?;
-        Ok(resp.json().await?)
+        decode_json(resp, "list_views").await
     }
 
     pub async fn list_items(
@@ -157,7 +165,7 @@ impl EmbyClient {
             .send()
             .await?;
         let resp = ensure_ok(resp).await?;
-        Ok(resp.json().await?)
+        decode_json(resp, "list_items").await
     }
 
     pub async fn get_item(
@@ -174,14 +182,56 @@ impl EmbyClient {
         let mut url = url;
         url.query_pairs_mut().append_pair(
             "Fields",
-            "Overview,Genres,GenreItems,People,CommunityRating,OfficialRating,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo,ProductionYear",
+            "Overview,Genres,GenreItems,Studios,People,CommunityRating,OfficialRating,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo,ProductionYear",
         );
         let resp = self
             .authed_request(Method::GET, url, server, account, &line)?
             .send()
             .await?;
         let resp = ensure_ok(resp).await?;
-        Ok(resp.json().await?)
+        decode_json(resp, "get_item").await
+    }
+
+    pub async fn set_favorite(
+        &self,
+        server: &Server,
+        account: &Account,
+        item_id: &str,
+        favorite: bool,
+    ) -> AppResult<UserData> {
+        let method = if favorite {
+            Method::POST
+        } else {
+            Method::DELETE
+        };
+        self.update_user_item_data(
+            server,
+            account,
+            item_id,
+            method,
+            &endpoints::user_favorite_item(&account.user_id, item_id),
+            "set_favorite",
+        )
+        .await
+    }
+
+    pub async fn set_played(
+        &self,
+        server: &Server,
+        account: &Account,
+        item_id: &str,
+        played: bool,
+    ) -> AppResult<UserData> {
+        let method = if played { Method::POST } else { Method::DELETE };
+        self.update_user_item_data(
+            server,
+            account,
+            item_id,
+            method,
+            &endpoints::user_played_item(&account.user_id, item_id),
+            "set_played",
+        )
+        .await
     }
 
     pub async fn search(
@@ -197,6 +247,10 @@ impl EmbyClient {
             &[
                 ("SearchTerm".into(), term.into()),
                 ("Recursive".into(), "true".into()),
+                (
+                    "Fields".into(),
+                    "PrimaryImageAspectRatio,Overview,ProductionYear,UserData".into(),
+                ),
                 ("Limit".into(), "50".into()),
             ],
         )
@@ -211,13 +265,14 @@ impl EmbyClient {
     ) -> AppResult<ItemsResponse> {
         let line = self.pick_active_line(server)?;
         let mut url = endpoints::join(&line.base_url, &endpoints::show_seasons(series_id))?;
-        url.query_pairs_mut().append_pair("UserId", &account.user_id);
+        url.query_pairs_mut()
+            .append_pair("UserId", &account.user_id);
         let resp = self
             .authed_request(Method::GET, url, server, account, &line)?
             .send()
             .await?;
         let resp = ensure_ok(resp).await?;
-        Ok(resp.json().await?)
+        decode_json(resp, "list_seasons").await
     }
 
     pub async fn list_episodes(
@@ -245,7 +300,63 @@ impl EmbyClient {
             .send()
             .await?;
         let resp = ensure_ok(resp).await?;
-        Ok(resp.json().await?)
+        decode_json(resp, "list_episodes").await
+    }
+
+    pub async fn similar_items(
+        &self,
+        server: &Server,
+        account: &Account,
+        item_id: &str,
+        limit: Option<i32>,
+    ) -> AppResult<ItemsResponse> {
+        let line = self.pick_active_line(server)?;
+        let mut url = endpoints::join(&line.base_url, &endpoints::similar_items(item_id))?;
+        {
+            let mut q = url.query_pairs_mut();
+            q.append_pair("UserId", &account.user_id);
+            q.append_pair("Limit", &limit.unwrap_or(18).max(1).to_string());
+            q.append_pair(
+                "Fields",
+                "PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo",
+            );
+        }
+        let resp = self
+            .authed_request(Method::GET, url, server, account, &line)?
+            .send()
+            .await?;
+        let resp = ensure_ok(resp).await?;
+        decode_json(resp, "similar_items").await
+    }
+
+    pub async fn special_features(
+        &self,
+        server: &Server,
+        account: &Account,
+        item_id: &str,
+        limit: Option<i32>,
+    ) -> AppResult<ItemsResponse> {
+        let line = self.pick_active_line(server)?;
+        let max = limit.unwrap_or(18).max(1) as usize;
+        let mut url = endpoints::join(
+            &line.base_url,
+            &endpoints::special_features(&account.user_id, item_id),
+        )?;
+        {
+            let mut q = url.query_pairs_mut();
+            q.append_pair("Limit", &max.to_string());
+            q.append_pair(
+                "Fields",
+                "PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo,RunTimeTicks",
+            );
+        }
+        let resp = self
+            .authed_request(Method::GET, url, server, account, &line)?
+            .send()
+            .await?;
+        let resp = ensure_ok(resp).await?;
+        let value = decode_json::<Value>(resp, "special_features").await?;
+        items_response_from_value(value, "special_features", Some(max))
     }
 
     pub async fn resume_items(
@@ -254,16 +365,13 @@ impl EmbyClient {
         account: &Account,
     ) -> AppResult<ItemsResponse> {
         let line = self.pick_active_line(server)?;
-        let url = endpoints::join(
-            &line.base_url,
-            &endpoints::resume_items(&account.user_id),
-        )?;
+        let url = endpoints::join(&line.base_url, &endpoints::resume_items(&account.user_id))?;
         let resp = self
             .authed_request(Method::GET, url, server, account, &line)?
             .send()
             .await?;
         let resp = ensure_ok(resp).await?;
-        Ok(resp.json().await?)
+        decode_json(resp, "resume_items").await
     }
 
     pub async fn playback_info(
@@ -273,7 +381,19 @@ impl EmbyClient {
         item_id: &str,
         start_ticks: Option<i64>,
     ) -> AppResult<PlaybackInfo> {
-        let line = self.pick_active_line(server)?;
+        self.playback_info_for_line(server, account, item_id, start_ticks, None)
+            .await
+    }
+
+    pub async fn playback_info_for_line(
+        &self,
+        server: &Server,
+        account: &Account,
+        item_id: &str,
+        start_ticks: Option<i64>,
+        line_id: Option<&str>,
+    ) -> AppResult<PlaybackInfo> {
+        let line = self.pick_line(server, line_id)?;
         let url = endpoints::join(&line.base_url, &endpoints::playback_info(item_id))?;
         let body = PlaybackInfoRequest {
             user_id: account.user_id.clone(),
@@ -286,7 +406,7 @@ impl EmbyClient {
             .send()
             .await?;
         let resp = ensure_ok(resp).await?;
-        Ok(resp.json().await?)
+        decode_json(resp, "playback_info").await
     }
 
     pub async fn report_progress(
@@ -341,7 +461,11 @@ impl EmbyClient {
     }
 
     /// List all active sessions on the server, excluding our own device id.
-    pub async fn list_sessions(&self, server: &Server, account: &Account) -> AppResult<Vec<crate::emby::models::RemoteSession>> {
+    pub async fn list_sessions(
+        &self,
+        server: &Server,
+        account: &Account,
+    ) -> AppResult<Vec<crate::emby::models::RemoteSession>> {
         let line = self.pick_active_line(server)?;
         let url = endpoints::join(&line.base_url, "Sessions")?;
         let resp = self
@@ -349,7 +473,8 @@ impl EmbyClient {
             .send()
             .await?;
         let resp = ensure_ok(resp).await?;
-        let all: Vec<crate::emby::models::RemoteSession> = resp.json().await?;
+        let all: Vec<crate::emby::models::RemoteSession> =
+            decode_json(resp, "list_sessions").await?;
         Ok(all
             .into_iter()
             .filter(|s| s.device_id.as_deref() != Some(DEVICE_ID))
@@ -453,8 +578,8 @@ impl EmbyClient {
         Ok(())
     }
 
-    /// Build the streaming URL for the chosen media source, signed with the
-    /// active account's token. The frontend hands this URL to mpv directly.
+    /// Build the streaming URL for the chosen media source. The frontend hands
+    /// this URL to mpv directly and authentication is normally sent by headers.
     pub fn build_stream_url(
         &self,
         server: &Server,
@@ -464,7 +589,29 @@ impl EmbyClient {
         play_session_id: &str,
         prefer_direct: bool,
     ) -> AppResult<Url> {
-        let line = self.pick_active_line(server)?;
+        self.build_stream_url_for_line(
+            server,
+            account,
+            item,
+            source,
+            play_session_id,
+            prefer_direct,
+            None,
+        )
+    }
+
+    pub fn build_stream_url_for_line(
+        &self,
+        server: &Server,
+        account: &Account,
+        item: &MediaItem,
+        source: &MediaSource,
+        play_session_id: &str,
+        prefer_direct: bool,
+        line_id: Option<&str>,
+    ) -> AppResult<Url> {
+        let line = self.pick_line(server, line_id)?;
+        let settings = self.config.settings();
         let path = if prefer_direct {
             format!("Videos/{}/stream", item.id)
         } else {
@@ -475,13 +622,31 @@ impl EmbyClient {
             let mut q = url.query_pairs_mut();
             q.append_pair("MediaSourceId", &source.id);
             q.append_pair("PlaySessionId", play_session_id);
-            q.append_pair("api_key", &account.access_token);
+            if settings.append_auth_query {
+                q.append_pair("api_key", &account.access_token);
+            }
             q.append_pair("Static", if prefer_direct { "true" } else { "false" });
         }
         Ok(url)
     }
 
     fn pick_active_line(&self, server: &Server) -> AppResult<Line> {
+        self.pick_line(server, None)
+    }
+
+    pub fn pick_line(&self, server: &Server, line_id: Option<&str>) -> AppResult<Line> {
+        if let Some(id) = line_id.filter(|id| !id.trim().is_empty()) {
+            let line = server
+                .lines
+                .iter()
+                .find(|line| line.id == id)
+                .ok_or_else(|| AppError::NotFound(format!("line {id}")))?;
+            if !line.enabled {
+                return Err(AppError::NoLine(server.id.clone()));
+            }
+            return Ok(line.clone());
+        }
+
         if let Some(id) = &server.active_line_id {
             if let Some(line) = server.lines.iter().find(|l| &l.id == id && l.enabled) {
                 return Ok(line.clone());
@@ -526,6 +691,46 @@ impl EmbyClient {
             .headers(headers)
             .timeout(Duration::from_millis(settings.request_timeout_ms)))
     }
+
+    async fn update_user_item_data(
+        &self,
+        server: &Server,
+        account: &Account,
+        item_id: &str,
+        method: Method,
+        path: &str,
+        context: &str,
+    ) -> AppResult<UserData> {
+        let line = self.pick_active_line(server)?;
+        let url = endpoints::join(&line.base_url, path)?;
+        let resp = self
+            .authed_request(method, url, server, account, &line)?
+            .send()
+            .await?;
+        let resp = ensure_ok(resp).await?;
+        let status = resp.status();
+        let url = resp.url().clone();
+        let body = resp.text().await.map_err(|e| {
+            AppError::Other(format!(
+                "{context}: failed to read response body from {url} (status {status}): {e}"
+            ))
+        })?;
+
+        if body.trim().is_empty() {
+            return Ok(self
+                .get_item(server, account, item_id)
+                .await?
+                .user_data
+                .unwrap_or_default());
+        }
+
+        serde_json::from_str(&body).map_err(|e| {
+            AppError::Other(format!(
+                "{context}: failed to parse JSON from {url} (status {status}): {e}; body preview: {}",
+                body_preview(&body)
+            ))
+        })
+    }
 }
 
 fn build_headers(
@@ -541,6 +746,7 @@ fn build_headers(
         USER_AGENT,
         HeaderValue::from_str(ua).map_err(|e| AppError::Other(e.to_string()))?,
     );
+    headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
 
     let auth = format!(
         "MediaBrowser Client=\"{client}\", Device=\"{device}\", DeviceId=\"{device_id}\", Version=\"{ver}\"",
@@ -594,4 +800,62 @@ async fn ensure_ok(resp: Response) -> AppResult<Response> {
         StatusCode::NOT_FOUND => Err(AppError::NotFound(body)),
         _ => Err(AppError::Other(format!("HTTP {status}: {body}"))),
     }
+}
+
+async fn decode_json<T>(resp: Response, context: &str) -> AppResult<T>
+where
+    T: DeserializeOwned,
+{
+    let status = resp.status();
+    let url = resp.url().clone();
+    let body = resp.text().await.map_err(|e| {
+        AppError::Other(format!(
+            "{context}: failed to read response body from {url} (status {status}): {e}"
+        ))
+    })?;
+
+    serde_json::from_str(&body).map_err(|e| {
+        AppError::Other(format!(
+            "{context}: failed to parse JSON from {url} (status {status}): {e}; body preview: {}",
+            body_preview(&body)
+        ))
+    })
+}
+
+fn items_response_from_value(
+    value: Value,
+    context: &str,
+    limit: Option<usize>,
+) -> AppResult<ItemsResponse> {
+    let mut response = if value.is_array() {
+        let items: Vec<MediaItem> = serde_json::from_value(value)
+            .map_err(|e| AppError::Other(format!("{context}: failed to parse item array: {e}")))?;
+        let total_record_count = items.len() as i64;
+        ItemsResponse {
+            items,
+            total_record_count,
+        }
+    } else {
+        serde_json::from_value::<ItemsResponse>(value).map_err(|e| {
+            AppError::Other(format!("{context}: failed to parse items response: {e}"))
+        })?
+    };
+
+    if let Some(max) = limit {
+        response.items.retain(|item| !item.id.is_empty());
+        response.items.truncate(max);
+    }
+    if response.total_record_count <= 0 {
+        response.total_record_count = response.items.len() as i64;
+    }
+    Ok(response)
+}
+
+fn body_preview(body: &str) -> String {
+    const MAX_CHARS: usize = 1200;
+    let mut preview: String = body.chars().take(MAX_CHARS).collect();
+    if body.chars().nth(MAX_CHARS).is_some() {
+        preview.push_str("...");
+    }
+    preview.replace('\r', "\\r").replace('\n', "\\n")
 }

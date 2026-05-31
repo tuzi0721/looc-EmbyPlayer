@@ -80,8 +80,8 @@ pub fn init_app(handle: &AppHandle, state: &Arc<AppState>) -> AppResult<()> {
 fn load_bindings(state: &Arc<AppState>) -> Vec<ShortcutBinding> {
     match state.config.get_raw(KEY_SHORTCUTS) {
         Some(v) => match serde_json::from_value::<Vec<ShortcutBinding>>(v) {
-            Ok(v) if !v.is_empty() => v,
-            _ => default_bindings(),
+            Ok(v) => v,
+            Err(_) => default_bindings(),
         },
         None => default_bindings(),
     }

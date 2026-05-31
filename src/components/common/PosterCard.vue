@@ -6,10 +6,13 @@ import { useAuthStore } from "@/stores/auth";
 import { useServerStore } from "@/stores/server";
 import { useLazyVisible } from "@/composables/useLazyVisible";
 import type { MediaItem } from "@/types/models";
+import { mediaImageUrl } from "@/utils/mediaImages";
+
+type PosterAspect = "portrait" | "backdrop" | "square";
 
 const props = defineProps<{
   item: MediaItem;
-  aspect?: "portrait" | "backdrop" | "square";
+  aspect?: PosterAspect | "auto";
   eager?: boolean;
 }>();
 
@@ -24,7 +27,14 @@ const loaded = ref(false);
 const auth = useAuthStore();
 const serverStore = useServerStore();
 
-const aspect = computed(() => props.aspect ?? "portrait");
+const isCollection = computed(() => props.item.Type === "BoxSet");
+const resolvedAspect = computed<PosterAspect>(() => {
+  if (props.aspect && props.aspect !== "auto") return props.aspect;
+  if (!isCollection.value) return "portrait";
+  const ratio = Number(props.item.PrimaryImageAspectRatio ?? 0);
+  if (Number.isFinite(ratio) && ratio >= 1.2) return "backdrop";
+  return "portrait";
+});
 
 const activeServer = computed(() => {
   const acc = auth.activeAccount;
@@ -35,21 +45,18 @@ const activeServer = computed(() => {
 const imageUrl = computed(() => {
   const server = activeServer.value;
   if (!server) return null;
-  const line = server.lines.find((l) => l.id === server.activeLineId) ?? server.lines[0];
-  if (!line) return null;
 
-  const tag = props.item.ImageTags?.Primary;
   const id = props.item.Id;
-  const imageType = aspect.value === "backdrop" ? "Backdrop" : "Primary";
-  const maxWidth = aspect.value === "backdrop" ? "640" : "320";
-  const params = new URLSearchParams({
+  const useBackdrop = resolvedAspect.value === "backdrop" && !isCollection.value;
+  const imageType = useBackdrop ? "Backdrop" : "Primary";
+  const tag = useBackdrop ? props.item.BackdropImageTags?.[0] : props.item.ImageTags?.Primary;
+  const maxWidth = resolvedAspect.value === "backdrop" ? "640" : "320";
+  return mediaImageUrl(server, id, imageType, {
     maxWidth,
-    quality: "82",
+    quality: 82,
     format: "webp",
+    tag,
   });
-  if (tag) params.set("tag", tag);
-  const sep = line.baseUrl.endsWith("/") ? "" : "/";
-  return `${line.baseUrl}${sep}Items/${id}/Images/${imageType}?${params.toString()}`;
 });
 
 const progress = computed(() => props.item.UserData?.PlayedPercentage ?? 0);
@@ -60,13 +67,18 @@ const subtitle = computed(() => {
   if (i.Type === "Episode" && i.SeriesName) {
     return `${i.SeriesName} · S${i.ParentIndexNumber ?? "?"}E${i.IndexNumber ?? "?"}`;
   }
+  if (i.Type === "BoxSet") return "合集";
   if (i.ProductionYear) return String(i.ProductionYear);
   return "";
 });
 </script>
 
 <template>
-  <article class="poster" :class="`poster--${aspect}`" @click="emit('activate')">
+  <article
+    class="poster"
+    :class="[`poster--${resolvedAspect}`, { 'poster--collection': isCollection }]"
+    @click="emit('activate')"
+  >
     <div ref="artEl" class="poster__art">
       <img
         v-if="imageUrl && (eager || visible)"

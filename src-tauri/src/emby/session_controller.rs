@@ -47,12 +47,7 @@ impl SessionController {
         }
     }
 
-    async fn dispatch(
-        &self,
-        server: &Server,
-        account: &Account,
-        ev: SocketEvent,
-    ) -> AppResult<()> {
+    async fn dispatch(&self, server: &Server, account: &Account, ev: SocketEvent) -> AppResult<()> {
         match ev.message_type.as_str() {
             "Playstate" => self.dispatch_playstate(ev.payload).await,
             "GeneralCommand" => self.dispatch_general(ev.payload).await,
@@ -62,10 +57,7 @@ impl SessionController {
     }
 
     async fn dispatch_playstate(&self, payload: Value) -> AppResult<()> {
-        let cmd = payload
-            .get("Command")
-            .and_then(Value::as_str)
-            .unwrap_or("");
+        let cmd = payload.get("Command").and_then(Value::as_str).unwrap_or("");
         let backend = self.mpv.backend();
         match cmd {
             "PlayPause" => {
@@ -139,13 +131,21 @@ impl SessionController {
             }
             "SetAudioStreamIndex" => {
                 if let Some(idx) = arg_i64(&args, "Index") {
-                    backend.execute(MpvCommand::SetAudioTrack(idx)).await?;
+                    backend
+                        .execute(MpvCommand::SetAudioTrack {
+                            id: idx,
+                            preserve_cache: self.config.settings().preserve_track_switch_cache,
+                        })
+                        .await?;
                 }
             }
             "SetSubtitleStreamIndex" => {
                 let idx = arg_i64(&args, "Index");
                 backend
-                    .execute(MpvCommand::SetSubtitleTrack(idx.filter(|v| *v >= 0)))
+                    .execute(MpvCommand::SetSubtitleTrack {
+                        id: idx.filter(|v| *v >= 0),
+                        preserve_cache: self.config.settings().preserve_track_switch_cache,
+                    })
                     .await?;
             }
             "DisplayMessage" => {
@@ -206,9 +206,14 @@ impl SessionController {
             .first()
             .ok_or_else(|| AppError::InvalidState("no media source".into()))?
             .clone();
-        let url =
-            self.emby
-                .build_stream_url(server, account, &item, &source, &pb.play_session_id, true)?;
+        let url = self.emby.build_stream_url(
+            server,
+            account,
+            &item,
+            &source,
+            &pb.play_session_id,
+            true,
+        )?;
 
         let line = server
             .lines
@@ -222,6 +227,10 @@ impl SessionController {
             .or_else(|| server.default_user_agent.clone());
         let mut headers = line.headers.clone();
         headers.push(("X-Emby-Token".into(), account.access_token.clone()));
+        headers.push((
+            "Authorization".into(),
+            format!("MediaBrowser Token=\"{}\"", account.access_token),
+        ));
 
         self.mpv
             .backend()

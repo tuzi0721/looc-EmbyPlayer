@@ -1,15 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { listen } from "@tauri-apps/api/event";
-import { type } from "@tauri-apps/plugin-os";
 
 import TopBar from "./components/common/TopBar.vue";
 import AppSidebar from "./components/common/AppSidebar.vue";
-import MpvBanner from "./components/common/MpvBanner.vue";
+import FirstRunGuide from "./components/common/FirstRunGuide.vue";
 import NotificationCenter from "./components/common/NotificationCenter.vue";
 import ToastStack from "./components/common/ToastStack.vue";
 import { api } from "./api";
+import { listen, platformType } from "./platform";
 import { useAuthStore } from "./stores/auth";
 import { useDownloadsStore } from "./stores/downloads";
 import { useNotificationsStore } from "./stores/notifications";
@@ -25,8 +24,12 @@ const notifications = useNotificationsStore();
 const player = usePlayerStore();
 const router = useRouter();
 const route = useRoute();
+const bootstrapped = ref(false);
 
 const isFullscreen = computed(() => Boolean(route.meta?.fullscreen));
+const showFirstRunGuide = computed(
+  () => bootstrapped.value && !isFullscreen.value && !settings.settings.firstRunCompleted,
+);
 
 watch(
   () => route.name,
@@ -39,7 +42,7 @@ watch(
 
 onMounted(async () => {
   try {
-    if (type() === "windows") {
+    if ((await platformType()) === "windows") {
       document.documentElement.classList.add("platform-windows");
     }
   } catch {
@@ -52,7 +55,9 @@ onMounted(async () => {
     downloads.refresh().catch(() => {}),
     notifications.refresh().catch(() => {}),
   ]);
+  bootstrapped.value = true;
   server.startListening().catch(() => {});
+  server.probeAllLines?.().catch(() => {});
   downloads.startListening().catch(() => {});
   notifications.startListening().catch(() => {});
 
@@ -109,7 +114,7 @@ onMounted(async () => {
     </div>
     <NotificationCenter />
     <ToastStack />
-    <MpvBanner v-if="!isFullscreen" />
+    <FirstRunGuide v-if="showFirstRunGuide" />
   </div>
 </template>
 

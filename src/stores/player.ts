@@ -5,10 +5,12 @@ import { api } from "@/api";
 import { useAuthStore } from "@/stores/auth";
 import { useLibraryStore } from "@/stores/library";
 import { useServerStore } from "@/stores/server";
-import type { MpvSnapshot } from "@/types/models";
+import type { PlaybackSource } from "@/api";
+import type { MpvSnapshot, PictureMode, SubtitleStyleSettings } from "@/types/models";
 
 export const usePlayerStore = defineStore("player", () => {
   const snapshot = ref<MpvSnapshot | null>(null);
+  const playbackSource = ref<PlaybackSource | null>(null);
   const playSessionId = ref<string | null>(null);
   const itemId = ref<string | null>(null);
   const queue = ref<string[]>([]);
@@ -21,12 +23,17 @@ export const usePlayerStore = defineStore("player", () => {
     itemId: string;
     startMs?: number;
     preferDirect?: boolean;
+    lineId?: string | null;
+    mediaSourceId?: string | null;
     recordWhilePlaying?: boolean;
     stealthWhenRecording?: boolean;
   }) {
-    const sessionId = await api.play(payload as any);
+    const result = await api.play(payload as any);
+    const source = typeof result === "string" ? null : result;
+    const sessionId = typeof result === "string" ? result : result.playSessionId;
     itemId.value = payload.itemId;
     playSessionId.value = sessionId;
+    playbackSource.value = source;
     lastEof = false;
     void pushNowPlaying();
     startPolling();
@@ -138,6 +145,7 @@ export const usePlayerStore = defineStore("player", () => {
     }
     await api.stop();
     snapshot.value = null;
+    playbackSource.value = null;
     itemId.value = null;
     playSessionId.value = null;
     try {
@@ -185,6 +193,10 @@ export const usePlayerStore = defineStore("player", () => {
     await api.setSubtitleScale(scale);
     await refresh();
   }
+  async function setSubtitleStyle(style: SubtitleStyleSettings) {
+    await api.setSubtitleStyle(style);
+    await refresh();
+  }
   async function cycleSubtitle() {
     await api.cycleSubtitle();
     await refresh();
@@ -196,6 +208,9 @@ export const usePlayerStore = defineStore("player", () => {
   async function setMuted(muted: boolean) {
     await api.setMuted(muted);
     await refresh();
+  }
+  async function setPictureMode(mode: PictureMode) {
+    await api.setPictureMode(mode);
   }
 
   async function refresh() {
@@ -261,6 +276,7 @@ export const usePlayerStore = defineStore("player", () => {
 
   return {
     snapshot,
+    playbackSource,
     playSessionId,
     itemId,
     queue,
@@ -282,9 +298,11 @@ export const usePlayerStore = defineStore("player", () => {
     removeSubtitle,
     setSubtitleDelay,
     setSubtitleScale,
+    setSubtitleStyle,
     cycleSubtitle,
     setVolume,
     setMuted,
+    setPictureMode,
     refresh,
   };
 });

@@ -173,7 +173,12 @@ function stringifyError(e: unknown): string {
     <AddServerDialog
       v-if="showAddDialog"
       @close="showAddDialog = false"
-      @created="(id) => (selectedServerId = id)"
+      @created="
+        (id, loggedIn) => {
+          selectedServerId = id;
+          if (loggedIn) router.replace('/home');
+        }
+      "
     />
   </main>
 </template>

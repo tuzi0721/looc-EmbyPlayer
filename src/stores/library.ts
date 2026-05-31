@@ -2,9 +2,12 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 
 import { api } from "@/api";
-import type { MediaItem } from "@/types/models";
+import { useSettingsStore } from "@/stores/settings";
+import type { MediaItem, UserData } from "@/types/models";
+import { filterJavItems } from "@/utils/javFilter";
 
 export const useLibraryStore = defineStore("library", () => {
+  const settings = useSettingsStore();
   const views = ref<MediaItem[]>([]);
   const resume = ref<MediaItem[]>([]);
   const itemsByParent = ref<Record<string, MediaItem[]>>({});
@@ -21,7 +24,7 @@ export const useLibraryStore = defineStore("library", () => {
         api.resumeItems(),
       ]);
       views.value = viewsResp.Items;
-      resume.value = resumeResp.Items;
+      resume.value = filterJavItems(resumeResp.Items, settings.settings.hideJavCodes);
     } finally {
       loading.value = false;
     }
@@ -32,39 +35,47 @@ export const useLibraryStore = defineStore("library", () => {
 
   async function loadParent(parentId: string, params: [string, string][] = []) {
     const r = await api.listItems({ parentId, params });
-    itemsByParent.value = { ...itemsByParent.value, [parentId]: r.Items };
+    const filterEnabled = settings.settings.hideJavCodes;
+    const filteredItems = filterJavItems(r.Items, settings.settings.hideJavCodes);
+    itemsByParent.value = { ...itemsByParent.value, [parentId]: filteredItems };
+    const rawTotal = r.TotalRecordCount ?? r.Items.length;
     totalByParent.value = {
       ...totalByParent.value,
-      [parentId]: r.TotalRecordCount ?? r.Items.length,
+      [parentId]: filterEnabled ? filteredItems.length + (r.Items.length < rawTotal ? 1 : 0) : rawTotal,
     };
     loadedRangeByParent.value = {
       ...loadedRangeByParent.value,
       [parentId]: { start: 0, end: r.Items.length },
     };
-    return r.Items;
+    return filteredItems;
   }
 
   async function loadMore(parentId: string, params: [string, string][] = []) {
     const existing = itemsByParent.value[parentId] ?? [];
-    const startIndex = existing.length;
+    const startIndex = loadedRangeByParent.value[parentId]?.end ?? existing.length;
     const total = totalByParent.value[parentId];
-    if (total != null && startIndex >= total) return [];
+    if (!settings.settings.hideJavCodes && total != null && startIndex >= total) return [];
     const merged: [string, string][] = [...params, ["StartIndex", String(startIndex)]];
     if (!merged.some(([k]) => k === "Limit")) merged.push(["Limit", "200"]);
     const r = await api.listItems({ parentId, params: merged });
+    const filterEnabled = settings.settings.hideJavCodes;
+    const filteredItems = filterJavItems(r.Items, settings.settings.hideJavCodes);
+    const nextItems = [...existing, ...filteredItems];
+    const rawEnd = startIndex + r.Items.length;
+    const rawTotal = r.TotalRecordCount ?? rawEnd;
     itemsByParent.value = {
       ...itemsByParent.value,
-      [parentId]: [...existing, ...r.Items],
+      [parentId]: nextItems,
     };
     totalByParent.value = {
       ...totalByParent.value,
-      [parentId]: r.TotalRecordCount ?? existing.length + r.Items.length,
+      [parentId]: filterEnabled ? nextItems.length + (rawEnd < rawTotal ? 1 : 0) : rawTotal,
     };
     loadedRangeByParent.value = {
       ...loadedRangeByParent.value,
-      [parentId]: { start: 0, end: existing.length + r.Items.length },
+      [parentId]: { start: 0, end: rawEnd },
     };
-    return r.Items;
+    return filteredItems;
   }
 
   async function loadItem(itemId: string) {
@@ -73,12 +84,34 @@ export const useLibraryStore = defineStore("library", () => {
     return m;
   }
 
+  function updateItemUserData(itemId: string, userData: UserData) {
+    const apply = (item: MediaItem): MediaItem =>
+      item.Id === itemId ? { ...item, UserData: userData } : item;
+
+    if (itemCache.value[itemId]) {
+      itemCache.value = {
+        ...itemCache.value,
+        [itemId]: apply(itemCache.value[itemId]!),
+      };
+    }
+
+    resume.value = resume.value.map(apply);
+    searchResults.value = searchResults.value.map(apply);
+    itemsByParent.value = Object.fromEntries(
+      Object.entries(itemsByParent.value).map(([parentId, items]) => [
+        parentId,
+        items.map(apply),
+      ]),
+    );
+  }
+
   async function search(term: string) {
     searching.value = true;
     try {
       const r = await api.search(term);
-      searchResults.value = r.Items;
-      return r.Items;
+      const filteredItems = filterJavItems(r.Items, settings.settings.hideJavCodes);
+      searchResults.value = filteredItems;
+      return filteredItems;
     } finally {
       searching.value = false;
     }
@@ -113,6 +146,7 @@ export const useLibraryStore = defineStore("library", () => {
     loadParent,
     loadMore,
     loadItem,
+    updateItemUserData,
     search,
     clearSearch,
     reset,

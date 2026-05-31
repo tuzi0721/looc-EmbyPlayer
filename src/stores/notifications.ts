@@ -1,8 +1,8 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { api } from "@/api";
+import { listen, type UnlistenFn } from "@/platform";
 import type {
   AppNotification,
   NotificationCategory,

@@ -8,7 +8,8 @@ pub fn join(base: &str, path: &str) -> AppResult<Url> {
         let p = format!("{}/", url.path());
         url.set_path(&p);
     }
-    url.join(path.trim_start_matches('/')).map_err(AppError::from)
+    url.join(path.trim_start_matches('/'))
+        .map_err(AppError::from)
 }
 
 pub fn authenticate_by_name() -> &'static str {
@@ -29,6 +30,14 @@ pub fn user_items(user_id: &str) -> String {
 
 pub fn user_item(user_id: &str, item_id: &str) -> String {
     format!("Users/{user_id}/Items/{item_id}")
+}
+
+pub fn user_favorite_item(user_id: &str, item_id: &str) -> String {
+    format!("Users/{user_id}/FavoriteItems/{item_id}")
+}
+
+pub fn user_played_item(user_id: &str, item_id: &str) -> String {
+    format!("Users/{user_id}/PlayedItems/{item_id}")
 }
 
 pub fn resume_items(user_id: &str) -> String {
@@ -77,6 +86,10 @@ pub fn latest(user_id: &str) -> String {
 #[allow(dead_code)]
 pub fn similar_items(item_id: &str) -> String {
     format!("Items/{item_id}/Similar")
+}
+
+pub fn special_features(user_id: &str, item_id: &str) -> String {
+    format!("Users/{user_id}/Items/{item_id}/SpecialFeatures")
 }
 
 /// Direct subtitle stream URL (Emby/Jellyfin):

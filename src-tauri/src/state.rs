@@ -39,6 +39,7 @@ pub struct CurrentPlaySession {
     pub item_id: String,
     pub play_session_id: String,
     pub media_source_id: String,
+    pub line_id: String,
     /// When set, the playback is also writing to a local file via mpv's
     /// `--stream-record` (watch-while-download). The id maps to a
     /// `DownloadTask` that needs to be finalized when playback stops.

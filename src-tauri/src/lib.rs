@@ -29,7 +29,8 @@ pub fn run() {
 
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,emby_player=debug")),
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info,emby_player=debug")),
         )
         .with_target(false)
         .init();
@@ -84,6 +85,7 @@ pub fn run() {
             commands::auth::list_accounts,
             commands::auth::switch_account,
             commands::server::list_servers,
+            commands::server::detect_server,
             commands::server::add_server,
             commands::server::update_server,
             commands::server::remove_server,
@@ -92,13 +94,18 @@ pub fn run() {
             commands::media::list_views,
             commands::media::list_items,
             commands::media::get_item_detail,
+            commands::media::set_item_favorite,
+            commands::media::set_item_played,
             commands::media::search,
             commands::media::resume_items,
             commands::media::list_seasons,
             commands::media::list_episodes,
+            commands::media::similar_items,
+            commands::media::special_features,
             commands::media::report_playback_progress,
             commands::media::report_playback_stopped,
             commands::player::play,
+            commands::player::play_external,
             commands::player::pause,
             commands::player::resume,
             commands::player::stop,
@@ -115,6 +122,7 @@ pub fn run() {
             commands::settings::update_settings,
             commands::danmaku::list_danmaku_providers,
             commands::danmaku::fetch_danmaku,
+            commands::danmaku::import_danmaku_xml,
             commands::download::list_downloads,
             commands::download::start_download,
             commands::download::pause_download,
@@ -127,6 +135,7 @@ pub fn run() {
             commands::subtitle::remove_subtitle,
             commands::subtitle::set_subtitle_delay,
             commands::subtitle::set_subtitle_scale,
+            commands::subtitle::set_subtitle_style,
             commands::subtitle::cycle_subtitle,
             commands::notifications::list_notifications,
             commands::notifications::unread_count,
@@ -136,8 +145,13 @@ pub fn run() {
             commands::notifications::clear_notifications,
             commands::player::set_volume,
             commands::player::set_muted,
-            commands::player::detect_mpv,
+            commands::player::set_picture_mode,
+            commands::player::show_mpv_stats_osd,
+            commands::player::take_screenshot,
             commands::player::open_external,
+            commands::player::open_path,
+            commands::player::set_always_on_top,
+            commands::player::set_secondary_display_blackout,
             commands::remote::list_remote_sessions,
             commands::remote::remote_playstate,
             commands::remote::remote_play,

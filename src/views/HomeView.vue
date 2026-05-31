@@ -13,6 +13,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useLibraryStore } from "@/stores/library";
 import { useServerStore } from "@/stores/server";
 import { useSettingsStore } from "@/stores/settings";
+import { serverActiveLine, serverKindIcon } from "@/utils/serverVisuals";
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -121,16 +122,13 @@ function gotoAddServer() {
           @click="pickServerLogin(s.id)"
         >
           <div class="server-card__icon">
-            <Icon
-              :icon="s.kind === 'jellyfin' ? 'simple-icons:jellyfin' : 'lucide:server'"
-              width="22"
-            />
+            <Icon :icon="serverKindIcon(s.kind)" width="22" />
           </div>
           <div class="server-card__name">{{ s.name }}</div>
           <div class="server-card__sub">
             <LineStatusDot
-              :status="(s.lines.find((l) => l.id === s.activeLineId) ?? s.lines[0])?.lastStatus"
-              :latency-ms="(s.lines.find((l) => l.id === s.activeLineId) ?? s.lines[0])?.lastLatencyMs"
+              :status="serverActiveLine(s)?.lastStatus"
+              :latency-ms="serverActiveLine(s)?.lastLatencyMs"
             />
           </div>
         </button>

@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::danmaku::{by_id, registry, DanmakuResult};
+use crate::danmaku::{by_id, registry, xml, DanmakuResult};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -12,6 +12,12 @@ use crate::state::AppState;
 pub struct ProviderInfo {
     pub id: &'static str,
     pub display_name: &'static str,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportDanmakuXmlPayload {
+    pub file_path: String,
 }
 
 #[tauri::command]
@@ -51,4 +57,22 @@ pub async fn fetch_danmaku(
     };
     let result = provider.fetch(&client, &ep_id).await?;
     Ok(Some(result))
+}
+
+#[tauri::command]
+pub async fn import_danmaku_xml(payload: ImportDanmakuXmlPayload) -> AppResult<DanmakuResult> {
+    let file_path = payload.file_path.trim();
+    if file_path.is_empty() {
+        return Err(AppError::InvalidState(
+            "import_danmaku_xml requires a file path".into(),
+        ));
+    }
+
+    let text = tokio::fs::read_to_string(file_path).await?;
+    let episode_id = std::path::Path::new(file_path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("local-xml")
+        .to_string();
+    Ok(xml::parse_danmaku_xml(&text, episode_id))
 }

@@ -1,8 +1,8 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { api } from "@/api";
+import { listen, type UnlistenFn } from "@/platform";
 import type { LineHealthReport, Server, ServerKind } from "@/types/models";
 
 export const useServerStore = defineStore("server", () => {
@@ -26,7 +26,9 @@ export const useServerStore = defineStore("server", () => {
   async function addServer(payload: {
     name: string;
     kind: ServerKind;
+    activeLineId?: string | null;
     lines: Array<{
+      id?: string;
       name: string;
       baseUrl: string;
       userAgent?: string | null;
@@ -39,6 +41,10 @@ export const useServerStore = defineStore("server", () => {
     const s = await api.addServer(payload);
     await refresh();
     return s;
+  }
+
+  async function detectServer(payload: Parameters<typeof api.detectServer>[0]) {
+    return api.detectServer(payload);
   }
 
   async function updateServer(payload: Parameters<typeof api.updateServer>[0]) {
@@ -57,6 +63,25 @@ export const useServerStore = defineStore("server", () => {
     lastReports.value = { ...lastReports.value, [serverId]: r.reports };
     await refresh();
     return r;
+  }
+
+  async function probeAllLines() {
+    const ids = servers.value.map((server) => server.id);
+    if (ids.length === 0) return;
+
+    const results = await Promise.allSettled(ids.map((id) => api.testLines(id)));
+    const reports = { ...lastReports.value };
+    let updated = false;
+    results.forEach((result, index) => {
+      const id = ids[index];
+      if (!id || result.status !== "fulfilled") return;
+      reports[id] = result.value.reports;
+      updated = true;
+    });
+    if (!updated) return;
+
+    lastReports.value = reports;
+    await refresh();
   }
 
   async function setActiveLine(serverId: string, lineId: string) {
@@ -94,9 +119,11 @@ export const useServerStore = defineStore("server", () => {
     byId,
     refresh,
     addServer,
+    detectServer,
     updateServer,
     removeServer,
     testLines,
+    probeAllLines,
     setActiveLine,
     startListening,
     stopListening,

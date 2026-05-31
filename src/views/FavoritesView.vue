@@ -6,10 +6,13 @@ import { Icon } from "@iconify/vue";
 import PosterCard from "@/components/common/PosterCard.vue";
 import { api } from "@/api";
 import { useAuthStore } from "@/stores/auth";
+import { useSettingsStore } from "@/stores/settings";
 import type { MediaItem } from "@/types/models";
+import { filterJavItems } from "@/utils/javFilter";
 
 const router = useRouter();
 const auth = useAuthStore();
+const settings = useSettingsStore();
 
 const items = ref<MediaItem[]>([]);
 const loading = ref(false);
@@ -31,7 +34,7 @@ async function load() {
         ["Limit", "400"],
       ],
     });
-    items.value = r.Items;
+    items.value = filterJavItems(r.Items, settings.settings.hideJavCodes);
   } catch {
     items.value = [];
   } finally {
@@ -41,6 +44,7 @@ async function load() {
 
 onMounted(load);
 watch(() => auth.activeId, load);
+watch(() => settings.settings.hideJavCodes, load);
 
 function open(id: string) {
   router.push(`/item/${id}`).catch(() => {});

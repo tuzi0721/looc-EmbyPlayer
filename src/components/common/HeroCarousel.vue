@@ -6,12 +6,15 @@ import { Icon } from "@iconify/vue";
 import { useAuthStore } from "@/stores/auth";
 import { useLibraryStore } from "@/stores/library";
 import { useServerStore } from "@/stores/server";
+import { useSettingsStore } from "@/stores/settings";
 import type { MediaItem } from "@/types/models";
+import { mediaImageUrl } from "@/utils/mediaImages";
 
 const router = useRouter();
 const auth = useAuthStore();
 const lib = useLibraryStore();
 const serverStore = useServerStore();
+const settings = useSettingsStore();
 
 const index = ref(0);
 let timer: number | null = null;
@@ -27,21 +30,20 @@ const items = computed(() => {
 });
 
 const current = computed(() => items.value[index.value] ?? null);
+const heroStyle = computed(() => settings.settings.homeHeroStyle ?? "classic");
+const heroImageWidth = computed(() => (heroStyle.value === "cinema" ? "2200" : "1280"));
 
 function posterUrl(item: MediaItem): string | null {
   const acc = auth.activeAccount;
   if (!acc) return null;
   const server = serverStore.byId(acc.serverId);
-  const line = server?.lines.find((l) => l.id === server.activeLineId) ?? server?.lines[0];
-  if (!line) return null;
   const tag = item.ImageTags?.Primary ?? item.BackdropImageTags?.[0];
   if (!tag && !item.Id) return null;
-  const sep = line.baseUrl.includes("?") ? "&" : "?";
-  const params = new URLSearchParams();
-  if (tag) params.set("tag", tag);
-  params.set("width", "1280");
-  params.set("format", "webp");
-  return `${line.baseUrl}${sep}Items/${item.Id}/Images/Backdrop?${params.toString()}`;
+  return mediaImageUrl(server, item.Id, "Backdrop", {
+    tag,
+    width: heroImageWidth.value,
+    format: "webp",
+  });
 }
 
 function metaLine(item: MediaItem): string {
@@ -74,7 +76,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section v-if="current" class="hero">
+  <section v-if="current" class="hero" :class="`hero--${heroStyle}`">
     <div
       class="hero__bg"
       :style="posterUrl(current) ? { backgroundImage: `url(${posterUrl(current)})` } : undefined"
@@ -112,6 +114,10 @@ onUnmounted(() => {
   overflow: hidden;
   flex-shrink: 0;
 }
+.hero--cinema {
+  height: min(68vh, 620px);
+  min-height: 360px;
+}
 .hero__bg {
   position: absolute;
   inset: 0;
@@ -126,6 +132,16 @@ onUnmounted(() => {
     rgba(0, 0, 0, 0.35) 55%,
     rgba(0, 0, 0, 0.15) 100%
   );
+}
+.hero--cinema .hero__shade {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.88) 0%,
+      rgba(0, 0, 0, 0.34) 52%,
+      rgba(0, 0, 0, 0.08) 100%
+    ),
+    linear-gradient(0deg, rgba(0, 0, 0, 0.62) 0%, rgba(0, 0, 0, 0.05) 42%);
 }
 .hero__nav {
   position: absolute;
@@ -152,12 +168,21 @@ onUnmounted(() => {
   z-index: 2;
   cursor: pointer;
 }
+.hero--cinema .hero__content {
+  left: clamp(28px, 6vw, 72px);
+  bottom: clamp(54px, 10vh, 104px);
+  max-width: min(680px, 62%);
+}
 .hero__title {
   margin: 0 0 8px;
-  font-size: clamp(22px, 3vw, 34px);
+  font-size: 34px;
   font-weight: 700;
   color: white;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
+}
+.hero--cinema .hero__title {
+  font-size: 58px;
+  max-width: 12em;
 }
 .hero__meta {
   margin: 0 0 8px;
@@ -173,6 +198,11 @@ onUnmounted(() => {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+.hero--cinema .hero__desc {
+  max-width: 62ch;
+  font-size: 14px;
+  -webkit-line-clamp: 4;
 }
 .hero__dots {
   position: absolute;
@@ -196,5 +226,28 @@ onUnmounted(() => {
   background: var(--accent);
   width: 18px;
   border-radius: 999px;
+}
+@media (max-width: 760px) {
+  .hero--cinema {
+    height: min(58vh, 520px);
+    min-height: 300px;
+  }
+  .hero--cinema .hero__content {
+    left: 18px;
+    right: 18px;
+    bottom: 48px;
+    max-width: none;
+  }
+  .hero--cinema .hero__title {
+    font-size: 40px;
+  }
+  .hero__title {
+    font-size: 28px;
+  }
+}
+@media (max-width: 420px) {
+  .hero--cinema .hero__title {
+    font-size: 34px;
+  }
 }
 </style>

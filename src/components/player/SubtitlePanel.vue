@@ -1,20 +1,34 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { Icon } from "@iconify/vue";
-import { open } from "@tauri-apps/plugin-dialog";
 
 import GlassButton from "@/components/common/GlassButton.vue";
 import { api } from "@/api";
+import { openFileDialog } from "@/platform";
 import { usePlayerStore } from "@/stores/player";
-import type { EmbySubtitle } from "@/types/models";
+import { useSettingsStore } from "@/stores/settings";
+import type { AppSettings, EmbySubtitle, SubtitleStyleSettings } from "@/types/models";
 
 const props = defineProps<{ visible: boolean }>();
 const emit = defineEmits<{ (e: "close"): void }>();
 
 const player = usePlayerStore();
+const settings = useSettingsStore();
 
 const embyTracks = ref<EmbySubtitle[]>([]);
 const loading = ref(false);
+type SubtitleStylePatch = Partial<
+  Pick<
+    AppSettings,
+    | "subtitleScale"
+    | "subtitleTextColor"
+    | "subtitleOutlineColor"
+    | "subtitleOutlineSize"
+    | "subtitleShadowOffset"
+    | "subtitlePositionPct"
+    | "subtitleForceStyle"
+  >
+>;
 
 const mpvSubs = computed(
   () => player.snapshot?.tracks.filter((t) => t.kind === "subtitle") ?? [],
@@ -27,9 +41,60 @@ const delay = computed({
   set: (v) => player.setSubtitleDelay(Math.round(v)),
 });
 const scale = computed({
-  get: () => player.snapshot?.subScale ?? 1,
-  set: (v) => player.setSubtitleScale(Number(v.toFixed(2))),
+  get: () => settings.settings.subtitleScale,
+  set: (v) => {
+    void saveSubtitleStyle({ subtitleScale: Number(v.toFixed(2)) });
+  },
 });
+
+const subtitleOutlineSize = computed({
+  get: () => settings.settings.subtitleOutlineSize,
+  set: (v) => {
+    void saveSubtitleStyle({ subtitleOutlineSize: Number(v.toFixed(2)) });
+  },
+});
+const subtitleShadowOffset = computed({
+  get: () => settings.settings.subtitleShadowOffset,
+  set: (v) => {
+    void saveSubtitleStyle({ subtitleShadowOffset: Number(v.toFixed(2)) });
+  },
+});
+const subtitlePositionPct = computed({
+  get: () => settings.settings.subtitlePositionPct,
+  set: (v) => {
+    void saveSubtitleStyle({ subtitlePositionPct: Math.round(v) });
+  },
+});
+
+function stylePayload(next: AppSettings): SubtitleStyleSettings {
+  return {
+    scale: next.subtitleScale,
+    textColor: next.subtitleTextColor,
+    outlineColor: next.subtitleOutlineColor,
+    outlineSize: next.subtitleOutlineSize,
+    shadowOffset: next.subtitleShadowOffset,
+    positionPct: next.subtitlePositionPct,
+    forceStyle: next.subtitleForceStyle,
+  };
+}
+
+async function saveSubtitleStyle(patch: SubtitleStylePatch) {
+  const next = { ...settings.settings, ...patch };
+  await settings.update(patch);
+  await player.setSubtitleStyle(stylePayload(next));
+}
+
+async function resetSubtitleStyle() {
+  await saveSubtitleStyle({
+    subtitleScale: 1,
+    subtitleTextColor: "#FFFFFF",
+    subtitleOutlineColor: "#000000",
+    subtitleOutlineSize: 1.65,
+    subtitleShadowOffset: 0,
+    subtitlePositionPct: 100,
+    subtitleForceStyle: false,
+  });
+}
 
 async function refresh() {
   loading.value = true;
@@ -53,7 +118,7 @@ async function attach(t: EmbySubtitle) {
 }
 
 async function pickExternal() {
-  const result = (await open({
+  const result = (await openFileDialog({
     multiple: false,
     filters: [
       {
@@ -192,7 +257,10 @@ onMounted(() => {
       </section>
 
       <section class="block">
-        <div class="row-head"><span>字幕大小</span></div>
+        <div class="row-head">
+          <span>字幕样式</span>
+          <button class="ghost" @click="resetSubtitleStyle">默认</button>
+        </div>
         <div class="delay-row">
           <button class="micro" @click="scale = Math.max(0.5, scale - 0.1)">A−</button>
           <span class="delay-value">{{ scale.toFixed(2) }}×</span>
@@ -206,6 +274,69 @@ onMounted(() => {
           :value="scale"
           @input="(e: any) => (scale = Number(e.target.value))"
         />
+        <div class="swatch-row">
+          <label>
+            <span>文字</span>
+            <input
+              type="color"
+              :value="settings.settings.subtitleTextColor"
+              @input="(e: any) => saveSubtitleStyle({ subtitleTextColor: e.target.value })"
+            />
+          </label>
+          <label>
+            <span>描边</span>
+            <input
+              type="color"
+              :value="settings.settings.subtitleOutlineColor"
+              @input="(e: any) => saveSubtitleStyle({ subtitleOutlineColor: e.target.value })"
+            />
+          </label>
+        </div>
+        <label class="metric-row">
+          <span>描边宽度</span>
+          <strong>{{ subtitleOutlineSize.toFixed(2) }}</strong>
+          <input
+            type="range"
+            min="0"
+            max="8"
+            step="0.05"
+            :value="subtitleOutlineSize"
+            @input="(e: any) => (subtitleOutlineSize = Number(e.target.value))"
+          />
+        </label>
+        <label class="metric-row">
+          <span>阴影偏移</span>
+          <strong>{{ subtitleShadowOffset.toFixed(2) }}</strong>
+          <input
+            type="range"
+            min="0"
+            max="8"
+            step="0.05"
+            :value="subtitleShadowOffset"
+            @input="(e: any) => (subtitleShadowOffset = Number(e.target.value))"
+          />
+        </label>
+        <label class="metric-row">
+          <span>垂直位置</span>
+          <strong>{{ subtitlePositionPct }}%</strong>
+          <input
+            type="range"
+            min="70"
+            max="100"
+            step="1"
+            :value="subtitlePositionPct"
+            @input="(e: any) => (subtitlePositionPct = Number(e.target.value))"
+          />
+        </label>
+        <label class="toggle-row">
+          <span>强制覆盖 ASS</span>
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.subtitleForceStyle"
+            @change="(e: any) => saveSubtitleStyle({ subtitleForceStyle: e.target.checked })"
+          />
+        </label>
       </section>
     </aside>
   </transition>
@@ -337,6 +468,48 @@ onMounted(() => {
   font-variant-numeric: tabular-nums;
   font-size: 13px;
 }
+.swatch-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.swatch-row label,
+.metric-row,
+.toggle-row {
+  min-width: 0;
+  display: grid;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--fg-tertiary);
+}
+.swatch-row label {
+  grid-template-columns: 1fr 34px;
+}
+.swatch-row input[type="color"] {
+  width: 34px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+.metric-row {
+  grid-template-columns: 1fr 46px;
+}
+.metric-row input {
+  grid-column: 1 / -1;
+}
+.metric-row strong {
+  color: var(--fg-primary);
+  font-size: 11px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.toggle-row {
+  grid-template-columns: 1fr auto;
+}
 .micro {
   appearance: none;
   background: rgba(255, 255, 255, 0.06);
@@ -356,6 +529,36 @@ onMounted(() => {
 input[type="range"] {
   width: 100%;
   accent-color: var(--accent);
+}
+.switch {
+  width: 42px;
+  height: 24px;
+  appearance: none;
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  position: relative;
+  transition: background 180ms var(--easing-glide), border-color 180ms var(--easing-glide);
+}
+.switch::before {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  top: 2px;
+  left: 2px;
+  border-radius: 999px;
+  background: var(--fg-secondary);
+  transition: transform 180ms var(--easing-glide), background 180ms var(--easing-glide);
+}
+.switch:checked {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.switch:checked::before {
+  transform: translateX(18px);
+  background: var(--accent);
 }
 
 .slide-right-enter-active,

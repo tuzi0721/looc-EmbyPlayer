@@ -8,9 +8,7 @@ use crate::notifications::Notification;
 use crate::state::AppState;
 
 #[tauri::command]
-pub async fn list_notifications(
-    state: State<'_, Arc<AppState>>,
-) -> AppResult<Vec<Notification>> {
+pub async fn list_notifications(state: State<'_, Arc<AppState>>) -> AppResult<Vec<Notification>> {
     Ok(state.notifications.list())
 }
 

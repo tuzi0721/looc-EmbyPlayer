@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 use tauri::State;
 
-use crate::emby::models::{ItemsResponse, MediaItem, PlaybackProgress, ViewsResponse};
+use crate::emby::models::{ItemsResponse, MediaItem, PlaybackProgress, UserData, ViewsResponse};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -39,7 +39,12 @@ pub struct ListItemsPayload {
     pub params: Vec<(String, String)>,
 }
 
-fn active_pair(state: &AppState) -> AppResult<(crate::config::models::Server, crate::config::models::Account)> {
+fn active_pair(
+    state: &AppState,
+) -> AppResult<(
+    crate::config::models::Server,
+    crate::config::models::Account,
+)> {
     let account = state
         .config
         .active_account()
@@ -65,7 +70,12 @@ pub async fn list_items(
     let (server, account) = active_pair(&state)?;
     state
         .emby
-        .list_items(&server, &account, payload.parent_id.as_deref(), &payload.params)
+        .list_items(
+            &server,
+            &account,
+            payload.parent_id.as_deref(),
+            &payload.params,
+        )
         .await
 }
 
@@ -76,6 +86,37 @@ pub async fn get_item_detail(
 ) -> AppResult<MediaItem> {
     let (server, account) = active_pair(&state)?;
     state.emby.get_item(&server, &account, &item_id).await
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemUserDataPayload {
+    pub item_id: String,
+    pub value: bool,
+}
+
+#[tauri::command]
+pub async fn set_item_favorite(
+    state: State<'_, Arc<AppState>>,
+    payload: ItemUserDataPayload,
+) -> AppResult<UserData> {
+    let (server, account) = active_pair(&state)?;
+    state
+        .emby
+        .set_favorite(&server, &account, &payload.item_id, payload.value)
+        .await
+}
+
+#[tauri::command]
+pub async fn set_item_played(
+    state: State<'_, Arc<AppState>>,
+    payload: ItemUserDataPayload,
+) -> AppResult<UserData> {
+    let (server, account) = active_pair(&state)?;
+    state
+        .emby
+        .set_played(&server, &account, &payload.item_id, payload.value)
+        .await
 }
 
 #[tauri::command]
@@ -114,7 +155,38 @@ pub async fn list_episodes(
     let (server, account) = active_pair(&state)?;
     state
         .emby
-        .list_episodes(&server, &account, &payload.series_id, payload.season_id.as_deref())
+        .list_episodes(
+            &server,
+            &account,
+            &payload.series_id,
+            payload.season_id.as_deref(),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn similar_items(
+    state: State<'_, Arc<AppState>>,
+    item_id: String,
+    limit: Option<i32>,
+) -> AppResult<ItemsResponse> {
+    let (server, account) = active_pair(&state)?;
+    state
+        .emby
+        .similar_items(&server, &account, &item_id, limit)
+        .await
+}
+
+#[tauri::command]
+pub async fn special_features(
+    state: State<'_, Arc<AppState>>,
+    item_id: String,
+    limit: Option<i32>,
+) -> AppResult<ItemsResponse> {
+    let (server, account) = active_pair(&state)?;
+    state
+        .emby
+        .special_features(&server, &account, &item_id, limit)
         .await
 }
 

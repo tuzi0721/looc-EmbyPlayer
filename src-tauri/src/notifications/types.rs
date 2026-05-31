@@ -76,7 +76,11 @@ pub struct NotificationSpec {
 }
 
 impl NotificationSpec {
-    pub fn new(kind: NotificationKind, category: NotificationCategory, title: impl Into<String>) -> Self {
+    pub fn new(
+        kind: NotificationKind,
+        category: NotificationCategory,
+        title: impl Into<String>,
+    ) -> Self {
         Self {
             kind,
             category,

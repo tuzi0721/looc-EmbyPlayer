@@ -1,6 +1,9 @@
 node_modules
 dist
 dist-ssr
+release-electron
+.electron-user-data
+.electron-builder-cache
 *.local
 
 # Local assistant/tooling memory (keep on this machine, do not publish)

@@ -24,6 +24,12 @@ const routes: RouteRecordRaw[] = [
     meta: { transition: "slide-up" },
   },
   {
+    path: "/history",
+    name: "history",
+    component: () => import("@/views/HistoryView.vue"),
+    meta: { transition: "slide-up" },
+  },
+  {
     path: "/aggregate",
     name: "aggregate",
     component: () => import("@/views/AggregateView.vue"),
@@ -40,6 +46,13 @@ const routes: RouteRecordRaw[] = [
     path: "/item/:id",
     name: "item-detail",
     component: () => import("@/views/DetailView.vue"),
+    props: true,
+    meta: { transition: "slide-up" },
+  },
+  {
+    path: "/studio/:id",
+    name: "studio-detail",
+    component: () => import("@/views/StudioView.vue"),
     props: true,
     meta: { transition: "slide-up" },
   },

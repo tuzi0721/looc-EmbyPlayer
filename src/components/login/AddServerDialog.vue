@@ -1,72 +1,173 @@
 <script setup lang="ts">
-import { reactive, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import { Icon } from "@iconify/vue";
 
 import GlassButton from "@/components/common/GlassButton.vue";
 import GlassInput from "@/components/common/GlassInput.vue";
+import { useAuthStore } from "@/stores/auth";
 import { useServerStore } from "@/stores/server";
 import type { ServerKind } from "@/types/models";
+import { normalizeNullableText, parseHeaderText } from "@/utils/headerText";
+import { normalizeServerBaseUrl } from "@/utils/serverUrl";
 
 const emit = defineEmits<{
   (e: "close"): void;
-  (e: "created", id: string): void;
+  (e: "created", id: string, loggedIn?: boolean): void;
 }>();
 
+const auth = useAuthStore();
 const serverStore = useServerStore();
+
+type ServerKindChoice = "auto" | ServerKind;
+
+type LineDraft = {
+  id: string;
+  name: string;
+  baseUrl: string;
+  port: string;
+  userAgent: string;
+  headersText: string;
+};
+
+type LinePayload = {
+  id: string;
+  name: string;
+  baseUrl: string;
+  userAgent: string | null;
+  headers: [string, string][];
+  priority: number;
+  enabled: boolean;
+};
+
+function createId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `line-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createLineDraft(name: string): LineDraft {
+  return {
+    id: createId(),
+    name,
+    baseUrl: "",
+    port: "",
+    userAgent: "",
+    headersText: "",
+  };
+}
 
 const form = reactive({
   name: "",
-  kind: "emby" as ServerKind,
-  lines: [
-    { name: "主线路", baseUrl: "" },
-  ],
+  kind: "auto" as ServerKindChoice,
+  defaultUserAgent: "",
+  username: "",
+  password: "",
+  showPassword: false,
+  lines: [createLineDraft("主线路")],
 });
 
 const submitting = ref(false);
 const errorText = ref<string | null>(null);
+const statusText = ref<string | null>(null);
+
+const hasCredentials = computed(
+  () => form.username.trim().length > 0 || form.password.length > 0,
+);
+const primaryLabel = computed(() => (hasCredentials.value ? "保存并登录" : "保存"));
 
 function addLine() {
-  form.lines.push({ name: `线路 ${form.lines.length + 1}`, baseUrl: "" });
+  form.lines.push(createLineDraft(`线路 ${form.lines.length + 1}`));
 }
 function removeLine(idx: number) {
   if (form.lines.length === 1) return;
   form.lines.splice(idx, 1);
 }
 
+function linePayload(line: LineDraft, index: number): LinePayload {
+  const baseUrl = normalizeServerBaseUrl(line.baseUrl, line.port);
+  if (!baseUrl) throw new Error(`线路 ${index + 1} 需要填写地址`);
+  return {
+    id: line.id,
+    name: line.name.trim() || `线路 ${index + 1}`,
+    baseUrl,
+    userAgent: normalizeNullableText(line.userAgent),
+    headers: parseHeaderText(line.headersText),
+    priority: index,
+    enabled: true,
+  };
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof TypeError && error.message.includes("Invalid URL")) {
+    return "服务器地址格式不正确";
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function submit() {
   errorText.value = null;
-  if (!form.name.trim()) {
+  statusText.value = null;
+  const name = form.name.trim();
+  if (!name) {
     errorText.value = "请填写服务器名称";
     return;
   }
-  const lines = form.lines
-    .map((l, i) => ({
-      name: l.name.trim() || `线路 ${i + 1}`,
-      baseUrl: l.baseUrl.trim(),
-      userAgent: null,
-      headers: [] as [string, string][],
-      priority: i,
-      enabled: true,
-    }))
-    .filter((l) => l.baseUrl.length > 0);
-  if (lines.length === 0) {
-    errorText.value = "至少需要一条可用线路";
+  if (hasCredentials.value && (!form.username.trim() || !form.password)) {
+    errorText.value = "登录需要同时填写账号和密码";
     return;
   }
+
+  let lines: LinePayload[];
+  try {
+    lines = form.lines.map(linePayload);
+  } catch (error) {
+    errorText.value = errorMessage(error);
+    return;
+  }
+
   submitting.value = true;
   try {
-    const s = await serverStore.addServer({
-      name: form.name.trim(),
-      kind: form.kind,
+    let kind: ServerKind = form.kind === "auto" ? "emby" : form.kind;
+    let activeLineId: string | null = null;
+
+    if (form.kind === "auto") {
+      statusText.value = "正在识别服务器类型…";
+      const detected = await serverStore.detectServer({
+        name,
+        lines,
+        defaultUserAgent: normalizeNullableText(form.defaultUserAgent),
+      });
+      kind = detected.kind;
+      activeLineId = detected.winningLineId;
+    }
+
+    statusText.value = hasCredentials.value ? "正在保存并登录…" : "正在保存服务器…";
+    const server = await serverStore.addServer({
+      name,
+      kind,
+      activeLineId,
       lines,
-      defaultUserAgent: null,
+      defaultUserAgent: normalizeNullableText(form.defaultUserAgent),
     });
-    emit("created", s.id);
+
+    let loggedIn = false;
+    if (hasCredentials.value) {
+      await auth.login({
+        serverId: server.id,
+        username: form.username.trim(),
+        password: form.password,
+      });
+      loggedIn = true;
+    }
+
+    emit("created", server.id, loggedIn);
     emit("close");
-  } catch (e) {
-    errorText.value = String(e);
+  } catch (error) {
+    errorText.value = errorMessage(error);
   } finally {
     submitting.value = false;
+    statusText.value = null;
   }
 }
 </script>
@@ -75,64 +176,114 @@ async function submit() {
   <Teleport to="body">
     <div class="modal-mask" @click.self="emit('close')">
       <div class="modal glass glass-strong">
-      <header class="modal__head">
-        <h3>添加服务器</h3>
-        <button class="iconbtn" @click="emit('close')" aria-label="Close">
-          <Icon icon="lucide:x" width="18" />
-        </button>
-      </header>
+        <header class="modal__head">
+          <h3>添加服务器</h3>
+          <button class="iconbtn" @click="emit('close')" aria-label="Close">
+            <Icon icon="lucide:x" width="18" />
+          </button>
+        </header>
 
-      <div class="modal__body">
-        <section class="fields">
-          <label class="field">
-            <span>名称</span>
-            <GlassInput v-model="form.name" placeholder="例如：家庭影院" />
-          </label>
-          <label class="field">
-            <span>类型</span>
-            <div class="seg">
-              <button
-                type="button"
-                :class="{ active: form.kind === 'emby' }"
-                @click="form.kind = 'emby'"
-              >Emby</button>
-              <button
-                type="button"
-                :class="{ active: form.kind === 'jellyfin' }"
-                @click="form.kind = 'jellyfin'"
-              >Jellyfin</button>
+        <div class="modal__body">
+          <section class="fields">
+            <label class="field">
+              <span>名称</span>
+              <GlassInput v-model="form.name" placeholder="例如：家庭影院" />
+            </label>
+            <label class="field">
+              <span>类型</span>
+              <div class="seg">
+                <button
+                  type="button"
+                  :class="{ active: form.kind === 'auto' }"
+                  @click="form.kind = 'auto'"
+                >自动</button>
+                <button
+                  type="button"
+                  :class="{ active: form.kind === 'emby' }"
+                  @click="form.kind = 'emby'"
+                >Emby</button>
+                <button
+                  type="button"
+                  :class="{ active: form.kind === 'jellyfin' }"
+                  @click="form.kind = 'jellyfin'"
+                >Jellyfin</button>
+              </div>
+            </label>
+            <label class="field">
+              <span>默认 User-Agent</span>
+              <GlassInput v-model="form.defaultUserAgent" placeholder="留空使用应用默认" />
+            </label>
+          </section>
+
+          <section>
+            <header class="section-head">
+              <h4>账号</h4>
+            </header>
+            <div class="account-grid">
+              <GlassInput
+                v-model="form.username"
+                placeholder="用户名"
+                autocomplete="username"
+                icon="lucide:user"
+              />
+              <GlassInput
+                v-model="form.password"
+                :type="form.showPassword ? 'text' : 'password'"
+                placeholder="密码"
+                autocomplete="current-password"
+                icon="lucide:lock"
+                :right-icon="form.showPassword ? 'lucide:eye-off' : 'lucide:eye'"
+                @rightIconClick="form.showPassword = !form.showPassword"
+              />
             </div>
-          </label>
-        </section>
+          </section>
 
-        <section>
-          <header class="section-head">
-            <h4>线路</h4>
-            <button class="link" @click="addLine">
-              <Icon icon="lucide:plus" width="14" />
-              新增线路
-            </button>
-          </header>
-          <div v-for="(line, idx) in form.lines" :key="idx" class="line-card">
-            <div class="line-card__top">
-              <GlassInput v-model="line.name" placeholder="线路名" />
-              <button class="iconbtn danger" @click="removeLine(idx)" :disabled="form.lines.length === 1">
-                <Icon icon="lucide:trash-2" width="16" />
+          <section>
+            <header class="section-head">
+              <h4>线路</h4>
+              <button class="link" @click="addLine">
+                <Icon icon="lucide:plus" width="14" />
+                新增线路
               </button>
+            </header>
+            <div v-for="(line, idx) in form.lines" :key="line.id" class="line-card">
+              <div class="line-card__top">
+                <GlassInput v-model="line.name" placeholder="线路名" />
+                <button class="iconbtn danger" @click="removeLine(idx)" :disabled="form.lines.length === 1">
+                  <Icon icon="lucide:trash-2" width="16" />
+                </button>
+              </div>
+              <div class="line-url">
+                <GlassInput v-model="line.baseUrl" placeholder="https://example.com 或 192.168.1.2" />
+                <GlassInput v-model="line.port" placeholder="端口：443 / 8096" />
+              </div>
+              <details class="line-advanced">
+                <summary>
+                  <Icon icon="lucide:sliders-horizontal" width="14" />
+                  高级
+                </summary>
+                <label class="field">
+                  <span>User-Agent</span>
+                  <GlassInput v-model="line.userAgent" placeholder="留空使用默认 UA" />
+                </label>
+                <label class="field">
+                  <span>Headers</span>
+                  <textarea v-model="line.headersText" placeholder="X-Header: value"></textarea>
+                </label>
+              </details>
             </div>
-            <GlassInput v-model="line.baseUrl" placeholder="https://emby.example.com" />
-          </div>
-        </section>
+          </section>
 
-        <p v-if="errorText" class="err">{{ errorText }}</p>
-      </div>
+          <p v-if="statusText" class="status">{{ statusText }}</p>
+          <p v-if="errorText" class="err">{{ errorText }}</p>
+        </div>
 
-      <footer class="modal__foot">
-        <GlassButton variant="ghost" @click="emit('close')">取消</GlassButton>
-        <GlassButton variant="primary" :loading="submitting" @click="submit">
-          保存
-        </GlassButton>
-      </footer>
+        <footer class="modal__foot">
+          <GlassButton variant="ghost" @click="emit('close')">取消</GlassButton>
+          <GlassButton variant="primary" :loading="submitting" @click="submit">
+            {{ primaryLabel }}
+          </GlassButton>
+        </footer>
       </div>
     </div>
   </Teleport>
@@ -151,9 +302,9 @@ async function submit() {
   padding: 24px;
 }
 .modal {
-  width: 560px;
+  width: 600px;
   max-width: 100%;
-  max-height: 80vh;
+  max-height: 84vh;
   display: flex;
   flex-direction: column;
   border-radius: 22px;
@@ -173,6 +324,7 @@ async function submit() {
 }
 .modal__body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 18px 20px;
   display: flex;
@@ -181,10 +333,19 @@ async function submit() {
 }
 .modal__foot {
   display: flex;
+  flex: 0 0 auto;
   gap: 10px;
   justify-content: flex-end;
   padding: 14px 20px;
   border-top: 1px solid var(--separator);
+  background: rgba(20, 20, 24, 0.72);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 .field {
   display: flex;
@@ -197,11 +358,6 @@ async function submit() {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-weight: 600;
-}
-.row-2 {
-  display: grid;
-  grid-template-columns: 1fr 2fr;
-  gap: 12px;
 }
 .section-head {
   display: flex;
@@ -232,6 +388,51 @@ async function submit() {
   grid-template-columns: 1fr auto;
   gap: 8px;
   align-items: center;
+}
+.line-url {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  gap: 8px;
+}
+.account-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.line-advanced {
+  margin-top: 2px;
+  border-top: 1px solid var(--separator);
+  padding-top: 10px;
+}
+.line-advanced summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--fg-secondary);
+  font-size: 12px;
+}
+.line-advanced[open] summary {
+  margin-bottom: 10px;
+  color: var(--accent);
+}
+textarea {
+  min-height: 78px;
+  resize: vertical;
+  outline: none;
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-primary);
+  font: inherit;
+  padding: 11px 13px;
+}
+textarea:focus {
+  border-color: rgba(10, 132, 255, 0.6);
+  box-shadow: 0 0 0 4px rgba(10, 132, 255, 0.18);
+}
+textarea::placeholder {
+  color: var(--fg-tertiary);
 }
 .seg {
   display: inline-flex;
@@ -290,9 +491,21 @@ async function submit() {
   align-items: center;
   gap: 4px;
 }
+.status,
 .err {
-  color: var(--danger);
   font-size: 13px;
   margin: 0;
+}
+.status {
+  color: var(--fg-secondary);
+}
+.err {
+  color: var(--danger);
+}
+@media (max-width: 620px) {
+  .line-url,
+  .account-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

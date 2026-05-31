@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 
 interface Comment {
   time: number;
   mode: "scroll" | "top" | "bottom" | "reverse";
   color: string;
   text: string;
+  count?: number;
 }
 
 const props = withDefaults(
@@ -18,8 +19,17 @@ const props = withDefaults(
     speed?: number;
     fontSize?: number;
     lanes?: number;
+    avoidSubtitles?: boolean;
+    bottomReservePct?: number;
   }>(),
-  { opacity: 0.85, speed: 1, fontSize: 22, lanes: 14 },
+  {
+    opacity: 0.85,
+    speed: 1,
+    fontSize: 22,
+    lanes: 14,
+    avoidSubtitles: true,
+    bottomReservePct: 18,
+  },
 );
 
 const container = ref<HTMLDivElement | null>(null);
@@ -40,6 +50,13 @@ interface Active {
 const active: Active[] = [];
 let rafHandle: number | null = null;
 let lastPlaybackSec = 0;
+
+const bottomReservePct = computed(() =>
+  props.avoidSubtitles ? Math.max(0, Math.min(40, props.bottomReservePct)) : 0,
+);
+const containerStyle = computed(() => ({
+  bottom: `${bottomReservePct.value}%`,
+}));
 
 function reset() {
   cursor.value = 0;
@@ -64,7 +81,7 @@ function spawn(c: Comment, now: number) {
   if (!container.value || !props.enabled) return;
   const el = document.createElement("div");
   el.className = "dm-item";
-  el.textContent = c.text;
+  el.textContent = c.count && c.count > 1 ? `${c.text} ×${c.count}` : c.text;
   el.style.color = c.color;
   el.style.opacity = String(props.opacity);
   el.style.fontSize = `${props.fontSize}px`;
@@ -190,6 +207,11 @@ watch(
 );
 
 watch(
+  () => [props.fontSize, props.lanes, props.avoidSubtitles, props.bottomReservePct],
+  () => reset(),
+);
+
+watch(
   () => props.enabled,
   (en) => {
     if (!en) {
@@ -214,7 +236,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="container" class="dm" aria-hidden="true" />
+  <div ref="container" class="dm" :style="containerStyle" aria-hidden="true" />
 </template>
 
 <style scoped>

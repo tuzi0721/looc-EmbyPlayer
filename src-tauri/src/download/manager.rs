@@ -33,7 +33,12 @@ impl DownloadManager {
         notifications: NotificationCenter,
     ) -> Self {
         Self {
-            engine: Arc::new(DownloadEngine::new(config, emby, handle.clone(), notifications)),
+            engine: Arc::new(DownloadEngine::new(
+                config,
+                emby,
+                handle.clone(),
+                notifications,
+            )),
             handles: Arc::new(DashMap::new()),
             handle,
         }

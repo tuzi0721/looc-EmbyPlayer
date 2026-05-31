@@ -28,11 +28,11 @@ Write-Host "Root: $Root`n"
 
 if (-not $SkipBuild) {
     Write-Host "==> Step 1/3: Frontend typecheck + vite build" -ForegroundColor Cyan
-    npm run build
+    npm.cmd run build
     if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
 
     Write-Host "`n==> Step 2/3: Tauri release build" -ForegroundColor Cyan
-    npm run tauri:build
+    npm.cmd run tauri:build
     if ($LASTEXITCODE -ne 0) { throw "tauri build failed" }
 } else {
     Write-Host "==> Skipping build (-SkipBuild)" -ForegroundColor Yellow
@@ -45,13 +45,7 @@ $dist = Join-Path $Root "dist\index.html"
 
 Assert-PathExists $dist "embedded frontend"
 Assert-PathExists $exe "release executable"
-
-if (Test-Path $mpv) {
-    Assert-PathExists $mpv "bundled mpv"
-} else {
-    Write-Host "WARN bundled mpv not found — playback requires system mpv in PATH" -ForegroundColor Yellow
-    Write-Host "    $mpv" -ForegroundColor DarkGray
-}
+Assert-PathExists $mpv "bundled mpv"
 
 Write-Host "`n=== Manual QA checklist ===" -ForegroundColor Cyan
 @(

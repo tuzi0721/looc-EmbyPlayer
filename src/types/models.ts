@@ -1,6 +1,7 @@
 export type ServerKind = "emby" | "jellyfin";
 
 export type LineStatus = "healthy" | "slow" | "degraded" | "down" | "unknown";
+export type StatsOverlayMode = "winui" | "mpv-osd";
 
 export interface Line {
   id: string;
@@ -43,14 +44,45 @@ export interface AppSettings {
   raceTimeoutMs: number;
   requestTimeoutMs: number;
   defaultUserAgent: string;
+  firstRunCompleted: boolean;
   theme: "dark" | "light" | "auto";
   blurStrength: number;
   enableWindowVibrancy: boolean;
   mpvBackend: "ipc" | "embedded";
-  mpvExecutablePath?: string | null;
+  externalPlayerPath?: string | null;
+  externalPlayerArgs: string;
   hardwareDecoding: boolean;
   mpvCacheMb: number;
   hiddenServerIds: string[];
+  hideJavCodes: boolean;
+  showNetworkSpeed: boolean;
+  statsOverlayMode: StatsOverlayMode;
+  blackoutOtherDisplays: boolean;
+  preserveTrackSwitchCache: boolean;
+  skipIntroOutroEnabled: boolean;
+  skipIntroSeconds: number;
+  skipOutroSeconds: number;
+  screenshotIncludeSubtitles: boolean;
+  appendAuthQuery: boolean;
+  homeHeroStyle: "classic" | "cinema";
+  closeToTray: boolean;
+  traktSyncEnabled: boolean;
+  traktUsername?: string | null;
+  traktSyncWatched: boolean;
+  traktSyncRatings: boolean;
+  traktSyncFavorites: boolean;
+  danmakuOpacity: number;
+  danmakuSpeed: number;
+  danmakuFontSize: number;
+  danmakuAvoidSubtitles: boolean;
+  danmakuBottomReservePct: number;
+  subtitleScale: number;
+  subtitleTextColor: string;
+  subtitleOutlineColor: string;
+  subtitleOutlineSize: number;
+  subtitleShadowOffset: number;
+  subtitlePositionPct: number;
+  subtitleForceStyle: boolean;
 }
 
 export interface LineHealthReport {
@@ -64,6 +96,7 @@ export interface LineHealthReport {
 export interface UserData {
   PlayedPercentage?: number | null;
   PlaybackPositionTicks?: number | null;
+  LastPlayedDate?: string | null;
   Played: boolean;
   IsFavorite: boolean;
   PlayCount: number;
@@ -74,6 +107,14 @@ export interface NameIdPair {
   Id?: string | null;
 }
 
+export interface MediaPerson {
+  Name: string;
+  Id?: string | null;
+  Role?: string | null;
+  Type?: string | null;
+  PrimaryImageTag?: string | null;
+}
+
 export interface MediaItem {
   Id: string;
   Name: string;
@@ -82,8 +123,10 @@ export interface MediaItem {
   ProductionYear?: number | null;
   CommunityRating?: number | null;
   OfficialRating?: string | null;
+  PrimaryImageAspectRatio?: number | null;
   Genres?: string[] | null;
   GenreItems?: NameIdPair[] | null;
+  Studios?: NameIdPair[] | null;
   RunTimeTicks?: number | null;
   SeriesName?: string | null;
   SeriesId?: string | null;
@@ -93,6 +136,8 @@ export interface MediaItem {
   ImageTags?: Record<string, string> | null;
   BackdropImageTags?: string[] | null;
   UserData?: UserData | null;
+  People?: MediaPerson[] | null;
+  ProviderIds?: Record<string, string | null | undefined> | null;
 }
 
 export interface ItemsResponse {
@@ -110,7 +155,39 @@ export interface MpvTrackInfo {
   kind: "video" | "audio" | "subtitle";
   title?: string | null;
   lang?: string | null;
+  codec?: string | null;
+  external?: boolean | null;
+  defaultTrack?: boolean | null;
+  forced?: boolean | null;
   selected: boolean;
+}
+
+export interface MpvChapterInfo {
+  index: number;
+  title?: string | null;
+  timeMs: number;
+}
+
+export type PictureMode = "fit" | "fill" | "stretch" | "autocrop";
+
+export interface MpvVideoParams {
+  w?: number;
+  h?: number;
+  dw?: number;
+  dh?: number;
+  aspect?: number;
+  rotate?: number;
+  pixelformat?: string;
+  "hw-pixelformat"?: string;
+  "average-bpp"?: number;
+}
+
+export interface MpvAudioParams {
+  samplerate?: number;
+  channels?: string;
+  "hr-channels"?: string;
+  "channel-count"?: number;
+  format?: string;
 }
 
 export interface MpvSnapshot {
@@ -123,8 +200,26 @@ export interface MpvSnapshot {
   muted: boolean;
   eof: boolean;
   tracks: MpvTrackInfo[];
+  chapters?: MpvChapterInfo[];
+  chapter?: number | null;
   subDelayMs?: number;
   subScale?: number;
+  networkBps?: number | null;
+  bufferedMs?: number;
+  buffering?: boolean;
+  cacheBufferingState?: number | null;
+  videoCodec?: string | null;
+  audioCodec?: string | null;
+  videoParams?: MpvVideoParams | null;
+  audioParams?: MpvAudioParams | null;
+  hwdecCurrent?: string | null;
+  containerFps?: number | null;
+  estimatedVfFps?: number | null;
+  videoBitrate?: number | null;
+  audioBitrate?: number | null;
+  frameDropCount?: number | null;
+  decoderFrameDropCount?: number | null;
+  voFrameDropCount?: number | null;
 }
 
 export type DanmakuMode = "scroll" | "top" | "bottom" | "reverse";
@@ -135,6 +230,7 @@ export interface DanmakuComment {
   color: string;
   text: string;
   source?: string | null;
+  count?: number;
 }
 
 export interface DanmakuResult {
@@ -146,6 +242,16 @@ export interface DanmakuResult {
 export interface DanmakuProviderInfo {
   id: string;
   displayName: string;
+}
+
+export interface SubtitleStyleSettings {
+  scale: number;
+  textColor: string;
+  outlineColor: string;
+  outlineSize: number;
+  shadowOffset: number;
+  positionPct: number;
+  forceStyle: boolean;
 }
 
 export interface RemotePlayState {
@@ -227,6 +333,8 @@ export interface DownloadTask {
   title: string;
   filePath: string;
   streamUrl: string;
+  headers?: [string, string][];
+  userAgent?: string | null;
   container?: string | null;
   totalBytes?: number | null;
   downloadedBytes: number;

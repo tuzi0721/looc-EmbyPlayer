@@ -32,7 +32,10 @@ impl HealthChecker {
 
     /// Check a single line. Uses Emby/Jellyfin `/System/Info/Public` which is unauthenticated.
     pub async fn check_one(&self, line: &Line, default_ua: &str) -> LineHealthReport {
-        let ua = line.user_agent.clone().unwrap_or_else(|| default_ua.to_string());
+        let ua = line
+            .user_agent
+            .clone()
+            .unwrap_or_else(|| default_ua.to_string());
         let ctx = RequestContext {
             line: line.clone(),
             effective_ua: ua,
@@ -66,12 +69,7 @@ impl HealthChecker {
         };
 
         let started = Instant::now();
-        let result = self
-            .client
-            .get(url)
-            .headers(headers)
-            .send()
-            .await;
+        let result = self.client.get(url).headers(headers).send().await;
 
         let latency = started.elapsed().as_millis() as u32;
 

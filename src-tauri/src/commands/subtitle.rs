@@ -1,6 +1,6 @@
 //! Subtitle commands: list available subtitles for the current item (built-in
 //! tracks reported by mpv + Emby-provided tracks), add external/sidecar
-//! subtitle files, and adjust delay / scale.
+//! subtitle files, and adjust delay / appearance.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use url::Url;
 
 use crate::emby::endpoints;
 use crate::error::{AppError, AppResult};
-use crate::mpv::MpvCommand;
+use crate::mpv::{MpvCommand, SubtitleStyle};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize)]
@@ -55,7 +55,13 @@ pub async fn list_subtitles(state: State<'_, Arc<AppState>>) -> AppResult<Option
 
     let pb = state
         .emby
-        .playback_info(&server, &account, &session.item_id, None)
+        .playback_info_for_line(
+            &server,
+            &account,
+            &session.item_id,
+            None,
+            Some(&session.line_id),
+        )
         .await?;
     let mut sources = pb.media_sources;
     let source = if let Some(pos) = sources.iter().position(|s| s.id == session.media_source_id) {
@@ -70,13 +76,7 @@ pub async fn list_subtitles(state: State<'_, Arc<AppState>>) -> AppResult<Option
         }));
     };
 
-    let line = server
-        .lines
-        .iter()
-        .find(|l| Some(&l.id) == server.active_line_id.as_ref())
-        .or_else(|| server.lines.first())
-        .cloned()
-        .ok_or_else(|| AppError::NoLine(server.id.clone()))?;
+    let line = state.emby.pick_line(&server, Some(&session.line_id))?;
 
     let mut tracks = vec![];
     for stream in source.media_streams {
@@ -238,6 +238,44 @@ pub async fn set_subtitle_scale(
         .mpv
         .backend()
         .execute(MpvCommand::SetSubtitleScale(payload.scale))
+        .await
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtitleStylePayload {
+    pub scale: f64,
+    pub text_color: String,
+    pub outline_color: String,
+    pub outline_size: f64,
+    pub shadow_offset: f64,
+    pub position_pct: u32,
+    pub force_style: bool,
+}
+
+impl From<SubtitleStylePayload> for SubtitleStyle {
+    fn from(value: SubtitleStylePayload) -> Self {
+        Self {
+            scale: value.scale.clamp(0.5, 2.5),
+            text_color: value.text_color,
+            outline_color: value.outline_color,
+            outline_size: value.outline_size.clamp(0.0, 8.0),
+            shadow_offset: value.shadow_offset.clamp(0.0, 8.0),
+            position_pct: value.position_pct.clamp(0, 100),
+            force_style: value.force_style,
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn set_subtitle_style(
+    state: State<'_, Arc<AppState>>,
+    payload: SubtitleStylePayload,
+) -> AppResult<()> {
+    state
+        .mpv
+        .backend()
+        .execute(MpvCommand::SetSubtitleStyle(payload.into()))
         .await
 }
 

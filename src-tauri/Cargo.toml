@@ -12,8 +12,6 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
-reqwest = { version = "0.12", features = ["blocking", "rustls-tls"] }
-sevenz-rust = "0.6"
 
 [dependencies]
 tauri = { version = "2", features = [ "tray-icon"] }
@@ -69,10 +67,7 @@ windows = { version = "0.58", features = [
 # URL parsing
 url = "2.5"
 
-# Resolve mpv on PATH when bundled copy is absent
-which = "7.0"
-
-# Open URLs from the frontend (mpv install page, etc.)
+# Open URLs and local paths from the frontend.
 open = "5"
 
 # Concurrency utilities
