@@ -9,6 +9,11 @@ import { useLocalFilesStore } from "@/stores/localFiles";
 import { usePlayerStore } from "@/stores/player";
 
 type SortMode = "path" | "name" | "modified" | "size";
+interface VisibleGroup {
+  key: string;
+  title: string;
+  items: Array<{ item: LocalFolderVideo; index: number }>;
+}
 
 const route = useRoute();
 const router = useRouter();
@@ -21,6 +26,7 @@ const errorText = ref<string | null>(null);
 const recursive = ref(false);
 const searchText = ref("");
 const sortMode = ref<SortMode>("path");
+const groupByFolder = ref(true);
 const posterFailures = ref<Set<string>>(new Set());
 
 const folderPath = computed(() => {
@@ -62,6 +68,21 @@ const visibleItems = computed(() => {
       )
     : items;
   return [...filtered].sort(compareVideos);
+});
+const visibleGroups = computed<VisibleGroup[]>(() => {
+  const indexedItems = visibleItems.value.map((item, index) => ({ item, index }));
+  if (!listing.value?.recursive || !groupByFolder.value) {
+    return [{ key: "all", title: "", items: indexedItems }];
+  }
+  const groups = new Map<string, VisibleGroup>();
+  for (const entry of indexedItems) {
+    const title = folderGroupTitle(entry.item);
+    const key = title.toLocaleLowerCase();
+    const group = groups.get(key) ?? { key, title, items: [] };
+    group.items.push(entry);
+    groups.set(key, group);
+  }
+  return [...groups.values()];
 });
 const countLabel = computed(() => {
   const total = listing.value?.items.length ?? 0;
@@ -115,6 +136,13 @@ function formatDate(ms?: number | null): string {
 function relativePathLabel(item: LocalFolderVideo): string {
   const value = item.relativePath?.trim();
   return value && value !== item.name ? value : "";
+}
+
+function folderGroupTitle(item: LocalFolderVideo): string {
+  const value = item.relativePath?.trim() ?? item.name;
+  const index = Math.max(value.lastIndexOf("\\"), value.lastIndexOf("/"));
+  if (index <= 0) return "根目录";
+  return value.slice(0, index);
 }
 
 function displayTitle(item: LocalFolderVideo): string {
@@ -350,6 +378,10 @@ watch(recursive, () => {
             <option value="size">大小</option>
           </select>
         </label>
+        <label v-if="listing?.recursive" class="group-toggle">
+          <input v-model="groupByFolder" type="checkbox" />
+          <span>按文件夹分组</span>
+        </label>
         <button
           v-if="searchText"
           class="icon-btn"
@@ -383,56 +415,62 @@ watch(recursive, () => {
       </div>
 
       <ul v-else class="file-list">
-        <li v-for="(item, index) in visibleItems" :key="item.filePath">
-          <div class="file-row" :title="item.filePath">
-            <button class="file-row__open" type="button" @click="openVideo(item, index)">
-              <span class="file-row__thumb" :class="{ 'file-row__thumb--image': videoPosterUrl(item) }">
-                <img
-                  v-if="videoPosterUrl(item)"
-                  :src="videoPosterUrl(item)"
-                  alt=""
-                  loading="lazy"
-                  @error="markPosterFailed(item)"
-                />
-                <Icon icon="lucide:file-video" width="18" />
-              </span>
-              <span class="file-row__main">
-                <strong>{{ displayTitle(item) }}</strong>
-                <small v-if="metadataSummary(item)" class="file-row__metadata">
-                  {{ metadataSummary(item) }}
-                </small>
-                <small v-if="listing?.recursive && relativePathLabel(item)" class="file-row__path">
-                  {{ relativePathLabel(item) }}
-                </small>
-                <small>
-                  {{ item.extension.toUpperCase() }} · {{ formatBytes(item.sizeBytes) }}
-                  <template v-if="formatDate(item.modifiedAtMs)">
-                    · {{ formatDate(item.modifiedAtMs) }}
-                  </template>
-                </small>
-              </span>
-              <Icon icon="lucide:play" width="17" class="file-row__play" />
-            </button>
-            <button
-              class="file-row__action"
-              type="button"
-              title="打开所在文件夹"
-              @click="openVideoFolder(item)"
-            >
-              <Icon icon="lucide:folder-search" width="16" />
-            </button>
-            <button
-              class="file-row__favorite"
-              :class="{ active: isFavoriteVideo(item) }"
-              type="button"
-              :title="isFavoriteVideo(item) ? '取消收藏文件' : '收藏文件'"
-              :aria-pressed="isFavoriteVideo(item)"
-              @click="toggleFavoriteVideo(item)"
-            >
-              <Icon icon="lucide:star" width="16" />
-            </button>
-          </div>
-        </li>
+        <template v-for="group in visibleGroups" :key="group.key">
+          <li v-if="group.title" class="file-group">
+            <span>{{ group.title }}</span>
+            <em>{{ group.items.length }} 个</em>
+          </li>
+          <li v-for="{ item, index } in group.items" :key="item.filePath">
+            <div class="file-row" :title="item.filePath">
+              <button class="file-row__open" type="button" @click="openVideo(item, index)">
+                <span class="file-row__thumb" :class="{ 'file-row__thumb--image': videoPosterUrl(item) }">
+                  <img
+                    v-if="videoPosterUrl(item)"
+                    :src="videoPosterUrl(item)"
+                    alt=""
+                    loading="lazy"
+                    @error="markPosterFailed(item)"
+                  />
+                  <Icon icon="lucide:file-video" width="18" />
+                </span>
+                <span class="file-row__main">
+                  <strong>{{ displayTitle(item) }}</strong>
+                  <small v-if="metadataSummary(item)" class="file-row__metadata">
+                    {{ metadataSummary(item) }}
+                  </small>
+                  <small v-if="listing?.recursive && relativePathLabel(item)" class="file-row__path">
+                    {{ relativePathLabel(item) }}
+                  </small>
+                  <small>
+                    {{ item.extension.toUpperCase() }} · {{ formatBytes(item.sizeBytes) }}
+                    <template v-if="formatDate(item.modifiedAtMs)">
+                      · {{ formatDate(item.modifiedAtMs) }}
+                    </template>
+                  </small>
+                </span>
+                <Icon icon="lucide:play" width="17" class="file-row__play" />
+              </button>
+              <button
+                class="file-row__action"
+                type="button"
+                title="打开所在文件夹"
+                @click="openVideoFolder(item)"
+              >
+                <Icon icon="lucide:folder-search" width="16" />
+              </button>
+              <button
+                class="file-row__favorite"
+                :class="{ active: isFavoriteVideo(item) }"
+                type="button"
+                :title="isFavoriteVideo(item) ? '取消收藏文件' : '收藏文件'"
+                :aria-pressed="isFavoriteVideo(item)"
+                @click="toggleFavoriteVideo(item)"
+              >
+                <Icon icon="lucide:star" width="16" />
+              </button>
+            </div>
+          </li>
+        </template>
       </ul>
     </div>
   </section>
@@ -595,6 +633,22 @@ watch(recursive, () => {
   background: #1f1f24;
   color: white;
 }
+.group-toggle {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--fg-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.group-toggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+}
 .folder-meta {
   display: flex;
   align-items: center;
@@ -618,6 +672,30 @@ watch(recursive, () => {
 }
 .file-list li {
   min-width: 0;
+}
+.file-group {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 4px 6px;
+  color: var(--fg-secondary);
+  border-bottom: 1px solid var(--separator);
+}
+.file-group span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 800;
+}
+.file-group em {
+  flex-shrink: 0;
+  color: var(--fg-tertiary);
+  font-size: 11px;
+  font-style: normal;
 }
 .file-row {
   border-bottom: 1px solid var(--separator);

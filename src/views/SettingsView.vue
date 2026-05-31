@@ -573,6 +573,13 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
     status: "available",
   },
   {
+    key: "local-folder-grouping",
+    label: "文件夹分组",
+    detail: "递归浏览时可按所在子目录聚合视频列表",
+    icon: "lucide:folder-tree",
+    status: "available",
+  },
+  {
     key: "favorite-local-folders",
     label: "收藏本地文件夹",
     detail: "当前客户端本地保存常用文件夹入口",
