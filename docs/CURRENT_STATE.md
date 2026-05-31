@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（Tauri 配置备份）
+> **更新时间**：2026-06-01（Web Preview 内嵌播放）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-0410-tauri-config-backup.md`](./CHANGE_LOG/2026-06-01-0410-tauri-config-backup.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-0438-web-preview-html-playback.md`](./CHANGE_LOG/2026-06-01-0438-web-preview-html-playback.md)
 
 ---
 
@@ -144,6 +144,7 @@
 ## 5. 响应兼容性与诊断
 
 - **2026-05-31**：Web Preview 本地代理补齐真实网络代理 fallback：`/__hills_web_proxy` 直连失败后会尝试环境变量代理与常见本机代理端口，解决浏览器预览通过 CORS 代理访问真实 443 线路时 Node `fetch` 不走系统代理导致的 `fetch failed`；当前两条真实线路公开探测均返回 200，测试账号真实登录成功并能拉到 5 个媒体库视图。
+- **2026-06-01**：Web Preview 远端播放链路补齐：浏览器预览新增真实 `get_playback_source` / `play` / `get_state` / 播放进度上报 fallback，通过 `PlaybackInfo` 生成 HLS 播放源、线路候选和媒体源候选；Vite 新增 `__hills_web_stream_proxy` 代理 HLS playlist/segment 并重写 URI，播放器在 Web Preview 中启用 HTML/HLS 内嵌播放。真实账号回归确认新增服务器为追加而非覆盖，首页拉到 5 个媒体库，真实剧集播放到 01:30+ 并出现实际视频帧；验证过程未写入账号、密码、token 或完整线路地址。
 - **2026-05-31**：Web Preview 真实登录与媒体库链路补齐：浏览器预览会通过本地 Vite 代理请求 Emby/Jellyfin API，`detect_server`、`login`、`list_views`、`resume_items`、媒体列表/详情/搜索等不再返回假数据；线路测活改为真实 `/System/Info/Public` 耗时并写回线路状态；服务器与账号态写入本地 `localStorage`，设置页新增服务器后立即刷新列表和账号态，避免新增条目看起来覆盖旧服务器。
 - **2026-05-31**：添加服务器弹窗改为“服务器 + 账号”一条流；类型默认自动识别，也可手动选择 Emby / Jellyfin。线路输入新增独立端口框，地址与端口会合成实际请求 baseUrl；填写用户名和密码时会保存后立即登录，不再要求用户先保存再跳到另一个页面找登录入口。
 - **2026-05-31**：添加服务器弹窗的“账号”区前移到基础信息之后、线路信息之前，1280x720 预览下用户名、密码与端口输入能在首屏同时可见；弹窗内容区补齐 flex 滚动约束，避免底部按钮栏压住输入框。
@@ -520,6 +521,8 @@ npm.cmd run electron:build
 本轮配置导入模式已闭环：设置页“备份与还原”将导入拆成“合并导入”和“替换导入”，合并继续走 `merge`，替换走 `replace` 且执行前确认；导入完成文案会区分合并/替换结果。验证已覆盖 `npm.cmd run build`、in-app Browser `/settings?c=backup` 冷刷新目检、行尾空白检查与敏感关键字扫描。
 
 本轮 Tauri 配置备份已闭环：Tauri 新增 `export_config` / `import_config`，通过系统保存/打开对话框读写与 Electron/Web Preview 同结构的 `hills-lite-config` JSON；导入支持 `merge` / `replace`，会更新设置、服务器、账号、当前账号，并同步全局快捷键 store 与运行态注册。设置页“备份与还原”在 Tauri 运行时解除禁用，Web Preview 与 Electron 行为保持不变。验证已覆盖 `cargo fmt --manifest-path src-tauri\Cargo.toml`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run build`、in-app Browser `/settings?c=backup` 冷刷新目检、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`。
+
+本轮 Web Preview 内嵌播放已闭环：Web Preview 平台 fallback 补齐真实 PlaybackInfo 播放源、HLS 流代理、HTML 视频播放、播放进度上报和基础播放器状态命令；播放器在 Web Preview 中启用内嵌 HTML/HLS 视频，线路/媒体源菜单可复用同一套切源逻辑，浏览器自动播放限制会回落为等待用户点击播放而非错误浮层。验证已覆盖 `npm.cmd run build`、`npm.cmd run electron:build`、`git diff --check`、in-app Browser 1422 预览真实账号登录、5 个媒体库加载、真实剧集播放到 01:30+ 且出现实际视频帧；敏感值扫描确认未写入测试账号、密码或完整线路地址。
 
 ---
 

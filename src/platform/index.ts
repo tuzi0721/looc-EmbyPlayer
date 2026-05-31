@@ -5,9 +5,12 @@ import type {
   Line,
   LineHealthReport,
   MediaItem,
+  MpvSnapshot,
+  MpvTrackInfo,
   Server,
   ServerKind,
 } from "@/types/models";
+import type { PlaybackLineOption, PlaybackMediaSource, PlaybackSource } from "@/api";
 
 export type UnlistenFn = () => void;
 
@@ -98,6 +101,8 @@ let webSettings: AppSettings = { ...WEB_DEFAULT_SETTINGS };
 let webServers: Server[] = [];
 let webAccounts: Account[] = [];
 let webActiveAccountId: string | null = null;
+let webPlaybackSourceState: PlaybackSource | null = null;
+let webPlaybackSnapshot: MpvSnapshot = webDefaultSnapshot();
 loadWebPreviewState();
 
 function hasTauriRuntime(): boolean {
@@ -114,6 +119,28 @@ function getWebSettings(): AppSettings {
 function clone<T>(value: T): T {
   if (typeof structuredClone === "function") return structuredClone(value);
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function webDefaultSnapshot(): MpvSnapshot {
+  return {
+    url: null,
+    paused: true,
+    positionMs: 0,
+    durationMs: 0,
+    speed: 1,
+    volume: 80,
+    muted: false,
+    eof: false,
+    tracks: [],
+    chapters: [],
+    chapter: null,
+    secondarySubId: null,
+    subDelayMs: 0,
+    subScale: 1,
+    networkBps: null,
+    bufferedMs: 0,
+    buffering: false,
+  };
 }
 
 function createId(prefix: string): string {
@@ -423,6 +450,115 @@ function boolFrom(value: unknown): boolean | null {
   return null;
 }
 
+function firstMediaStream(mediaSource: any, type: "video" | "audio" | "subtitle") {
+  const streams = Array.isArray(mediaSource?.MediaStreams) ? mediaSource.MediaStreams : [];
+  return (
+    streams.find((stream: any) => stringFrom(stream?.Type)?.toLowerCase() === type) ??
+    null
+  );
+}
+
+function normalizeTrack(value: any): MpvTrackInfo {
+  const stream = value && typeof value === "object" ? value : {};
+  const type = stringFrom(stream.Type)?.toLowerCase();
+  const kind: MpvTrackInfo["kind"] =
+    type === "audio" ? "audio" : type === "subtitle" ? "subtitle" : "video";
+  return {
+    id: numberFrom(stream.Index) ?? numberFrom(stream.Id) ?? 0,
+    kind,
+    title: stringFrom(stream.DisplayTitle) ?? stringFrom(stream.Title),
+    lang: stringFrom(stream.Language),
+    codec: stringFrom(stream.Codec),
+    external: boolFrom(stream.IsExternal),
+    defaultTrack: boolFrom(stream.IsDefault),
+    forced: boolFrom(stream.IsForced),
+    selected: boolFrom(stream.IsDefault) ?? false,
+  };
+}
+
+function playbackSourceLabel(mediaSource: any, index: number): string {
+  const name = stringFrom(mediaSource?.Name);
+  if (name) return name;
+  const path = stringFrom(mediaSource?.Path);
+  if (path) {
+    const parts = path.replace(/\\/g, "/").split("/").filter(Boolean);
+    return parts.at(-1) ?? path;
+  }
+  const id = stringFrom(mediaSource?.Id);
+  return id ? `Media source ${id}` : `Media source ${index + 1}`;
+}
+
+function normalizePlaybackMediaSource(
+  mediaSource: any,
+  index: number,
+  selectedId: string,
+): PlaybackMediaSource {
+  const video = firstMediaStream(mediaSource, "video");
+  const audio = firstMediaStream(mediaSource, "audio");
+  const id = stringFrom(mediaSource?.Id) ?? `source-${index}`;
+  return {
+    id,
+    name: stringFrom(mediaSource?.Name),
+    displayName: playbackSourceLabel(mediaSource, index),
+    container: stringFrom(mediaSource?.Container),
+    protocol: stringFrom(mediaSource?.Protocol),
+    path: stringFrom(mediaSource?.Path),
+    bitrate: numberFrom(mediaSource?.Bitrate),
+    size: numberFrom(mediaSource?.Size),
+    width: numberFrom(video?.Width),
+    height: numberFrom(video?.Height),
+    videoCodec: stringFrom(video?.Codec),
+    audioCodec: stringFrom(audio?.Codec),
+    audioLanguage: stringFrom(audio?.Language),
+    supportsDirectPlay: boolFrom(mediaSource?.SupportsDirectPlay),
+    supportsDirectStream: boolFrom(mediaSource?.SupportsDirectStream),
+    supportsTranscoding: boolFrom(mediaSource?.SupportsTranscoding),
+    isRemote: boolFrom(mediaSource?.IsRemote),
+    selected: id === selectedId,
+  };
+}
+
+function playbackLineOptions(server: Server, selectedLine: Line): PlaybackLineOption[] {
+  return server.lines.map((line) => ({
+    id: line.id,
+    name: line.name || line.baseUrl || "Line",
+    baseUrl: line.baseUrl,
+    enabled: line.enabled !== false,
+    status: line.lastStatus ?? null,
+    latencyMs: line.lastLatencyMs ?? null,
+    selected: line.id === selectedLine.id,
+  }));
+}
+
+function appendToken(url: URL, token: string, enabled: boolean) {
+  if (!enabled) return url;
+  if (!url.searchParams.has("api_key") && !url.searchParams.has("X-Emby-Token")) {
+    url.searchParams.set("api_key", token);
+  }
+  return url;
+}
+
+function defaultUserAgent(server: Server, line: Line): string | null {
+  return line.userAgent ?? server.defaultUserAgent ?? webSettings.defaultUserAgent;
+}
+
+function proxiedStreamUrl(url: URL): string {
+  return `/__hills_web_stream_proxy?url=${encodeURIComponent(url.toString())}`;
+}
+
+function playbackHeaders(server: Server, line: Line, token: string): [string, string][] {
+  const headers: [string, string][] = [
+    ["X-Emby-Token", token],
+    ["Authorization", `MediaBrowser Token="${token}"`],
+  ];
+  for (const [name, value] of line.headers ?? []) {
+    if (name && value != null) headers.push([name, String(value)]);
+  }
+  const userAgent = defaultUserAgent(server, line);
+  if (userAgent) headers.push(["User-Agent", userAgent]);
+  return headers;
+}
+
 function joinWebUrl(baseUrl: string, route: string): URL {
   const base = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   return new URL(route.replace(/^\/+/, ""), base);
@@ -636,18 +772,188 @@ function webActivePair() {
   return { server, account };
 }
 
-async function webAuthedJson(method: string, route: string, query?: Record<string, unknown>) {
+async function webAuthedJson(
+  method: string,
+  route: string,
+  query?: Record<string, unknown>,
+  body?: unknown,
+  lineId?: string | null,
+) {
   const { server, account } = webActivePair();
-  const line = pickWebLine(server);
+  const line = pickWebLine(server, lineId ?? null);
   const url = joinWebUrl(line.baseUrl, route);
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value != null && value !== "") url.searchParams.set(key, String(value));
   }
   return webJson(
     url,
-    { method, headers: webHeaders(server, line, account.accessToken) },
+    {
+      method,
+      headers: webHeaders(server, line, account.accessToken, body != null),
+      body: body == null ? undefined : JSON.stringify(body),
+    },
     route,
   );
+}
+
+async function webPlaybackSource(
+  itemId: string,
+  startMs = 0,
+  options: { lineId?: string | null; mediaSourceId?: string | null } = {},
+): Promise<PlaybackSource> {
+  const { server, account } = webActivePair();
+  const line = pickWebLine(server, options.lineId ?? null);
+  const startTicks = Math.max(0, Math.floor((numberFrom(startMs) ?? 0) * 10_000));
+  const url = joinWebUrl(line.baseUrl, `Items/${itemId}/PlaybackInfo`);
+  for (const [key, value] of Object.entries({
+    UserId: account.userId,
+    StartTimeTicks: startTicks,
+    IsPlayback: "true",
+    AutoOpenLiveStream: "true",
+    MaxStreamingBitrate: "140000000",
+  })) {
+    url.searchParams.set(key, String(value));
+  }
+
+  const body = {
+    UserId: account.userId,
+    MaxStreamingBitrate: 140000000,
+    StartTimeTicks: startTicks,
+    IsPlayback: true,
+    AutoOpenLiveStream: true,
+    DeviceProfile: {
+      Name: "Hills Lite Web Preview",
+      MaxStreamingBitrate: 140000000,
+      DirectPlayProfiles: [
+        { Type: "Video", Container: "mp4,m4v,webm" },
+        { Type: "Audio", Container: "mp3,aac,flac,ogg,opus,wav" },
+      ],
+      TranscodingProfiles: [
+        {
+          Type: "Video",
+          Context: "Streaming",
+          Protocol: "hls",
+          Container: "ts",
+          VideoCodec: "h264",
+          AudioCodec: "aac,mp3",
+          MaxAudioChannels: "2",
+        },
+      ],
+      SubtitleProfiles: [
+        { Format: "vtt", Method: "External" },
+        { Format: "srt", Method: "External" },
+      ],
+    },
+  };
+
+  const info = await webJson(
+    url,
+    {
+      method: "POST",
+      headers: webHeaders(server, line, account.accessToken, true),
+      body: JSON.stringify(body),
+    },
+    "get_playback_source",
+  );
+  const mediaSources = Array.isArray(info?.MediaSources) ? info.MediaSources : [];
+  const requestedMediaSourceId = stringFrom(options.mediaSourceId);
+  const mediaSource = requestedMediaSourceId
+    ? mediaSources.find((source: any) => stringFrom(source?.Id) === requestedMediaSourceId)
+    : mediaSources.find((source: any) => stringFrom(source?.TranscodingUrl)) ?? mediaSources[0];
+  if (!mediaSource) {
+    throw new Error(
+      requestedMediaSourceId
+        ? `get_playback_source: media source not found: ${requestedMediaSourceId}`
+        : "get_playback_source: no playable media source returned",
+    );
+  }
+
+  const mediaSourceId = stringFrom(mediaSource.Id) ?? "";
+  const playSessionId =
+    stringFrom(info?.PlaySessionId) ?? stringFrom(mediaSource.PlaySessionId) ?? createId("play");
+  const transcodingUrl = stringFrom(mediaSource.TranscodingUrl);
+  let streamUrl: URL;
+  if (transcodingUrl) {
+    streamUrl = joinWebUrl(line.baseUrl, transcodingUrl);
+  } else {
+    streamUrl = joinWebUrl(line.baseUrl, `Videos/${itemId}/master.m3u8`);
+    streamUrl.searchParams.set("UserId", account.userId);
+    streamUrl.searchParams.set("MediaSourceId", mediaSourceId);
+    streamUrl.searchParams.set("PlaySessionId", playSessionId);
+    streamUrl.searchParams.set("StartTimeTicks", String(startTicks));
+    streamUrl.searchParams.set("VideoCodec", "h264");
+    streamUrl.searchParams.set("AudioCodec", "aac,mp3");
+    streamUrl.searchParams.set(
+      "AudioStreamIndex",
+      String(numberFrom(mediaSource.DefaultAudioStreamIndex) ?? 1),
+    );
+    streamUrl.searchParams.set("TranscodingContainer", "ts");
+    streamUrl.searchParams.set("TranscodingProtocol", "hls");
+    streamUrl.searchParams.set("MaxStreamingBitrate", "140000000");
+  }
+  appendToken(streamUrl, account.accessToken, true);
+
+  const tracks = Array.isArray(mediaSource.MediaStreams)
+    ? mediaSource.MediaStreams.map(normalizeTrack)
+    : [];
+  const source: PlaybackSource = {
+    itemId,
+    playSessionId,
+    mediaSourceId,
+    lineId: line.id,
+    lineName: line.name,
+    streamUrl: proxiedStreamUrl(streamUrl),
+    headers: playbackHeaders(server, line, account.accessToken),
+    userAgent: defaultUserAgent(server, line),
+    durationMs: Math.floor((numberFrom(mediaSource.RunTimeTicks) ?? 0) / 10_000),
+    tracks,
+    mediaSources: mediaSources.map((candidate: any, index: number) =>
+      normalizePlaybackMediaSource(candidate, index, mediaSourceId),
+    ),
+    lines: playbackLineOptions(server, line),
+    diagnostics: {
+      streamKind: "web-preview-hls",
+      sourceKind: transcodingUrl ? "transcoding-url" : "hls-master",
+      mediaSourceCount: mediaSources.length,
+      proxied: true,
+      authQuery: true,
+    },
+  };
+  return source;
+}
+
+function webSnapshotFromSource(source: PlaybackSource, startMs = 0): MpvSnapshot {
+  return {
+    ...webDefaultSnapshot(),
+    url: source.streamUrl,
+    paused: true,
+    positionMs: Math.max(0, Math.floor(numberFrom(startMs) ?? 0)),
+    durationMs: Math.max(0, Math.floor(source.durationMs ?? 0)),
+    tracks: source.tracks ?? [],
+  };
+}
+
+async function webReportPlaybackProgress(progress: any) {
+  await webAuthedJson("POST", "Sessions/Playing/Progress", undefined, {
+    ItemId: stringFrom(progress?.itemId) ?? "",
+    PlaySessionId: stringFrom(progress?.playSessionId) ?? "",
+    PositionTicks: numberFrom(progress?.positionTicks) ?? 0,
+    IsPaused: boolFrom(progress?.isPaused) ?? false,
+    PlayMethod: stringFrom(progress?.playMethod) ?? "Transcode",
+    VolumeLevel: numberFrom(progress?.volumeLevel) ?? 80,
+  }, webPlaybackSourceState?.lineId ?? null);
+}
+
+async function webReportPlaybackStopped(payload: any) {
+  await webAuthedJson("POST", "Sessions/Playing/Stopped", undefined, {
+    ItemId: stringFrom(payload?.itemId) ?? "",
+    PlaySessionId: stringFrom(payload?.playSessionId) ?? "",
+    PositionTicks: numberFrom(payload?.positionTicks) ?? 0,
+  }, webPlaybackSourceState?.lineId ?? null);
+  if (!payload?.playSessionId || webPlaybackSourceState?.playSessionId === payload.playSessionId) {
+    webPlaybackSourceState = null;
+    webPlaybackSnapshot = webDefaultSnapshot();
+  }
 }
 
 function invokeWebFallback<T>(
@@ -900,6 +1206,69 @@ function invokeWebFallback<T>(
         Limit: args?.limit ?? 18,
         Fields: "PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo,RunTimeTicks",
       }).then(normalizeItemsResponse) as Promise<T>;
+    case "get_playback_source": {
+      const payload = args?.payload as any;
+      return (async () => {
+        const source = await webPlaybackSource(String(payload?.itemId ?? ""), payload?.startMs ?? 0, {
+          lineId: stringFrom(payload?.lineId),
+          mediaSourceId: stringFrom(payload?.mediaSourceId),
+        });
+        webPlaybackSourceState = source;
+        webPlaybackSnapshot = webSnapshotFromSource(source, payload?.startMs ?? 0);
+        return source as T;
+      })();
+    }
+    case "play": {
+      const payload = args?.payload as any;
+      return (async () => {
+        const source = await webPlaybackSource(String(payload?.itemId ?? ""), payload?.startMs ?? 0, {
+          lineId: stringFrom(payload?.lineId),
+          mediaSourceId: stringFrom(payload?.mediaSourceId),
+        });
+        webPlaybackSourceState = source;
+        webPlaybackSnapshot = webSnapshotFromSource(source, payload?.startMs ?? 0);
+        return source as T;
+      })();
+    }
+    case "report_playback_progress":
+      return webReportPlaybackProgress(args?.progress).then(() => undefined as T);
+    case "report_playback_stopped":
+      return webReportPlaybackStopped(args?.payload).then(() => undefined as T);
+    case "get_state":
+      return Promise.resolve(clone(webPlaybackSnapshot) as T);
+    case "pause":
+      webPlaybackSnapshot = { ...webPlaybackSnapshot, paused: true };
+      return Promise.resolve(undefined as T);
+    case "resume":
+      webPlaybackSnapshot = { ...webPlaybackSnapshot, paused: false };
+      return Promise.resolve(undefined as T);
+    case "seek": {
+      const positionMs = numberFrom((args?.payload as any)?.positionMs) ?? 0;
+      webPlaybackSnapshot = {
+        ...webPlaybackSnapshot,
+        positionMs: Math.max(0, Math.floor(positionMs)),
+      };
+      return Promise.resolve(undefined as T);
+    }
+    case "set_speed": {
+      const speed = numberFrom((args?.payload as any)?.speed) ?? 1;
+      webPlaybackSnapshot = { ...webPlaybackSnapshot, speed };
+      return Promise.resolve(undefined as T);
+    }
+    case "set_volume": {
+      const volume = numberFrom((args?.payload as any)?.volume) ?? webPlaybackSnapshot.volume;
+      webPlaybackSnapshot = { ...webPlaybackSnapshot, volume };
+      return Promise.resolve(undefined as T);
+    }
+    case "set_muted": {
+      const muted = boolFrom((args?.payload as any)?.muted) ?? webPlaybackSnapshot.muted;
+      webPlaybackSnapshot = { ...webPlaybackSnapshot, muted };
+      return Promise.resolve(undefined as T);
+    }
+    case "stop":
+      webPlaybackSourceState = null;
+      webPlaybackSnapshot = webDefaultSnapshot();
+      return Promise.resolve(undefined as T);
     case "list_subtitles":
       return Promise.resolve(null as T);
     case "search_online_subtitles":

@@ -41,7 +41,7 @@ const settings = useSettingsStore();
 const embedVideo =
   typeof window !== "undefined" &&
   Boolean(window.hillsLite || window.__TAURI_INTERNALS__ || window.__TAURI__);
-const useHtmlVideo = false;
+const useHtmlVideo = !embedVideo;
 
 const errorText = ref<string | null>(null);
 const errorCopyStatus = ref<string | null>(null);
@@ -875,7 +875,11 @@ function startHtmlProgressReporter() {
   htmlProgressTimer = window.setInterval(() => reportHtmlProgress(false), 10_000);
 }
 
-async function startHtmlPlayback(itemId: string, startMs = 0) {
+async function startHtmlPlayback(
+  itemId: string,
+  startMs = 0,
+  options: { lineId?: string | null; mediaSourceId?: string | null } = {},
+) {
   const video = videoEl.value;
   if (!video) throw new Error("播放器尚未初始化");
 
@@ -883,10 +887,18 @@ async function startHtmlPlayback(itemId: string, startMs = 0) {
     await lib.loadItem(itemId);
   }
 
-  const source = await api.getPlaybackSource({ itemId, startMs });
+  const source = await api.getPlaybackSource({
+    itemId,
+    startMs,
+    lineId: options.lineId ?? null,
+    mediaSourceId: options.mediaSourceId ?? null,
+  });
   destroyHtmlPlayback();
   player.itemId = itemId;
   player.playSessionId = source.playSessionId;
+  player.playbackSource = source;
+  player.localFilePath = null;
+  player.localFileTitle = null;
   htmlTracks.value = source.tracks ?? [];
   htmlDurationMs.value = source.durationMs ?? 0;
   htmlPaused.value = true;
@@ -931,7 +943,15 @@ async function startHtmlPlayback(itemId: string, startMs = 0) {
     video.src = source.streamUrl;
   }
 
-  await video.play();
+  try {
+    await video.play();
+  } catch (error) {
+    if (!(error instanceof DOMException) || error.name !== "NotAllowedError") {
+      throw error;
+    }
+    htmlPaused.value = true;
+    showControls.value = true;
+  }
   startHtmlProgressReporter();
   reportHtmlProgress(false);
   bumpControls();
@@ -1400,7 +1420,7 @@ async function switchPlaybackSource(next: {
   lineId?: string | null;
   mediaSourceId?: string | null;
 }) {
-  if (playbackSwitching.value || useHtmlVideo) return;
+  if (playbackSwitching.value) return;
   const lineId = next.lineId ?? selectedPlaybackLineId.value;
   const mediaSourceId = next.mediaSourceId ?? selectedPlaybackMediaSourceId.value;
   if (lineId === selectedPlaybackLineId.value && mediaSourceId === selectedPlaybackMediaSourceId.value) {
@@ -1413,7 +1433,10 @@ async function switchPlaybackSource(next: {
   showControls.value = true;
   try {
     const startMs = Math.max(0, Math.floor(positionMs.value));
-    if (player.itemId && player.playSessionId && player.snapshot) {
+    if (useHtmlVideo) {
+      reportHtmlProgress(true);
+      await startHtmlPlayback(currentItemId.value, startMs, { lineId, mediaSourceId });
+    } else if (player.itemId && player.playSessionId && player.snapshot) {
       await api
         .reportPlaybackStopped({
           itemId: player.itemId,
@@ -1421,14 +1444,22 @@ async function switchPlaybackSource(next: {
           positionTicks: Math.max(0, Math.floor(player.snapshot.positionMs * 10_000)),
         })
         .catch(() => {});
+      await player.play({
+        itemId: currentItemId.value,
+        startMs,
+        preferDirect: true,
+        lineId,
+        mediaSourceId,
+      });
+    } else {
+      await player.play({
+        itemId: currentItemId.value,
+        startMs,
+        preferDirect: true,
+        lineId,
+        mediaSourceId,
+      });
     }
-    await player.play({
-      itemId: currentItemId.value,
-      startMs,
-      preferDirect: true,
-      lineId,
-      mediaSourceId,
-    });
     await applyPictureMode();
     sourceMenuOpen.value = false;
   } catch (error) {
