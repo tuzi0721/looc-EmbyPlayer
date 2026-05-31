@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（播放器播放按钮可识别）
+> **更新时间**：2026-06-01（真实双线路默认播放回归）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-0553-player-play-toggle-label.md`](./CHANGE_LOG/2026-06-01-0553-player-play-toggle-label.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-0604-real-two-line-playback-check.md`](./CHANGE_LOG/2026-06-01-0604-real-two-line-playback-check.md)
 
 ---
 
@@ -538,6 +538,8 @@ npm.cmd run electron:build
 本轮设置页当前线路控制已闭环：服务器线路列表会在 active line 上显示“当前”，其他启用线路提供“设为当前”按钮并复用现有 `set_active_line` 命令；该入口修改服务器级默认线路，播放器会话级切源仍走播放器内播放源面板。验证已覆盖 `npm.cmd run build`、in-app Browser 使用真实测试账号当前会话打开 `/settings?c=servers`，确认“当前”标记可见，点击“设为当前”后标记移动到目标线路。
 
 本轮播放器播放按钮可识别性已闭环：真实测试账号临时会话在 1420 Web Preview 中确认服务器已连接、媒体库加载、电影列表与详情页可打开，进入播放器后拿到真实 1440×1080 HTML 视频对象；同时修复中央播放/暂停按钮没有可访问名称的问题，现在按钮会随状态暴露“播放”或“暂停”的 `title` / `aria-label`，便于用户悬停、辅助技术识别和自动化回归定位。验证已覆盖 `npm.cmd run build`、播放器页冷刷新按钮名称检查、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`；验证过程未写入账号、密码、token 或完整线路地址。
+
+本轮真实双线路默认播放回归已闭环：1420 Web Preview 使用真实测试账号当前会话，将当前真实服务器编辑为两条 443 线路，保存后“测活”返回两条真实秒级延迟；设置页“设为当前”切到第二线路后，新开播放器默认播放源菜单选中第二线路，并可在会话内切到主线路再切回第二线路，期间 HTML 视频对象保持 1440×1080 / readyState 4。该阶段仅更新验证日志和状态快照，未改运行时代码，未写入账号、密码、token 或完整线路地址。
 
 ---
 
