@@ -204,6 +204,21 @@ function redactSensitive(value) {
   return value;
 }
 
+function bestLineId(lines = []) {
+  const priority = (line) => {
+    const value = Number(line?.priority);
+    return Number.isFinite(value) ? value : 0;
+  };
+  const latency = (line) => {
+    const value = Number(line?.lastLatencyMs);
+    return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
+  };
+
+  return [...lines]
+    .filter((line) => line?.enabled !== false && line?.lastStatus !== "down")
+    .sort((left, right) => priority(left) - priority(right) || latency(left) - latency(right))[0]?.id ?? null;
+}
+
 function writePlaybackLog(event, details = {}) {
   const entry = {
     at: new Date().toISOString(),
@@ -1790,6 +1805,9 @@ async function handleInvoke(command, args = {}) {
         };
       }),
     };
+    if (updated.autoFailover !== false) {
+      updated.activeLineId = bestLineId(updated.lines) ?? updated.activeLineId;
+    }
     await store.upsertServer(updated);
     return { serverId: server.id, reports };
   }

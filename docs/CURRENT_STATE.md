@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（Web Preview 路由地址同步）
+> **更新时间**：2026-06-01（线路测活自动切线三端对齐）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-0518-web-history-routing.md`](./CHANGE_LOG/2026-06-01-0518-web-history-routing.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-0532-line-failover-parity.md`](./CHANGE_LOG/2026-06-01-0532-line-failover-parity.md)
 
 ---
 
@@ -174,7 +174,7 @@
 - **2026-05-31**：真实播放会话中继续验证了播放器控制面：同一线路1媒体内可通过 mpv IPC 切到字幕轨 `sid = 1` 并关闭字幕，mpv Stats OSD 页面命令可执行，截图命令可生成 PNG 后清理；该媒体没有章节，因此章节跳转仍待有章节样本继续验证。
 - **2026-05-31**：章节样本条目 `16240` 已完成真实跳转验证；mpv `chapter-list` 返回 3 章，播放器章节菜单依赖的章节时间和当前章节索引可从 IPC 快照取得，跳到 Story 章节后位置与目标一致。
 
-- **2026-05-31**：真实测试账号联调确认线路1 `https://ciallo.party/` 可完成 Electron `PlaybackInfo` 与 `mpvPlaybackSource()` 构造，测试条目 `21648` 选中 `mediasource_21648` 并返回 `mpv-direct-static` / `direct-stream` 摘要；验证过程未把 token、密码或完整播放 URL 写入仓库文档。线路2 `https://yuanshen.help/` 的 `PlaybackInfo`、普通认证 API 与直连流 Range GET 均被 Cloudflare 返回 HTTP 403，默认 UA 与浏览器 UA 对照一致，因此该线路需要上游 / 反代放行 API 与媒体流后才能继续做真实切线播放验证。
+- **2026-05-31**：真实测试账号联调确认线路1（完整地址已省略）可完成 Electron `PlaybackInfo` 与 `mpvPlaybackSource()` 构造，测试条目 `21648` 选中 `mediasource_21648` 并返回 `mpv-direct-static` / `direct-stream` 摘要；验证过程未把 token、密码或完整播放 URL 写入仓库文档。线路2（完整地址已省略）的 `PlaybackInfo`、普通认证 API 与直连流 Range GET 均被 Cloudflare 返回 HTTP 403，默认 UA 与浏览器 UA 对照一致，因此该线路需要上游 / 反代放行 API 与媒体流后才能继续做真实切线播放验证。
 
 - **2026-05-31**：播放器底栏在存在多个播放线路或 `PlaybackInfo.MediaSources` 候选时显示“播放源”入口；面板按“播放线路 / 媒体源”分组展示候选摘要，切换时按当前播放位置重新发起 mpv 播放并传入 `lineId` / `mediaSourceId`，同时 best-effort 上报旧会话停止进度。设置菜单也提供“播放源”入口，便于窄窗口访问。
 
@@ -532,6 +532,8 @@ npm.cmd run electron:build
 本轮播放源菜单视口约束已闭环：`PlayerView` 在 920px 以下将播放源弹层固定到播放器视口并保留左右边距，760px 以下避开双行控制栏；真实播放页目检确认 Line 2 和媒体源选中状态可见，菜单主体不被底栏遮挡。验证已覆盖 `npm.cmd run build`、`npm.cmd run electron:build`、`git diff --check`、in-app Browser 真实播放页菜单目检与敏感关键字扫描。
 
 本轮 Web Preview 路由地址同步已闭环：`src/router/index.ts` 现在按运行协议选择 history，非 `file://` 环境使用 `createWebHistory()`，打包本地文件继续使用 `createMemoryHistory()`。验证已覆盖 `npm.cmd run build`、`npm.cmd run electron:build`、`git diff --check`、in-app Browser 冷开 `/home` 后进入真实详情得到 `/item/16114`，点击继续播放后得到 `/player/16890?start=...&from=...`，播放器路由内 HTML 视频对象保留 1920×1080 媒体宽高；敏感关键字扫描确认未写入测试账号、密码、token 或完整线路地址。
+
+本轮线路测活自动切线三端对齐已闭环：Electron `test_lines` 与 Web Preview fallback 现在和 Tauri 一样，在 `autoFailover` 未关闭时会从启用且非 down 的线路中按优先级与延迟选择 active line；测活不再只更新健康状态而不影响后续播放线路。验证已覆盖 `node --check electron\main.mjs`、`npm.cmd run build`、in-app Browser Web Preview 真实测试账号临时添加两条 443 线路、自动识别 Emby、登录成功、真实线路测活返回秒级延迟、首页加载 5 个媒体库、详情页继续播放并创建 1920×1080 HTML 视频对象；验证过程未写入账号、密码、token 或完整线路地址。
 
 ---
 

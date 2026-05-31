@@ -579,6 +579,23 @@ function pickWebLine(server: Server, lineId?: string | null): Line {
   return line;
 }
 
+function bestWebLineId(lines: Line[]): string | null {
+  const priority = (line: Line) => {
+    const value = Number(line.priority);
+    return Number.isFinite(value) ? value : 0;
+  };
+  const latency = (line: Line) => {
+    const value = Number(line.lastLatencyMs);
+    return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
+  };
+
+  return (
+    [...lines]
+      .filter((line) => line.enabled !== false && line.lastStatus !== "down")
+      .sort((left, right) => priority(left) - priority(right) || latency(left) - latency(right))[0]?.id ?? null
+  );
+}
+
 function webHeaders(server: Server, line: Line, token?: string | null, hasBody = false) {
   const headers: Record<string, string> = {
     Accept: "application/json",
@@ -1060,6 +1077,9 @@ function invokeWebFallback<T>(
             lastCheckedAt: checkedAt,
           };
         });
+        if (server.autoFailover !== false) {
+          server.activeLineId = bestWebLineId(server.lines) ?? server.activeLineId;
+        }
         webServers = webServers.map((item) => (item.id === server.id ? { ...server } : item));
         saveWebPreviewState();
         return { serverId: server.id, reports } as T;

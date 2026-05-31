@@ -15,9 +15,9 @@ node --input-type=module -e "<redacted real-line playback source smoke>"
 结果：
 
 - 登录成功，验证过程中未把访问 token、密码或完整播放 URL 写入仓库文档。
-- 线路1 `https://ciallo.party/` 可完成 `PlaybackInfo` 与 `mpvPlaybackSource()` 构造。
+- 线路1（完整地址已省略）可完成 `PlaybackInfo` 与 `mpvPlaybackSource()` 构造。
 - 测试条目 `21648` 可选中 `mediaSourceId = mediasource_21648`，后端返回 mpv 直连静态流摘要，`diagnostics.streamKind = mpv-direct-static`，`diagnostics.sourceKind = direct-stream`。
-- 线路2 `https://yuanshen.help/` 在真实后端请求中被 Cloudflare 拦截：
+- 线路2（完整地址已省略）在真实后端请求中被 Cloudflare 拦截：
   - `PlaybackInfo` POST 返回 HTTP 403 / Cloudflare HTML。
   - `Users/{userId}/Views` GET 返回 HTTP 403 / Cloudflare。
   - `Videos/21648/stream` Range GET 返回 HTTP 403 / Cloudflare。
