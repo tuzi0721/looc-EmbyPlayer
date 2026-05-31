@@ -531,6 +531,13 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
     status: "available",
   },
   {
+    key: "sidecar-posters",
+    label: "同名封面",
+    detail: "本地文件夹识别同名图片与 cover/poster/folder 图片",
+    icon: "lucide:image",
+    status: "available",
+  },
+  {
     key: "sidecar-subtitles",
     label: "同名字幕",
     detail: "本地播放会自动关联同目录同名字幕",

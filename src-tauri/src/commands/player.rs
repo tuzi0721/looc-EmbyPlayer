@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     process::Command,
     sync::Arc,
@@ -73,6 +74,8 @@ pub struct LocalFolderVideo {
     pub relative_path: String,
     pub name: String,
     pub extension: String,
+    pub poster_path: Option<String>,
+    pub poster_url: Option<String>,
     pub size_bytes: u64,
     pub modified_at_ms: Option<u64>,
 }
@@ -101,7 +104,23 @@ const LOCAL_VIDEO_EXTENSIONS: &[&str] = &[
     "mp4", "mkv", "mov", "avi", "wmv", "flv", "webm", "m4v", "ts", "m2ts", "mpeg", "mpg", "3gp",
     "ogv", "rmvb",
 ];
+const LOCAL_IMAGE_EXTENSIONS: &[(&str, usize)] = &[
+    ("jpg", 0),
+    ("jpeg", 1),
+    ("png", 2),
+    ("webp", 3),
+    ("avif", 4),
+    ("bmp", 5),
+];
+const FOLDER_POSTER_STEMS: &[&str] = &["poster", "cover", "folder"];
 const MAX_LOCAL_FOLDER_VIDEOS: usize = 500;
+
+#[derive(Debug, Clone)]
+struct LocalPosterCandidate {
+    path: PathBuf,
+    name: String,
+    rank: usize,
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -294,6 +313,83 @@ fn sidecar_subtitle_ext_rank(ext: &str) -> Option<usize> {
         .find_map(|(candidate, rank)| (*candidate == ext).then_some(*rank))
 }
 
+fn local_image_ext_rank(ext: &str) -> Option<usize> {
+    LOCAL_IMAGE_EXTENSIONS
+        .iter()
+        .find_map(|(candidate, rank)| (*candidate == ext).then_some(*rank))
+}
+
+fn better_local_poster(
+    current: Option<LocalPosterCandidate>,
+    candidate: LocalPosterCandidate,
+) -> LocalPosterCandidate {
+    match current {
+        Some(existing)
+            if existing.rank < candidate.rank
+                || (existing.rank == candidate.rank && existing.name <= candidate.name) =>
+        {
+            existing
+        }
+        _ => candidate,
+    }
+}
+
+fn build_local_poster_index(
+    entries: &[std::fs::DirEntry],
+) -> (
+    HashMap<String, LocalPosterCandidate>,
+    Option<LocalPosterCandidate>,
+) {
+    let mut by_stem = HashMap::new();
+    let mut folder_poster = None;
+
+    for entry in entries {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(ext) = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(|value| value.to_ascii_lowercase())
+        else {
+            continue;
+        };
+        let Some(rank) = local_image_ext_rank(&ext) else {
+            continue;
+        };
+        let Some(stem) = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .map(|value| value.to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let candidate = LocalPosterCandidate {
+            path,
+            name: entry.file_name().to_string_lossy().to_ascii_lowercase(),
+            rank,
+        };
+        let previous = by_stem.remove(&stem);
+        by_stem.insert(
+            stem.clone(),
+            better_local_poster(previous, candidate.clone()),
+        );
+        if FOLDER_POSTER_STEMS.contains(&stem.as_str()) {
+            folder_poster = Some(better_local_poster(folder_poster, candidate));
+        }
+    }
+
+    (by_stem, folder_poster)
+}
+
+fn local_poster_url(path: &Path) -> Option<String> {
+    url::Url::from_file_path(path)
+        .ok()
+        .map(|url| url.to_string())
+}
+
 fn sidecar_subtitle_rank(video_stem: &str, subtitle_stem: &str) -> Option<usize> {
     let video = video_stem.to_lowercase();
     let subtitle = subtitle_stem.to_lowercase();
@@ -474,16 +570,19 @@ fn scan_local_folder_dir(
         return Ok(());
     }
 
-    for entry in std::fs::read_dir(directory)
+    let entries = std::fs::read_dir(directory)
         .map_err(|error| AppError::InvalidState(format!("failed to read folder: {}", error)))?
-    {
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| {
+            AppError::InvalidState(format!("failed to read folder item: {}", error))
+        })?;
+    let (poster_by_stem, folder_poster) = build_local_poster_index(&entries);
+
+    for entry in entries {
         if *truncated {
             break;
         }
 
-        let entry = entry.map_err(|error| {
-            AppError::InvalidState(format!("failed to read folder item: {}", error))
-        })?;
         let path = entry.path();
         let file_type = entry.file_type().map_err(|error| {
             AppError::InvalidState(format!("failed to inspect folder item: {}", error))
@@ -533,12 +632,27 @@ fn scan_local_folder_dir(
             .unwrap_or(&path)
             .to_string_lossy()
             .to_string();
+        let stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .map(|value| value.to_ascii_lowercase())
+            .unwrap_or_default();
+        let poster_path = poster_by_stem
+            .get(&stem)
+            .or(folder_poster.as_ref())
+            .map(|candidate| candidate.path.clone());
+        let poster_path_string = poster_path
+            .as_ref()
+            .map(|path| path.to_string_lossy().to_string());
+        let poster_url = poster_path.as_deref().and_then(local_poster_url);
 
         items.push(LocalFolderVideo {
             file_path: path.to_string_lossy().to_string(),
             relative_path,
             name,
             extension,
+            poster_path: poster_path_string,
+            poster_url,
             size_bytes: metadata.len(),
             modified_at_ms,
         });

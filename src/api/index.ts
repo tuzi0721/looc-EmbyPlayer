@@ -118,6 +118,8 @@ export interface LocalFolderVideo {
   relativePath?: string | null;
   name: string;
   extension: string;
+  posterPath?: string | null;
+  posterUrl?: string | null;
   sizeBytes: number;
   modifiedAtMs?: number | null;
 }

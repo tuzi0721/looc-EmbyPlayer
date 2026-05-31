@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（收藏本地文件）
+> **更新时间**：2026-06-01（本地文件夹同名封面）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-0055-favorite-local-files.md`](./CHANGE_LOG/2026-06-01-0055-favorite-local-files.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-0106-local-folder-sidecar-posters.md`](./CHANGE_LOG/2026-06-01-0106-local-folder-sidecar-posters.md)
 
 ---
 
@@ -64,6 +64,8 @@
 **2026-06-01**：`/local-folder` 新增排序下拉，可按路径、文件名、最近修改和大小整理当前扫描结果；播放队列跟随搜索与排序后的可见列表。
 
 **2026-06-01**：本地文件夹列表新增单个视频收藏；文件行可星标收藏/取消收藏，侧边栏底部显示收藏本地文件并避开最近本地文件重复项，收藏记录仅保存在当前客户端。
+
+**2026-06-01**：本地文件夹列表新增同名封面识别；Electron/Tauri 扫描同目录 `.jpg/.jpeg/.png/.webp/.avif/.bmp`，同名图片优先，`poster`、`cover`、`folder` 图片兜底，文件行会显示本地缩略图并在加载失败时回退视频图标。
 
 **2026-05-30**：单集详情页会并行加载季列表与当前季剧集，并通过详情/剧集加载序号避免快速切换 PDP 时旧请求覆盖新页面状态。
 
@@ -500,9 +502,11 @@ npm.cmd run electron:build
 
 本轮收藏本地文件已闭环：`localFiles` store 使用独立 `hills-lite:favorite-local-files` 本地 key 保存最多 32 个收藏文件；`/local-folder` 文件行支持星标收藏/取消收藏，侧边栏底部展示收藏本地文件并可清空，最近本地文件列表会避开已收藏项。设置页“文件服务 / 连接器”面板同步将“收藏本地文件”标记为可用。验证已覆盖 `npm.cmd run build`、in-app Browser 设置页与本地文件夹页面目检、`npm.cmd run electron:build`、行尾空白检查与敏感关键字扫描。
 
+本轮本地文件夹同名封面已闭环：Electron/Tauri `list_local_folder` 会为视频返回同名图片或目录级 `poster/cover/folder` 图片；Electron 使用 `hills-image://local/...` 安全读取本地图片，`/local-folder` 文件行显示缩略图并在失败时回退视频图标。设置页“文件服务 / 连接器”面板同步将“同名封面”标记为可用。验证已覆盖 `node --check electron\main.mjs`、`cargo fmt --manifest-path src-tauri\Cargo.toml`、`npm.cmd run build`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、in-app Browser 设置页与本地文件夹页面目检、`npm.cmd run electron:build`。
+
 ---
 
 ## 10. Phase 2 待办
 
 - 播放窗口内嵌已通过本地屏幕像素 smoke；后续仍建议用真实媒体人工走一遍控制栏显示/隐藏、全屏和窗口 resize 体验。
-- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层/递归视频浏览、本地文件夹列表搜索/排序与播放队列、同名字幕自动关联、同名 XML 弹幕自动关联、最近本地文件入口、最近本地文件夹入口、收藏本地文件和收藏本地文件夹；封面/元数据刮削、WebDAV、SMB、Alist/OpenList 和 Plex 仍待后续分阶段接入。
+- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层/递归视频浏览、本地文件夹列表搜索/排序与播放队列、同名封面、同名字幕自动关联、同名 XML 弹幕自动关联、最近本地文件入口、最近本地文件夹入口、收藏本地文件和收藏本地文件夹；在线封面/元数据刮削、WebDAV、SMB、Alist/OpenList 和 Plex 仍待后续分阶段接入。

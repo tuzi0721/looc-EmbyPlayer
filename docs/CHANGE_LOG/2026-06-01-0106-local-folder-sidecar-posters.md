@@ -1,0 +1,21 @@
+# 本地文件夹同名封面
+
+- **时间**：2026-06-01 01:06 (UTC+8)
+- **动机**：本地文件夹列表已经支持递归、搜索、排序和收藏，但视频行只能显示通用图标。文件源后续要走封面/元数据方向，先把无需外部 API 的同名封面侧挂图做成真实可用的小闭环。
+- **修改文件**：
+  - `electron/main.mjs` — `list_local_folder` 扫描同目录图片，按同名图片优先、`poster/cover/folder` 图片兜底返回 `posterPath/posterUrl`；Electron 新增 `hills-image://local/...` 读取本地图片，避免直接把 `<img>` 绑到裸 `file://`。
+  - `src-tauri/src/commands/player.rs` — Tauri `list_local_folder` 同步返回 `posterPath/posterUrl`，支持同名图片和文件夹级封面兜底。
+  - `src/api/index.ts` — 本地文件夹视频模型新增 `posterPath` 与 `posterUrl`。
+  - `src/views/LocalFolderView.vue` — 文件行从固定图标升级为 44px 缩略图槽，有封面时显示图片，图片加载失败时回退视频图标。
+  - `src/views/SettingsView.vue` — “文件服务 / 连接器”面板将同名封面标记为可用能力。
+- **规则**：支持 `.jpg/.jpeg/.png/.webp/.avif/.bmp`；同名图片优先于目录内 `poster`、`cover`、`folder` 图片。Web Preview 仍不假装拥有本地文件权限。
+- **风险**：本阶段只识别本地侧挂图片，不做在线刮削、视频抽帧或长期索引；Tauri 侧返回 `file://` 图片地址，实际显示能力仍依赖 WebView 对本地文件图像的支持。
+- **回滚**：移除本地封面扫描字段、Electron 本地图像协议分支、文件行缩略图 UI 和设置页能力项即可恢复通用视频图标。
+- **验证步骤**：
+  - `node --check electron\main.mjs`
+  - `cargo fmt --manifest-path src-tauri\Cargo.toml`
+  - `npm.cmd run build`
+  - `cargo check --manifest-path src-tauri\Cargo.toml --all-targets`
+  - in-app Browser 打开 `/settings?c=file-services`，确认“同名封面”为可用；打开 `/local-folder?folder=...`，确认 Web Preview 仍保持无本地权限空列表
+  - `npm.cmd run electron:build`
+- **结果**：通过；Electron 命令覆盖检查仍为 93/93，Electron unpacked 包完整性检查通过。

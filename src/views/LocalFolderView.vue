@@ -21,6 +21,7 @@ const errorText = ref<string | null>(null);
 const recursive = ref(false);
 const searchText = ref("");
 const sortMode = ref<SortMode>("path");
+const posterFailures = ref<Set<string>>(new Set());
 
 const folderPath = computed(() => {
   const value = route.query.folder;
@@ -169,6 +170,17 @@ function toggleFavoriteVideo(item: LocalFolderVideo) {
   localFiles.toggleFavorite(item.filePath);
 }
 
+function videoPosterUrl(item: LocalFolderVideo): string {
+  if (posterFailures.value.has(item.filePath)) return "";
+  return item.posterUrl?.trim() ?? "";
+}
+
+function markPosterFailed(item: LocalFolderVideo) {
+  const next = new Set(posterFailures.value);
+  next.add(item.filePath);
+  posterFailures.value = next;
+}
+
 function openVideo(item: LocalFolderVideo, index: number) {
   const items = visibleItems.value;
   player.setLocalQueue(items.map((entry) => entry.filePath), index);
@@ -184,6 +196,7 @@ function openVideo(item: LocalFolderVideo, index: number) {
 
 watch(folderPath, (directory) => {
   searchText.value = "";
+  posterFailures.value = new Set();
   void loadFolder(directory);
 }, { immediate: true });
 watch(recursive, () => {
@@ -322,7 +335,14 @@ watch(recursive, () => {
         <li v-for="(item, index) in visibleItems" :key="item.filePath">
           <div class="file-row" :title="item.filePath">
             <button class="file-row__open" type="button" @click="openVideo(item, index)">
-              <span class="file-row__icon">
+              <span class="file-row__thumb" :class="{ 'file-row__thumb--image': videoPosterUrl(item) }">
+                <img
+                  v-if="videoPosterUrl(item)"
+                  :src="videoPosterUrl(item)"
+                  alt=""
+                  loading="lazy"
+                  @error="markPosterFailed(item)"
+                />
                 <Icon icon="lucide:file-video" width="18" />
               </span>
               <span class="file-row__main">
@@ -554,7 +574,7 @@ watch(recursive, () => {
   color: inherit;
   min-width: 0;
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 28px;
+  grid-template-columns: 44px minmax(0, 1fr) 28px;
   align-items: center;
   gap: 12px;
   padding: 9px 4px;
@@ -577,14 +597,29 @@ watch(recursive, () => {
 .file-row__favorite.active {
   color: #fbbf24;
 }
-.file-row__icon {
-  width: 34px;
-  height: 34px;
+.file-row__thumb {
+  width: 44px;
+  height: 44px;
   border-radius: 8px;
   display: grid;
   place-items: center;
   color: var(--fg-secondary);
   background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+  position: relative;
+}
+.file-row__thumb img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.file-row__thumb--image {
+  background: #111;
+}
+.file-row__thumb--image svg {
+  opacity: 0;
 }
 .file-row__main {
   min-width: 0;

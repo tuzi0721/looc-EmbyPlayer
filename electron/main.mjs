@@ -40,6 +40,23 @@ const localVideoExtensions = new Set([
   "ogv",
   "rmvb",
 ]);
+const localImageExtensions = new Map([
+  ["jpg", 0],
+  ["jpeg", 1],
+  ["png", 2],
+  ["webp", 3],
+  ["avif", 4],
+  ["bmp", 5],
+]);
+const localImageMimeTypes = new Map([
+  ["jpg", "image/jpeg"],
+  ["jpeg", "image/jpeg"],
+  ["png", "image/png"],
+  ["webp", "image/webp"],
+  ["avif", "image/avif"],
+  ["bmp", "image/bmp"],
+]);
+const folderPosterStems = new Set(["poster", "cover", "folder"]);
 const maxLocalFolderVideos = 500;
 
 fs.mkdirSync(userDataDir, { recursive: true });
@@ -322,7 +339,16 @@ function imageProtocolError(status, message) {
 
 function parseImageProtocolUrl(value) {
   const url = new URL(value);
-  if (url.protocol !== "hills-image:" || url.hostname !== "media") {
+  if (url.protocol !== "hills-image:") {
+    throw new Error("invalid image cache protocol");
+  }
+  if (url.hostname === "local") {
+    const encodedPath = url.pathname.split("/").filter(Boolean)[0];
+    if (!encodedPath) throw new Error("invalid local image route");
+    const filePath = Buffer.from(encodedPath, "base64url").toString("utf8");
+    return { kind: "local", filePath };
+  }
+  if (url.hostname !== "media") {
     throw new Error("invalid image cache protocol");
   }
   const [serverId, lineId, itemId, imageType] = url.pathname
@@ -339,7 +365,11 @@ function parseImageProtocolUrl(value) {
     const value = String(rawValue).trim();
     if (value) query.set(key, value);
   }
-  return { serverId, lineId, itemId, imageType, query };
+  return { kind: "remote", serverId, lineId, itemId, imageType, query };
+}
+
+function localImageProtocolUrl(filePath) {
+  return `hills-image://local/${Buffer.from(filePath, "utf8").toString("base64url")}`;
 }
 
 function imageCacheKey(spec) {
@@ -478,6 +508,18 @@ async function handleImageProtocolRequest(request) {
     return imageProtocolError(400, String(error));
   }
 
+  if (spec.kind === "local") {
+    const ext = path.extname(spec.filePath).replace(/^\./, "").toLowerCase();
+    if (!localImageExtensions.has(ext)) return imageProtocolError(415, "unsupported local image");
+    try {
+      const data = await fs.promises.readFile(spec.filePath);
+      return cachedImageResponse(data, localImageMimeTypes.get(ext) ?? "application/octet-stream", "local");
+    } catch (error) {
+      console.warn("failed to read local image", error);
+      return imageProtocolError(404, "local image not found");
+    }
+  }
+
   const cacheKey = imageCacheKey(spec);
   try {
     const cached = await readImageCacheEntry(cacheKey);
@@ -498,6 +540,36 @@ async function handleImageProtocolRequest(request) {
   } finally {
     imageCacheInflight.delete(cacheKey);
   }
+}
+
+function betterLocalPoster(current, candidate) {
+  if (!current || candidate.rank < current.rank || (candidate.rank === current.rank && candidate.name < current.name)) {
+    return candidate;
+  }
+  return current;
+}
+
+function buildLocalPosterIndex(currentDir, dirents) {
+  const byStem = new Map();
+  let folderPoster = null;
+  for (const dirent of dirents) {
+    if (!dirent.isFile()) continue;
+    const ext = path.extname(dirent.name).replace(/^\./, "").toLowerCase();
+    const rank = localImageExtensions.get(ext);
+    if (rank == null) continue;
+    const stem = path.basename(dirent.name, path.extname(dirent.name)).toLowerCase();
+    if (!stem) continue;
+    const candidate = {
+      filePath: path.join(currentDir, dirent.name),
+      name: dirent.name.toLowerCase(),
+      rank,
+    };
+    byStem.set(stem, betterLocalPoster(byStem.get(stem), candidate));
+    if (folderPosterStems.has(stem)) {
+      folderPoster = betterLocalPoster(folderPoster, candidate);
+    }
+  }
+  return { byStem, folderPoster };
 }
 
 function emitAppEvent(event, payload) {
@@ -882,6 +954,7 @@ async function listLocalFolder(payload = {}) {
   async function collect(currentDir) {
     if (truncated) return;
     const dirents = await fs.promises.readdir(currentDir, { withFileTypes: true });
+    const posterIndex = buildLocalPosterIndex(currentDir, dirents);
     for (const dirent of dirents) {
       if (truncated) return;
       const entryPath = path.join(currentDir, dirent.name);
@@ -899,11 +972,16 @@ async function listLocalFolder(payload = {}) {
       const fileStat = await fs.promises.stat(entryPath).catch(() => null);
       if (!fileStat?.isFile()) continue;
       const relativePath = path.relative(resolved, entryPath) || dirent.name;
+      const stem = path.basename(dirent.name, path.extname(dirent.name)).toLowerCase();
+      const posterPath =
+        posterIndex.byStem.get(stem)?.filePath ?? posterIndex.folderPoster?.filePath ?? null;
       items.push({
         filePath: entryPath,
         relativePath,
         name: dirent.name,
         extension,
+        posterPath,
+        posterUrl: posterPath ? localImageProtocolUrl(posterPath) : null,
         sizeBytes: fileStat.size,
         modifiedAtMs: Number(fileStat.mtimeMs.toFixed(0)),
       });
