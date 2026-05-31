@@ -1,10 +1,21 @@
+use std::fs;
 use std::sync::Arc;
 
+use chrono::Utc;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
-use tauri::State;
+use serde::Serialize;
+use serde_json::Value;
+use tauri::{AppHandle, Emitter, State};
+use tauri_plugin_dialog::DialogExt;
 
-use crate::config::models::{AppSettings, HomeHeroStyle, MpvBackendKind, StatsOverlayMode, Theme};
-use crate::error::AppResult;
+use crate::commands::shortcuts::{
+    self, merge_shortcut_bindings, normalize_shortcut_bindings, ShortcutBinding,
+};
+use crate::config::models::{
+    Account, AppSettings, HomeHeroStyle, MpvBackendKind, Server, StatsOverlayMode, Theme,
+};
+use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -56,6 +67,37 @@ pub struct SettingsPatch {
     pub subtitle_shadow_offset: Option<f64>,
     pub subtitle_position_pct: Option<u32>,
     pub subtitle_force_style: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ConfigImportMode {
+    Merge,
+    Replace,
+}
+
+impl Default for ConfigImportMode {
+    fn default() -> Self {
+        Self::Merge
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportConfigPayload {
+    #[serde(default)]
+    pub mode: ConfigImportMode,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigTransferSummary {
+    pub file_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<ConfigImportMode>,
+    pub servers: usize,
+    pub accounts: usize,
+    pub shortcuts: usize,
 }
 
 fn deserialize_nullable_field<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
@@ -247,4 +289,213 @@ pub async fn update_settings(
         state.mpv.rebuild(&settings).await?;
     }
     Ok(settings)
+}
+
+#[tauri::command]
+pub async fn export_config(
+    handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> AppResult<Option<ConfigTransferSummary>> {
+    let shortcuts = state.shortcuts.snapshot();
+    let backup = serde_json::json!({
+        "schema": "hills-lite-config",
+        "version": 1,
+        "exportedAt": Utc::now().to_rfc3339(),
+        "data": {
+            "settings": state.config.settings(),
+            "servers": state.config.servers(),
+            "accounts": state.config.accounts(),
+            "activeAccountId": state.config.active_account_id(),
+            "globalShortcuts": shortcuts,
+        },
+    });
+
+    let stamp = Utc::now().format("%Y-%m-%d").to_string();
+    let Some(file_path) = handle
+        .dialog()
+        .file()
+        .set_title("导出配置")
+        .set_file_name(format!("hills-lite-config-{stamp}.json"))
+        .add_filter("JSON", &["json"])
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+
+    let path = file_path
+        .into_path()
+        .map_err(|e| AppError::Other(format!("dialog path error: {e}")))?;
+    fs::write(
+        &path,
+        format!("{}\n", serde_json::to_string_pretty(&backup)?),
+    )?;
+
+    Ok(Some(ConfigTransferSummary {
+        file_path: path.display().to_string(),
+        mode: None,
+        servers: backup["data"]["servers"].as_array().map_or(0, Vec::len),
+        accounts: backup["data"]["accounts"].as_array().map_or(0, Vec::len),
+        shortcuts: backup["data"]["globalShortcuts"]
+            .as_array()
+            .map_or(0, Vec::len),
+    }))
+}
+
+#[tauri::command]
+pub async fn import_config(
+    handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    payload: Option<ImportConfigPayload>,
+) -> AppResult<Option<ConfigTransferSummary>> {
+    let Some(file_path) = handle
+        .dialog()
+        .file()
+        .set_title("导入配置")
+        .add_filter("JSON", &["json"])
+        .blocking_pick_file()
+    else {
+        return Ok(None);
+    };
+
+    let path = file_path
+        .into_path()
+        .map_err(|e| AppError::Other(format!("dialog path error: {e}")))?;
+    let parsed: Value = serde_json::from_str(&fs::read_to_string(&path)?)?;
+    let data = backup_data(&parsed)?;
+    let mode = payload.map(|payload| payload.mode).unwrap_or_default();
+
+    let imported_servers: Vec<Server> = parse_array_field(data, "servers")?;
+    let imported_accounts: Vec<Account> = parse_array_field(data, "accounts")?;
+    let imported_shortcuts = parse_shortcuts(data)?;
+    let settings = merge_settings_value(
+        data.get("settings"),
+        match mode {
+            ConfigImportMode::Merge => state.config.settings(),
+            ConfigImportMode::Replace => AppSettings::default(),
+        },
+    )?;
+
+    let current_shortcuts = state.shortcuts.snapshot();
+    let next_shortcuts = match (mode, imported_shortcuts) {
+        (ConfigImportMode::Replace, Some(shortcuts)) => normalize_shortcut_bindings(shortcuts),
+        (ConfigImportMode::Replace, None) => current_shortcuts,
+        (ConfigImportMode::Merge, Some(shortcuts)) => {
+            merge_shortcut_bindings(current_shortcuts, shortcuts)
+        }
+        (ConfigImportMode::Merge, None) => current_shortcuts,
+    };
+    let applied_shortcuts =
+        shortcuts::replace_global_shortcuts(&handle, state.inner(), next_shortcuts)?;
+
+    let active_account_id = backup_text(data, "activeAccountId")
+        .or_else(|| backup_text(data, "active_account_id"))
+        .or_else(|| match mode {
+            ConfigImportMode::Merge => state.config.active_account_id(),
+            ConfigImportMode::Replace => None,
+        });
+    let (servers, accounts) = match mode {
+        ConfigImportMode::Replace => (imported_servers.clone(), imported_accounts.clone()),
+        ConfigImportMode::Merge => (
+            merge_servers(state.config.servers(), imported_servers.clone()),
+            merge_accounts(state.config.accounts(), imported_accounts.clone()),
+        ),
+    };
+
+    state
+        .config
+        .set_config_snapshot(settings, servers, accounts, active_account_id)?;
+
+    let summary = ConfigTransferSummary {
+        file_path: path.display().to_string(),
+        mode: Some(mode),
+        servers: imported_servers.len(),
+        accounts: imported_accounts.len(),
+        shortcuts: applied_shortcuts.len(),
+    };
+    handle.emit("config:imported", &summary)?;
+    Ok(Some(summary))
+}
+
+fn backup_data(parsed: &Value) -> AppResult<&Value> {
+    let data = parsed.get("data").unwrap_or(parsed);
+    if data.is_object() {
+        Ok(data)
+    } else {
+        Err(AppError::Other("invalid backup file".to_string()))
+    }
+}
+
+fn parse_array_field<T>(data: &Value, key: &str) -> AppResult<Vec<T>>
+where
+    T: DeserializeOwned,
+{
+    match data.get(key) {
+        Some(Value::Array(_)) => serde_json::from_value(data[key].clone()).map_err(AppError::from),
+        Some(_) => Err(AppError::Other(format!("invalid {key} in backup file"))),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn parse_shortcuts(data: &Value) -> AppResult<Option<Vec<ShortcutBinding>>> {
+    match data
+        .get("globalShortcuts")
+        .or_else(|| data.get("global_shortcuts"))
+    {
+        Some(Value::Array(value)) => serde_json::from_value(Value::Array(value.clone()))
+            .map(Some)
+            .map_err(AppError::from),
+        Some(_) => Err(AppError::Other(
+            "invalid globalShortcuts in backup file".to_string(),
+        )),
+        None => Ok(None),
+    }
+}
+
+fn merge_settings_value(value: Option<&Value>, base: AppSettings) -> AppResult<AppSettings> {
+    let Some(value) = value else {
+        return Ok(base);
+    };
+    let Value::Object(patch) = value else {
+        return Err(AppError::Other(
+            "invalid settings in backup file".to_string(),
+        ));
+    };
+    let mut merged = serde_json::to_value(base)?;
+    let Some(target) = merged.as_object_mut() else {
+        return Err(AppError::Other("invalid settings state".to_string()));
+    };
+    for (key, value) in patch {
+        target.insert(key.clone(), value.clone());
+    }
+    serde_json::from_value(merged).map_err(AppError::from)
+}
+
+fn backup_text(data: &Value, key: &str) -> Option<String> {
+    data.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn merge_servers(mut existing: Vec<Server>, incoming: Vec<Server>) -> Vec<Server> {
+    for server in incoming {
+        if let Some(current) = existing.iter_mut().find(|item| item.id == server.id) {
+            *current = server;
+        } else {
+            existing.push(server);
+        }
+    }
+    existing
+}
+
+fn merge_accounts(mut existing: Vec<Account>, incoming: Vec<Account>) -> Vec<Account> {
+    for account in incoming {
+        if let Some(current) = existing.iter_mut().find(|item| item.id == account.id) {
+            *current = account;
+        } else {
+            existing.push(account);
+        }
+    }
+    existing
 }

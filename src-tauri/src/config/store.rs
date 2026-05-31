@@ -147,6 +147,10 @@ impl ConfigStore {
             .and_then(|id| g.accounts.iter().find(|a| a.id == *id).cloned())
     }
 
+    pub fn active_account_id(&self) -> Option<String> {
+        self.inner.read().active_account_id.clone()
+    }
+
     pub fn set_active_account(&self, id: Option<String>) -> AppResult<()> {
         {
             let mut g = self.inner.write();
@@ -165,6 +169,30 @@ impl ConfigStore {
             f(&mut g.settings);
         }
         self.persist_settings()
+    }
+
+    pub fn set_config_snapshot(
+        &self,
+        settings: AppSettings,
+        servers: Vec<Server>,
+        accounts: Vec<Account>,
+        active_account_id: Option<String>,
+    ) -> AppResult<()> {
+        let active_account_id = active_account_id
+            .filter(|id| accounts.iter().any(|account| account.id == *id))
+            .or_else(|| accounts.first().map(|account| account.id.clone()));
+        {
+            let mut g = self.inner.write();
+            g.settings = settings;
+            g.servers = servers;
+            g.accounts = accounts;
+            g.active_account_id = active_account_id;
+        }
+        self.persist_settings()?;
+        self.persist_servers()?;
+        self.persist_accounts()?;
+        self.persist_active_account()?;
+        Ok(())
     }
 
     pub fn downloads(&self) -> Vec<DownloadTask> {

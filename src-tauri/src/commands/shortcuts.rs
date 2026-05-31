@@ -207,6 +207,95 @@ pub async fn reset_global_shortcuts(
     Ok(state.shortcuts.snapshot())
 }
 
+pub fn normalize_shortcut_bindings(bindings: Vec<ShortcutBinding>) -> Vec<ShortcutBinding> {
+    let mut next: Vec<ShortcutBinding> = Vec::new();
+    for binding in bindings {
+        let action = binding.action.trim();
+        let accelerator = binding.accelerator.trim();
+        if action.is_empty() || accelerator.is_empty() {
+            continue;
+        }
+        let normalized = ShortcutBinding {
+            action: action.to_string(),
+            accelerator: accelerator.to_string(),
+        };
+        if let Some(existing) = next
+            .iter_mut()
+            .find(|item| item.action == normalized.action)
+        {
+            *existing = normalized;
+        } else {
+            next.push(normalized);
+        }
+    }
+    next
+}
+
+pub fn merge_shortcut_bindings(
+    existing: Vec<ShortcutBinding>,
+    incoming: Vec<ShortcutBinding>,
+) -> Vec<ShortcutBinding> {
+    let mut next = normalize_shortcut_bindings(existing);
+    for binding in normalize_shortcut_bindings(incoming) {
+        if let Some(existing) = next.iter_mut().find(|item| item.action == binding.action) {
+            *existing = binding;
+        } else {
+            next.push(binding);
+        }
+    }
+    next
+}
+
+pub fn replace_global_shortcuts(
+    handle: &AppHandle,
+    state: &Arc<AppState>,
+    bindings: Vec<ShortcutBinding>,
+) -> AppResult<Vec<ShortcutBinding>> {
+    let next = normalize_shortcut_bindings(bindings);
+    for binding in &next {
+        let _: Shortcut = binding.accelerator.parse().map_err(|e| {
+            AppError::Other(format!("invalid accelerator {}: {e}", binding.accelerator))
+        })?;
+    }
+
+    let previous = state.shortcuts.snapshot();
+    let current_actions: Vec<String> = state.shortcuts.current.lock().keys().cloned().collect();
+    for action in current_actions {
+        let _ = unregister(handle, &state.shortcuts, &action);
+    }
+
+    let mut registered_actions: Vec<String> = Vec::new();
+    for binding in &next {
+        if let Err(error) = register(
+            handle,
+            &state.shortcuts,
+            &binding.action,
+            &binding.accelerator,
+        ) {
+            for action in registered_actions {
+                let _ = unregister(handle, &state.shortcuts, &action);
+            }
+            for old in &previous {
+                if let Err(restore_error) =
+                    register(handle, &state.shortcuts, &old.action, &old.accelerator)
+                {
+                    tracing::warn!(target = "shortcuts", error = %restore_error, "restore shortcut failed");
+                }
+            }
+            if let Ok(value) = serde_json::to_value(&previous) {
+                let _ = state.config.set_raw(KEY_SHORTCUTS, value);
+            }
+            return Err(error);
+        }
+        registered_actions.push(binding.action.clone());
+    }
+
+    state
+        .config
+        .set_raw(KEY_SHORTCUTS, serde_json::to_value(&next)?)?;
+    Ok(state.shortcuts.snapshot())
+}
+
 fn persist(state: &State<'_, Arc<AppState>>) -> AppResult<()> {
     let bindings = state.shortcuts.snapshot();
     state

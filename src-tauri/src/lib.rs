@@ -121,6 +121,8 @@ pub fn run() {
             commands::player::embed_detach,
             commands::settings::get_settings,
             commands::settings::update_settings,
+            commands::settings::export_config,
+            commands::settings::import_config,
             commands::danmaku::list_danmaku_providers,
             commands::danmaku::fetch_danmaku,
             commands::danmaku::import_danmaku_xml,

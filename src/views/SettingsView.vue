@@ -51,7 +51,11 @@ const backupStatus = ref("");
 const appVersion = "0.1.0";
 const platformLabel = ref("...");
 const isElectronRuntime = typeof window !== "undefined" && Boolean(window.hillsLite);
-const backupAvailable = computed(() => isElectronRuntime || platformLabel.value === "web");
+const isTauriRuntime =
+  typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
+const backupAvailable = computed(
+  () => isElectronRuntime || isTauriRuntime || platformLabel.value === "web",
+);
 
 type ServerLineDraft = {
   id?: string;
