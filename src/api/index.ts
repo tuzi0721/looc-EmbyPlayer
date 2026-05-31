@@ -359,6 +359,8 @@ export const api = {
     invoke<void>("set_subtitle_scale", { payload: { scale } }),
   setSubtitleStyle: (payload: SubtitleStyleSettings) =>
     invoke<void>("set_subtitle_style", { payload }),
+  setSecondarySubtitleTrack: (trackId: number | null) =>
+    invoke<void>("set_secondary_subtitle_track", { payload: { trackId } }),
   cycleSubtitle: () => invoke<void>("cycle_subtitle"),
 
   // Remote control / sync playback

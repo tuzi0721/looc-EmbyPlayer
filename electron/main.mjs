@@ -1600,6 +1600,14 @@ async function handleInvoke(command, args = {}) {
     });
   }
 
+  if (command === "set_secondary_subtitle_track") {
+    const trackId = args.payload?.trackId;
+    return runMpvIfRunning(async () => {
+      await mpv.setProperty("secondary-sid", trackId == null ? "no" : Number(trackId));
+      await mpv.setProperty("secondary-sub-visibility", trackId != null);
+    });
+  }
+
   if (command === "set_volume") {
     return runMpvIfRunning(() => mpv.setProperty("volume", Number(args.payload?.volume ?? 80)));
   }

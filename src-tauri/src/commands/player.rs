@@ -453,6 +453,20 @@ pub async fn set_subtitle_track(
         .await
 }
 
+#[tauri::command]
+pub async fn set_secondary_subtitle_track(
+    state: State<'_, Arc<AppState>>,
+    payload: SubtitleTrackPayload,
+) -> AppResult<()> {
+    state
+        .mpv
+        .backend()
+        .execute(MpvCommand::SetSecondarySubtitleTrack {
+            id: payload.track_id,
+        })
+        .await
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VolumePayload {

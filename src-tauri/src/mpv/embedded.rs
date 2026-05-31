@@ -169,6 +169,19 @@ impl MpvBackend for MpvEmbeddedBackend {
                 }
                 drop_buffers_if_requested(&m, preserve_cache)
             }
+            MpvCommand::SetSecondarySubtitleTrack { id } => {
+                if let Some(id) = id {
+                    m.set_property("secondary-sid", id)
+                        .map_err(|e| AppError::Mpv(e.to_string()))?;
+                    m.set_property("secondary-sub-visibility", true)
+                        .map_err(|e| AppError::Mpv(e.to_string()))
+                } else {
+                    m.set_property("secondary-sid", "no")
+                        .map_err(|e| AppError::Mpv(e.to_string()))?;
+                    m.set_property("secondary-sub-visibility", false)
+                        .map_err(|e| AppError::Mpv(e.to_string()))
+                }
+            }
             MpvCommand::AddSubtitle {
                 source,
                 title,
@@ -249,6 +262,7 @@ impl MpvBackend for MpvEmbeddedBackend {
         let volume: i64 = m.get_property("volume").unwrap_or(100);
         let muted: bool = m.get_property("mute").unwrap_or(false);
         let eof: bool = m.get_property("eof-reached").unwrap_or(false);
+        let secondary_sub_id: Option<i64> = m.get_property("secondary-sid").ok();
         let sub_delay: f64 = m.get_property("sub-delay").unwrap_or(0.0);
         let sub_scale: f64 = m.get_property("sub-scale").unwrap_or(1.0);
         let network_bps = m
@@ -279,6 +293,7 @@ impl MpvBackend for MpvEmbeddedBackend {
             tracks: vec![],
             chapters: vec![],
             chapter: None,
+            secondary_sub_id,
             sub_delay_ms: (sub_delay * 1000.0) as i64,
             sub_scale,
             network_bps,

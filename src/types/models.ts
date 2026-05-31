@@ -202,6 +202,7 @@ export interface MpvSnapshot {
   tracks: MpvTrackInfo[];
   chapters?: MpvChapterInfo[];
   chapter?: number | null;
+  secondarySubId?: number | null;
   subDelayMs?: number;
   subScale?: number;
   networkBps?: number | null;

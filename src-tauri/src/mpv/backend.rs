@@ -50,6 +50,9 @@ pub struct MpvSnapshot {
     pub chapters: Vec<MpvChapterInfo>,
     #[serde(default)]
     pub chapter: Option<i64>,
+    /// Current secondary subtitle track id, if mpv is stacking a second sub.
+    #[serde(default)]
+    pub secondary_sub_id: Option<i64>,
     /// Current subtitle delay in milliseconds (positive = later, negative = earlier).
     #[serde(default)]
     pub sub_delay_ms: i64,
@@ -139,6 +142,9 @@ pub enum MpvCommand {
     SetSubtitleTrack {
         id: Option<i64>,
         preserve_cache: bool,
+    },
+    SetSecondarySubtitleTrack {
+        id: Option<i64>,
     },
     /// Add a subtitle from a path or URL. `title` and `lang` may be set so
     /// the track shows up nicely in the picker. The track is selected by

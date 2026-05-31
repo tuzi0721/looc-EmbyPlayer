@@ -171,6 +171,10 @@ export const usePlayerStore = defineStore("player", () => {
     await api.setSubtitleTrack(id);
     await refresh();
   }
+  async function setSecondarySubtitleTrack(id: number | null) {
+    await api.setSecondarySubtitleTrack(id);
+    await refresh();
+  }
 
   async function addSubtitle(payload: {
     source: string;
@@ -294,6 +298,7 @@ export const usePlayerStore = defineStore("player", () => {
     setSpeed,
     setAudioTrack,
     setSubtitleTrack,
+    setSecondarySubtitleTrack,
     addSubtitle,
     removeSubtitle,
     setSubtitleDelay,

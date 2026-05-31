@@ -484,6 +484,15 @@ impl MpvBackend for MpvIpcBackend {
                     .await?;
                 self.drop_buffers_if_requested(preserve_cache).await
             }
+            MpvCommand::SetSecondarySubtitleTrack { id } => {
+                self.set_property(
+                    "secondary-sid",
+                    id.map_or_else(|| json!("no"), |id| json!(id)),
+                )
+                .await?;
+                self.set_property("secondary-sub-visibility", json!(id.is_some()))
+                    .await
+            }
             MpvCommand::AddSubtitle {
                 source,
                 title,
@@ -626,6 +635,16 @@ impl MpvBackend for MpvIpcBackend {
             .ok()
             .and_then(|v| v.as_i64())
             .filter(|v| *v >= 0);
+        let secondary_sub_id = self
+            .get_property("secondary-sid")
+            .await
+            .ok()
+            .and_then(|v| match v {
+                Value::Number(n) => n.as_i64(),
+                Value::String(s) => s.parse::<i64>().ok(),
+                _ => None,
+            })
+            .filter(|v| *v >= 0);
         let sub_delay = self
             .get_property("sub-delay")
             .await
@@ -717,6 +736,7 @@ impl MpvBackend for MpvIpcBackend {
             tracks,
             chapters,
             chapter,
+            secondary_sub_id,
             sub_delay_ms: (sub_delay * 1000.0) as i64,
             sub_scale,
             network_bps,

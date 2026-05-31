@@ -113,6 +113,7 @@ pub fn run() {
             commands::player::set_speed,
             commands::player::set_audio_track,
             commands::player::set_subtitle_track,
+            commands::player::set_secondary_subtitle_track,
             commands::player::get_state,
             commands::player::embed_attach,
             commands::player::embed_set_rect,

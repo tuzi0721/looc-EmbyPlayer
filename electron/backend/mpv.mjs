@@ -76,6 +76,7 @@ function defaultSnapshot() {
     tracks: [],
     chapters: [],
     chapter: null,
+    secondarySubId: null,
     subDelayMs: 0,
     subScale: 1,
     networkBps: null,
@@ -302,6 +303,7 @@ export class MpvController {
       tracks,
       chapters,
       chapter,
+      secondarySid,
       subDelay,
       subScale,
       networkBps,
@@ -332,6 +334,7 @@ export class MpvController {
       get("track-list", []),
       get("chapter-list", []),
       get("chapter", null),
+      get("secondary-sid", null),
       get("sub-delay", 0),
       get("sub-scale", 1),
       get("cache-speed", null),
@@ -382,6 +385,10 @@ export class MpvController {
       tracks: normalizedTracks,
       chapters: parseChapters(chapters),
       chapter: chapter == null || numberFrom(chapter, -1) < 0 ? null : Math.floor(numberFrom(chapter)),
+      secondarySubId:
+        secondarySid == null || secondarySid === "no" || numberFrom(secondarySid, -1) < 0
+          ? null
+          : Math.floor(numberFrom(secondarySid)),
       subDelayMs: Math.floor(numberFrom(subDelay) * 1000),
       subScale: numberFrom(subScale, 1),
       networkBps: networkBps == null ? null : numberFrom(networkBps, 0),

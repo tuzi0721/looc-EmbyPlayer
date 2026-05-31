@@ -49,6 +49,7 @@ const mpvSubs = computed(
 const activeSubId = computed(
   () => mpvSubs.value.find((t) => t.selected)?.id ?? null,
 );
+const secondarySubId = computed(() => player.snapshot?.secondarySubId ?? null);
 const delay = computed({
   get: () => player.snapshot?.subDelayMs ?? 0,
   set: (v) => player.setSubtitleDelay(Math.round(v)),
@@ -202,8 +203,16 @@ async function attachOnline(result: OnlineSubtitleSearchResult) {
   }
 }
 
-function setActive(id: number | null) {
-  player.setSubtitleTrack(id);
+async function setActive(id: number | null) {
+  if (id != null && id === secondarySubId.value) {
+    await player.setSecondarySubtitleTrack(null);
+  }
+  await player.setSubtitleTrack(id);
+}
+
+function setSecondary(id: number | null) {
+  if (id != null && id === activeSubId.value) return;
+  player.setSecondarySubtitleTrack(id);
 }
 
 function nudgeDelay(deltaMs: number) {
@@ -281,6 +290,28 @@ onMounted(() => {
             >
               <Icon icon="lucide:trash-2" width="12" />
             </button>
+          </li>
+        </ul>
+      </section>
+
+      <section v-if="mpvSubs.length > 1" class="block">
+        <div class="row-head">
+          <span>第二字幕</span>
+        </div>
+        <ul class="tracks">
+          <li :class="{ active: secondarySubId == null }" @click="setSecondary(null)">
+            <Icon icon="lucide:layers-2" width="14" />
+            <span>关闭第二字幕</span>
+          </li>
+          <li
+            v-for="t in mpvSubs"
+            :key="`secondary-${t.id}`"
+            :class="{ active: secondarySubId === t.id, disabled: activeSubId === t.id }"
+            @click="setSecondary(t.id)"
+          >
+            <Icon icon="lucide:captions" width="14" />
+            <span>{{ t.title || t.lang || `字幕 ${t.id}` }}</span>
+            <span v-if="activeSubId === t.id" class="tag muted">主字幕</span>
           </li>
         </ul>
       </section>
@@ -576,6 +607,13 @@ onMounted(() => {
   background: rgba(10, 132, 255, 0.18);
   color: var(--accent);
 }
+.tracks li.disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.tracks li.disabled:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
 .tracks li.hint {
   color: var(--fg-tertiary);
   cursor: default;
@@ -593,6 +631,9 @@ onMounted(() => {
 .tag.forced {
   color: #ff9f0a;
   border-color: rgba(255, 159, 10, 0.4);
+}
+.tag.muted {
+  text-transform: none;
 }
 .field {
   min-width: 0;
