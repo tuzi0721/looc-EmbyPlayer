@@ -8,14 +8,18 @@ import { useServerStore } from "@/stores/server";
 import type { PlaybackSource } from "@/api";
 import type { MpvSnapshot, PictureMode, SubtitleStyleSettings } from "@/types/models";
 
+type PlaybackQueueKind = "remote" | "local";
+
 export const usePlayerStore = defineStore("player", () => {
   const snapshot = ref<MpvSnapshot | null>(null);
   const playbackSource = ref<PlaybackSource | null>(null);
   const playSessionId = ref<string | null>(null);
   const itemId = ref<string | null>(null);
+  const localFilePath = ref<string | null>(null);
   const localFileTitle = ref<string | null>(null);
   const queue = ref<string[]>([]);
   const queueIndex = ref(-1);
+  const queueKind = ref<PlaybackQueueKind>("remote");
   let pollHandle: number | null = null;
   let pollBusy = false;
   let lastEof = false;
@@ -35,6 +39,8 @@ export const usePlayerStore = defineStore("player", () => {
     itemId.value = payload.itemId;
     playSessionId.value = sessionId;
     playbackSource.value = source;
+    if (queueKind.value === "local") clearQueue();
+    localFilePath.value = null;
     localFileTitle.value = null;
     lastEof = false;
     void pushNowPlaying();
@@ -52,11 +58,13 @@ export const usePlayerStore = defineStore("player", () => {
     title?: string | null;
   }) {
     await api.playFile({ filePath: payload.filePath, startMs: payload.startMs ?? null });
+    const keepsLocalQueue =
+      queueKind.value === "local" && queue.value[queueIndex.value] === payload.filePath;
     itemId.value = null;
     playSessionId.value = null;
     playbackSource.value = null;
-    queue.value = [];
-    queueIndex.value = -1;
+    if (!keepsLocalQueue) clearQueue();
+    localFilePath.value = payload.filePath;
     localFileTitle.value = payload.title?.trim() || fileNameFromPath(payload.filePath);
     lastEof = false;
     void pushNowPlaying();
@@ -132,14 +140,26 @@ export const usePlayerStore = defineStore("player", () => {
     if (items.length === 0) return;
     queue.value = [...items];
     queueIndex.value = Math.max(0, Math.min(items.length - 1, startIndex));
+    queueKind.value = "remote";
     await play({ itemId: queue.value[queueIndex.value]!, preferDirect: true });
+  }
+
+  function setLocalQueue(files: string[], startIndex = 0) {
+    queue.value = [...files];
+    queueIndex.value = files.length > 0 ? Math.max(0, Math.min(files.length - 1, startIndex)) : -1;
+    queueKind.value = "local";
   }
 
   async function nextTrack() {
     if (queue.value.length === 0) return false;
     if (queueIndex.value + 1 >= queue.value.length) return false;
     queueIndex.value += 1;
-    await play({ itemId: queue.value[queueIndex.value]!, preferDirect: true });
+    if (queueKind.value === "local") {
+      const filePath = queue.value[queueIndex.value]!;
+      await playFile({ filePath, title: fileNameFromPath(filePath) });
+    } else {
+      await play({ itemId: queue.value[queueIndex.value]!, preferDirect: true });
+    }
     return true;
   }
 
@@ -147,18 +167,25 @@ export const usePlayerStore = defineStore("player", () => {
     if (queue.value.length === 0) return false;
     if (queueIndex.value <= 0) return false;
     queueIndex.value -= 1;
-    await play({ itemId: queue.value[queueIndex.value]!, preferDirect: true });
+    if (queueKind.value === "local") {
+      const filePath = queue.value[queueIndex.value]!;
+      await playFile({ filePath, title: fileNameFromPath(filePath) });
+    } else {
+      await play({ itemId: queue.value[queueIndex.value]!, preferDirect: true });
+    }
     return true;
   }
 
   function clearQueue() {
     queue.value = [];
     queueIndex.value = -1;
+    queueKind.value = "remote";
   }
 
   function setQueue(items: string[], index: number) {
     queue.value = [...items];
     queueIndex.value = items.length > 0 ? Math.max(0, Math.min(items.length - 1, index)) : -1;
+    queueKind.value = "remote";
   }
 
   async function pause() {
@@ -187,6 +214,7 @@ export const usePlayerStore = defineStore("player", () => {
     playbackSource.value = null;
     itemId.value = null;
     playSessionId.value = null;
+    localFilePath.value = null;
     localFileTitle.value = null;
     try {
       await api.clearNowPlaying();
@@ -310,7 +338,11 @@ export const usePlayerStore = defineStore("player", () => {
 
           if (snapshot.value.eof && !lastEof) {
             lastEof = true;
-            if (queue.value.length > 0 && queueIndex.value + 1 < queue.value.length) {
+            if (
+              queueKind.value === "remote" &&
+              queue.value.length > 0 &&
+              queueIndex.value + 1 < queue.value.length
+            ) {
               void nextTrack();
             }
           } else if (!snapshot.value.eof) {
@@ -335,12 +367,15 @@ export const usePlayerStore = defineStore("player", () => {
     playbackSource,
     playSessionId,
     itemId,
+    localFilePath,
     localFileTitle,
     queue,
     queueIndex,
+    queueKind,
     play,
     playFile,
     playQueue,
+    setLocalQueue,
     nextTrack,
     prevTrack,
     clearQueue,

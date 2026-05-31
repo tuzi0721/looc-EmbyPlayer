@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-05-31（本地文件夹浏览）
+> **更新时间**：2026-06-01（本地文件夹播放队列）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-05-31-2348-local-folder-browser.md`](./CHANGE_LOG/2026-05-31-2348-local-folder-browser.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-0000-local-folder-queue.md`](./CHANGE_LOG/2026-06-01-0000-local-folder-queue.md)
 
 ---
 
@@ -50,6 +50,8 @@
 **2026-05-31**：设置页新增“文件服务 / 连接器”只读能力面板，可通过 `/settings?c=file-services` 直达；本地单文件、最近本地文件、同名字幕、同名 XML 弹幕标记为可用，文件夹媒体库、WebDAV、SMB、Alist/OpenList、Plex 连接器标记为待接入。
 
 **2026-05-31**：新增 `/local-folder` 本地文件夹页面；Electron/Tauri 提供 `list_local_folder` 命令枚举所选目录第一层常见视频文件，侧边栏“打开本地文件夹”可进入列表，点击视频继续走 `/player/local-file?file=...` 本地播放器链路。设置页“文件服务 / 连接器”面板同步将“文件夹媒体库”标记为可用。
+
+**2026-06-01**：本地文件夹播放接入播放器队列；从 `/local-folder` 点击视频会把当前列表写入本地队列，播放器上一集/下一集和选集菜单显示文件名并切换本地文件，返回按钮会回到来源文件夹。
 
 **2026-05-30**：单集详情页会并行加载季列表与当前季剧集，并通过详情/剧集加载序号避免快速切换 PDP 时旧请求覆盖新页面状态。
 
@@ -472,9 +474,11 @@ npm.cmd run electron:build
 
 本轮本地文件夹浏览已闭环：新增 `/local-folder` 页面和侧边栏“打开本地文件夹”入口，Electron/Tauri `list_local_folder` 会枚举所选目录第一层的常见视频格式并返回文件名、路径、扩展名、大小和修改时间；列表项点击后复用现有本地文件播放、最近本地文件、同名字幕和同名 XML 弹幕链路。Web Preview 对该命令返回空列表，避免假装拥有本地文件权限。验证已覆盖 `cargo fmt --manifest-path src-tauri/Cargo.toml`、`node --check electron/main.mjs`、`npm.cmd run build`、`cargo check --manifest-path src-tauri/Cargo.toml --all-targets`、行尾空白检查、in-app Browser 目检与 `npm.cmd run electron:build`。
 
+本轮本地文件夹播放队列已闭环：`player` store 队列增加 `remote` / `local` 类型，本地文件夹列表点击视频时会把当前列表写入本地队列；播放器选集菜单显示文件名，上一集/下一集切换会继续调用本地 `play_file`，切换后重新尝试同名 XML 弹幕并更新播放器 URL；从本地文件夹进入播放器时返回按钮会回到来源文件夹。验证已覆盖 `npm.cmd run build`（首次 Vite HTML 输出路径异常，重跑通过）、行尾空白检查、in-app Browser 目检与 `npm.cmd run electron:build`。
+
 ---
 
 ## 10. Phase 2 待办
 
 - 播放窗口内嵌已通过本地屏幕像素 smoke；后续仍建议用真实媒体人工走一遍控制栏显示/隐藏、全屏和窗口 resize 体验。
-- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层视频浏览、同名字幕自动关联、同名 XML 弹幕自动关联和最近本地文件入口；递归目录索引、封面/元数据刮削、WebDAV、SMB、Alist/OpenList 和 Plex 仍待后续分阶段接入。
+- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层视频浏览与本地文件夹播放队列、同名字幕自动关联、同名 XML 弹幕自动关联和最近本地文件入口；递归目录索引、封面/元数据刮削、WebDAV、SMB、Alist/OpenList 和 Plex 仍待后续分阶段接入。

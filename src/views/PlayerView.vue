@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { CSSProperties } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { useRoute, useRouter, type LocationQueryRaw } from "vue-router";
 import { Icon } from "@iconify/vue";
 import Hls from "hls.js";
 
@@ -60,6 +60,7 @@ let lastEmbedRectKey = "";
 let blackoutSyncSeq = 0;
 let introSkipAppliedItemId: string | null = null;
 let outroSkipAppliedItemId: string | null = null;
+let localQueueEofHandled = false;
 
 const subtitlePanelOpen = ref(false);
 const settingsMenuOpen = ref(false);
@@ -278,14 +279,16 @@ function mergeDanmakuComments(comments: DanmakuComment[]): DanmakuComment[] {
 
 const currentItemId = computed(() => player.itemId ?? props.id);
 const item = computed(() => lib.itemCache[currentItemId.value] ?? lib.itemCache[props.id] ?? null);
-const localFilePath = computed(() => {
+const routeLocalFilePath = computed(() => {
   const value = route.query.file;
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 });
+const localFilePath = computed(() => player.localFilePath ?? routeLocalFilePath.value);
 const localFileTitle = computed(() =>
   localFilePath.value ? fileNameFromPath(localFilePath.value) : null,
 );
 const isLocalFilePlayback = computed(() => Boolean(localFilePath.value));
+const isLocalQueue = computed(() => player.queueKind === "local");
 const displayTitle = computed(
   () =>
     item.value?.SeriesName ??
@@ -564,14 +567,37 @@ watch(currentItemId, (id, oldId) => {
   resetDanmakuState();
 });
 
-watch(localFilePath, (filePath, oldFilePath) => {
-  if (!oldFilePath || filePath === oldFilePath) return;
+watch(() => player.localFilePath, (filePath, oldFilePath) => {
+  if (!filePath || filePath === oldFilePath) return;
   resetDanmakuState();
+  void autoImportLocalDanmakuXml(filePath);
+  if (props.id === "local-file" && routeLocalFilePath.value !== filePath) {
+    const query: LocationQueryRaw = { ...route.query, file: filePath };
+    delete query.start;
+    router.replace({ name: "player", params: { id: "local-file" }, query }).catch(() => {});
+  }
 });
 
 watch(episodeMenuOpen, (open) => {
   if (open) void ensureQueueItems();
 });
+
+watch(
+  () => player.snapshot?.eof ?? false,
+  (eof) => {
+    if (!isLocalQueue.value) {
+      localQueueEofHandled = false;
+      return;
+    }
+    if (!eof) {
+      localQueueEofHandled = false;
+      return;
+    }
+    if (localQueueEofHandled || player.queueIndex + 1 >= player.queue.length) return;
+    localQueueEofHandled = true;
+    void playNextTrack();
+  },
+);
 
 watch(
   () => settings.settings.blackoutOtherDisplays,
@@ -942,6 +968,7 @@ function onVideoEnded() {
 }
 
 function queueTitle(entry: (typeof queueEntries.value)[number]): string {
+  if (isLocalQueue.value) return fileNameFromPath(entry.id);
   const media = entry.item;
   if (!media) return `第 ${entry.index + 1} 集`;
   const year = media.ProductionYear ? ` (${media.ProductionYear})` : "";
@@ -954,6 +981,7 @@ function queueTitle(entry: (typeof queueEntries.value)[number]): string {
 }
 
 function queueSubtitle(entry: (typeof queueEntries.value)[number]): string {
+  if (isLocalQueue.value) return entry.active ? "正在播放" : "本地文件";
   const media = entry.item;
   if (!media) return entry.active ? "正在播放" : "";
   const parts = [media.SeriesName].filter(Boolean);
@@ -1005,6 +1033,7 @@ async function togglePlay() {
 }
 
 async function ensureQueueItems() {
+  if (isLocalQueue.value) return;
   const missing = player.queue.filter((id) => !lib.itemCache[id]).slice(0, 30);
   if (missing.length === 0) return;
   queueLoading.value = true;
@@ -1038,7 +1067,13 @@ async function jumpToChapter(chapter: { timeMs: number }) {
 }
 
 async function playQueueIndex(index: number) {
-  if (useHtmlVideo) {
+  if (isLocalQueue.value) {
+    const filePath = player.queue[index];
+    if (!filePath) return;
+    player.queueIndex = index;
+    resetDanmakuState();
+    await player.playFile({ filePath, title: fileNameFromPath(filePath) });
+  } else if (useHtmlVideo) {
     const id = player.queue[index];
     if (!id) return;
     player.queueIndex = index;
@@ -1073,6 +1108,15 @@ async function playNextTrack() {
 
 function back() {
   void player.stop();
+  const folder = route.query.folder;
+  if (isLocalFilePlayback.value) {
+    if (typeof folder === "string" && folder.trim().length > 0) {
+      router.push({ name: "local-folder", query: { folder } }).catch(() => {});
+    } else {
+      router.push("/home").catch(() => {});
+    }
+    return;
+  }
   const from =
     (route.query.from as string | undefined) ||
     item.value?.SeriesId ||
@@ -1545,7 +1589,7 @@ async function copyPlayerError() {
 
 async function startCurrentPlayback() {
   const start = Number(route.query.start ?? 0) || 0;
-  const filePath = localFilePath.value;
+  const filePath = routeLocalFilePath.value;
   const localId = (route.query.local as string | undefined) ?? null;
   const recordWhilePlaying = route.query.record === "1";
   const stealthWhenRecording = route.query.stealth !== "0";
@@ -1555,9 +1599,8 @@ async function startCurrentPlayback() {
     await player.playFile({
       filePath,
       startMs: start,
-      title: localFileTitle.value,
+      title: fileNameFromPath(filePath),
     });
-    await autoImportLocalDanmakuXml(filePath);
   } else if (localId) {
     if (!lib.itemCache[props.id]) {
       await lib.loadItem(props.id);

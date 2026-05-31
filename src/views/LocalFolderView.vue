@@ -6,10 +6,12 @@ import { Icon } from "@iconify/vue";
 import { api, type LocalFolderListing, type LocalFolderVideo } from "@/api";
 import { openFileDialog } from "@/platform";
 import { useLocalFilesStore } from "@/stores/localFiles";
+import { usePlayerStore } from "@/stores/player";
 
 const route = useRoute();
 const router = useRouter();
 const localFiles = useLocalFilesStore();
+const player = usePlayerStore();
 
 const listing = ref<LocalFolderListing | null>(null);
 const loading = ref(false);
@@ -89,10 +91,16 @@ async function loadFolder(directory = folderPath.value) {
   }
 }
 
-function openVideo(item: LocalFolderVideo) {
+function openVideo(item: LocalFolderVideo, index: number) {
+  const items = listing.value?.items ?? [];
+  player.setLocalQueue(items.map((entry) => entry.filePath), index);
   localFiles.remember(item.filePath);
   router
-    .push({ name: "player", params: { id: "local-file" }, query: { file: item.filePath } })
+    .push({
+      name: "player",
+      params: { id: "local-file" },
+      query: { file: item.filePath, folder: listing.value?.directory ?? folderPath.value },
+    })
     .catch(() => {});
 }
 
@@ -154,8 +162,8 @@ watch(folderPath, (directory) => void loadFolder(directory), { immediate: true }
       </div>
 
       <ul v-else class="file-list">
-        <li v-for="item in listing?.items ?? []" :key="item.filePath">
-          <button class="file-row" type="button" :title="item.filePath" @click="openVideo(item)">
+        <li v-for="(item, index) in listing?.items ?? []" :key="item.filePath">
+          <button class="file-row" type="button" :title="item.filePath" @click="openVideo(item, index)">
             <span class="file-row__icon">
               <Icon icon="lucide:file-video" width="18" />
             </span>
