@@ -422,11 +422,11 @@ const statsTrackRows = computed<StatsRow[]>(() => {
   }));
 });
 const statsWhisperRows = computed<StatsRow[]>(() => [
-  { label: "实时字幕", value: "未运行" },
-  { label: "后端", value: "未启动" },
-  { label: "预读窗口", value: "0s" },
-  { label: "队列", value: "0 段" },
-  { label: "翻译", value: "未运行" },
+  { label: "实时字幕", value: "待接入" },
+  { label: "本地 Whisper", value: "未配置模型" },
+  { label: "API 字幕", value: "未配置" },
+  { label: "GPU 加速", value: "待检测" },
+  { label: "AI 翻译", value: "待接入" },
 ]);
 const statsRows = computed<StatsRow[]>(() => {
   if (statsPage.value === "video") return statsVideoRows.value;

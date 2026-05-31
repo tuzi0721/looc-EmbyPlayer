@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-05-31（下载失败通知重试动作）
+> **更新时间**：2026-05-31（AI 字幕能力面板）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-05-31-2135-download-notification-retry.md`](./CHANGE_LOG/2026-05-31-2135-download-notification-retry.md)
+> **变更日志**：[`CHANGE_LOG/2026-05-31-2146-ai-subtitle-capability-panel.md`](./CHANGE_LOG/2026-05-31-2146-ai-subtitle-capability-panel.md)
 
 ---
 
@@ -147,7 +147,7 @@
 - **2026-05-31**：Electron `get_playback_source` 会返回当前播放线路、线路候选和 `PlaybackInfo.MediaSources` 候选摘要；`play` / mpv 播放链支持传入 `lineId` 与 `mediaSourceId` 指定候选重新开流，播放日志与串行去重 key 同步区分切源请求；Tauri `play` / `play_external` 已同步兼容 `lineId` 与 `mediaSourceId`，并让服务器字幕列表跟随当前播放会话线路；Electron 外部播放器入口也会透传线路 / 媒体源选择。
 
 - **2026-05-30**：播放器底部控制栏按 1180px / 920px / 620px 三档收纳低频控件；倍速/截图、队列前后/音轨/章节、快退/快进/音量会随宽度逐级隐藏，核心播放、字幕/弹幕、设置、选集与全屏入口保持可用。
-- **2026-05-30**：播放器 Stats 浮层新增五页标签：综合页显示时间/进度/缓存/轨道概况，视频页显示 codec、硬解、尺寸、FPS、码率和丢帧，音频页显示 codec、采样率、声道、码率和速度，轨道页列出全部 mpv 轨道状态，Whisper 页显示当前实时字幕任务状态；播放行为设置可切换为 mpv 自带 OSD。
+- **2026-05-30**：播放器 Stats 浮层新增五页标签：综合页显示时间/进度/缓存/轨道概况，视频页显示 codec、硬解、尺寸、FPS、码率和丢帧，音频页显示 codec、采样率、声道、码率和速度，轨道页列出全部 mpv 轨道状态，Whisper 页显示当前实时字幕能力状态；播放行为设置可切换为 mpv 自带 OSD。
 - **2026-05-30**：播放器内嵌 mpv/composition 尺寸同步新增 stage `ResizeObserver`、rAF 节流和重复 rect 去重；全屏变化与窗口 resize 共用同一条同步路径，卸载时断开 observer 并并行执行 `embedSetVisible(false)` / `embedDetach()`。
 - **2026-05-30**：播放器页内快捷键改为 `PLAYER_SHORTCUTS` 动作分发表，设置页“播放页内”说明复用 `PLAYER_SHORTCUT_SUMMARY`；`useKeyboard` 复用共享组合键解析，并支持稳定匹配单独 `+` 键。
 - **2026-05-29**：播放器卸载清理改为并行执行置顶恢复、副屏遮黑关闭和 `player.stop()`，通过 `Promise.allSettled` 统一等待；HTML5/HLS fallback 的本地销毁仍保持同步处理，减少关闭播放页时被单个桌面命令拖慢的概率。
@@ -173,6 +173,7 @@
 - **2026-05-29**：播放器设置菜单“统计信息”改为可用 Stats 浮层，展示时间、进度、速度、音量、缓存、网络、当前音轨/字幕和轨道数量，支持菜单开关与 `Esc` 关闭。
 - **2026-05-29**：设置页播放器面板新增 `Windows HDR` 按钮，Windows 平台可直接打开系统显示/HDR 相关设置，非 Windows 平台禁用。
 - **2026-05-31**：设置页新增“画质增强”能力面板，Windows HDR 保持系统入口，其余 RTX VSR、RTX TrueHDR、AMD FSR、RIFE 与 GLSL Shaders 以待接入状态展示，不提供尚无后端支撑的假开关。
+- **2026-05-31**：设置页新增“AI 字幕”能力面板，Whisper 本地转写、Whisper API、CUDA / Vulkan、AI 翻译和 DTW 时间戳均以待接入状态展示；播放器 Stats 的 Whisper 页同步改成能力状态，不再显示尚无后端支撑的“0s / 0 段”任务数。
 - **2026-05-29**：设置页新增“外部播放器”面板，持久化外部播放器路径和启动参数；播放器设置菜单新增“外部播放器”入口，Electron/Tauri 均可把当前媒体流、标题和当前位置交给系统默认或指定外部播放器打开。
 - **2026-05-29**：设置页新增“弹幕”面板，持久化弹幕透明度、速度和字号；播放器 `DanmakuOverlay` 改为读取设置 store 中的弹幕参数。
 - **2026-05-28**：设置页播放器分组新增“右上角网速”开关，默认关闭。
@@ -400,6 +401,8 @@ npm.cmd run electron:build
 本轮 Windows HDR 设置入口的行尾空白检查、`npm.cmd run build`、`npm.cmd run electron:build` 已通过。
 
 本轮画质增强能力面板已接入：设置页新增只读能力列表，Windows HDR 保持系统入口，RTX VSR、RTX TrueHDR、AMD FSR、RIFE 和 GLSL Shaders 显示待接入状态，不提供尚无后端支撑的开关。验证已覆盖 `npm.cmd run build`、行尾空白检查、in-app Browser 面板目检与 `npm.cmd run electron:build`。
+
+本轮 AI 字幕能力面板已接入：设置页新增只读能力列表，Whisper 本地转写、Whisper API、CUDA / Vulkan、AI 翻译和 DTW 时间戳显示待接入状态；播放器 Stats 的 Whisper 页改为“待接入 / 未配置 / 待检测”，不再展示尚无运行时支撑的任务队列数。验证已覆盖 `npm.cmd run build`、行尾空白检查、in-app Browser 1421 干净 dev server 面板目检与 `npm.cmd run electron:build`。
 
 本轮首启引导基础的 `node --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、行尾空白检查、`npm.cmd run build`、`npm.cmd run electron:build` 已通过。
 

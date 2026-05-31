@@ -26,6 +26,7 @@ type PanelId =
   | "network"
   | "player"
   | "enhancement"
+  | "aiSubtitles"
   | "externalPlayer"
   | "danmaku"
   | "shortcuts"
@@ -92,6 +93,10 @@ function panelFromQuery(value: unknown): PanelId {
       return category;
     case "enhancement":
       return "enhancement";
+    case "ai-subtitles":
+    case "aiSubtitles":
+    case "whisper":
+      return "aiSubtitles";
     case "external-player":
       return "externalPlayer";
     case "appearance":
@@ -373,7 +378,8 @@ const runtimeLabel = computed(() =>
 const activeAccountLabel = computed(() => auth.activeAccount?.username ?? "未登录");
 const isWindowsPlatform = computed(() => platformLabel.value.toLowerCase().includes("windows"));
 
-type EnhancementStatus = "available" | "disabled" | "planned";
+type CapabilityStatus = "available" | "disabled" | "planned";
+type EnhancementStatus = CapabilityStatus;
 
 type EnhancementCapability = {
   key: string;
@@ -384,7 +390,15 @@ type EnhancementCapability = {
   action?: "windows-hdr";
 };
 
-const enhancementStatusLabel: Record<EnhancementStatus, string> = {
+type AiSubtitleCapability = {
+  key: string;
+  label: string;
+  detail: string;
+  icon: string;
+  status: CapabilityStatus;
+};
+
+const enhancementStatusLabel: Record<CapabilityStatus, string> = {
   available: "可用",
   disabled: "禁用",
   planned: "待接入",
@@ -393,6 +407,7 @@ const enhancementStatusLabel: Record<EnhancementStatus, string> = {
 const enhancementSummary = computed(() =>
   isWindowsPlatform.value ? "HDR 系统入口" : "等待硬件路径",
 );
+const aiSubtitleSummary = computed(() => "待接入");
 
 const enhancementCapabilities = computed<EnhancementCapability[]>(() => {
   const mpvPath =
@@ -445,6 +460,44 @@ const enhancementCapabilities = computed<EnhancementCapability[]>(() => {
     },
   ];
 });
+
+const aiSubtitleCapabilities = computed<AiSubtitleCapability[]>(() => [
+  {
+    key: "whisper-local",
+    label: "Whisper 本地转写",
+    detail: "未接入模型目录、任务队列与音频切片",
+    icon: "lucide:mic-vocal",
+    status: "planned",
+  },
+  {
+    key: "whisper-api",
+    label: "Whisper API",
+    detail: "未接入 API Key、用量限制与失败重试",
+    icon: "lucide:cloud",
+    status: "planned",
+  },
+  {
+    key: "gpu-acceleration",
+    label: "CUDA / Vulkan",
+    detail: "未接入 GPU 与运行时能力检测",
+    icon: "lucide:cpu",
+    status: "planned",
+  },
+  {
+    key: "ai-translation",
+    label: "AI 翻译",
+    detail: "未接入本地或云端翻译 worker",
+    icon: "lucide:languages",
+    status: "planned",
+  },
+  {
+    key: "dtw-timestamps",
+    label: "DTW 时间戳",
+    detail: "未接入 token 时间戳对齐与有限预读",
+    icon: "lucide:timer",
+    status: "planned",
+  },
+]);
 
 const syncSummary = computed(() => {
   if (!settings.settings.traktSyncEnabled) return "未启用";
@@ -1020,6 +1073,27 @@ const danmakuSummary = computed(() => {
             >
               <Icon icon="lucide:external-link" width="14" />
             </button>
+          </li>
+        </ul>
+      </div>
+
+      <button class="row" @click="togglePanel('aiSubtitles')">
+        <span>AI 字幕</span>
+        <span class="value">{{ aiSubtitleSummary }}</span>
+      </button>
+      <div v-if="openPanel === 'aiSubtitles'" class="panel glass">
+        <ul class="cap-list">
+          <li v-for="cap in aiSubtitleCapabilities" :key="cap.key" class="cap-row">
+            <div class="cap-row__icon">
+              <Icon :icon="cap.icon" width="16" />
+            </div>
+            <div class="cap-row__main">
+              <strong>{{ cap.label }}</strong>
+              <span>{{ cap.detail }}</span>
+            </div>
+            <span class="cap-status" :class="`cap-status--${cap.status}`">
+              {{ enhancementStatusLabel[cap.status] }}
+            </span>
           </li>
         </ul>
       </div>
