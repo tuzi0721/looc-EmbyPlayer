@@ -144,17 +144,23 @@ function closePlayerPanels(except?: PlayerPanel) {
   }
 }
 
+function hasOpenPlayerPanel(): boolean {
+  return ["subtitle", "settings", "episode", "chapter", "danmaku", "source", "stats"].some((panel) =>
+    isPlayerPanelOpen(panel as PlayerPanel),
+  );
+}
+
 function togglePlayerPanel(panel: PlayerPanel) {
   const wasOpen = isPlayerPanelOpen(panel);
   closePlayerPanels(panel);
   setPlayerPanelOpen(panel, !wasOpen);
-  showControls.value = true;
+  bumpControls();
 }
 
 function openPlayerPanel(panel: PlayerPanel) {
   closePlayerPanels(panel);
   setPlayerPanelOpen(panel, true);
-  showControls.value = true;
+  bumpControls();
 }
 
 async function toggleDanmaku() {
@@ -1018,7 +1024,9 @@ function clearControlsHideTimer() {
 function bumpControls() {
   showControls.value = true;
   clearControlsHideTimer();
-  hideTimer = window.setTimeout(() => (showControls.value = false), 3200);
+  hideTimer = window.setTimeout(() => {
+    if (!hasOpenPlayerPanel()) showControls.value = false;
+  }, 3200);
 }
 
 async function onScrubInput(e: Event) {
@@ -1996,7 +2004,7 @@ onBeforeUnmount(async () => {
               v-if="hasPlaybackSwitchOptions"
               class="menu-wrap"
               data-control="source"
-              data-hide-below="medium"
+              :data-hide-below="sourceMenuOpen ? undefined : 'medium'"
             >
               <button
                 class="iconbtn"
