@@ -203,8 +203,11 @@ onUnmounted(() => {
 <style scoped>
 .hero {
   position: relative;
-  height: clamp(420px, 58vh, 620px);
-  min-height: 360px;
+  width: calc(100% - var(--content-pad) * 2);
+  max-width: 1280px;
+  margin: 0 auto;
+  aspect-ratio: 16 / 6.2;
+  min-height: 240px;
   border-radius: 0;
   overflow: hidden;
   flex-shrink: 0;
@@ -212,8 +215,8 @@ onUnmounted(() => {
   outline: none;
 }
 .hero--cinema {
-  height: clamp(520px, calc(100dvh - 72px), 900px);
-  min-height: min(520px, calc(100dvh - 72px));
+  aspect-ratio: 16 / 6.2;
+  min-height: 240px;
 }
 .hero__bg {
   position: absolute;
@@ -234,11 +237,11 @@ onUnmounted(() => {
   background:
     linear-gradient(
       90deg,
-      rgba(0, 0, 0, 0.9) 0%,
-      rgba(0, 0, 0, 0.48) 48%,
-      rgba(0, 0, 0, 0.16) 100%
+      rgba(0, 0, 0, 0.94) 0%,
+      rgba(0, 0, 0, 0.56) 48%,
+      rgba(0, 0, 0, 0.22) 100%
     ),
-    linear-gradient(0deg, rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0.05) 48%);
+    linear-gradient(0deg, rgba(0, 0, 0, 0.82) 0%, rgba(0, 0, 0, 0.12) 48%);
 }
 .hero__nav {
   position: absolute;
@@ -267,7 +270,7 @@ onUnmounted(() => {
 }
 .hero--cinema .hero__content {
   left: clamp(36px, 7vw, 96px);
-  bottom: clamp(72px, 10vh, 132px);
+  bottom: clamp(38px, 7vh, 92px);
   max-width: min(840px, 72%);
 }
 .hero__title {
@@ -275,6 +278,7 @@ onUnmounted(() => {
   font-size: 38px;
   font-weight: 700;
   color: white;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.55);
   letter-spacing: 0;
   line-height: 1.08;
 }
@@ -286,7 +290,7 @@ onUnmounted(() => {
   clip-path: inset(50%);
 }
 .hero--cinema .hero__title {
-  font-size: 74px;
+  font-size: clamp(42px, 5.2vw, 74px);
   max-width: 12em;
 }
 .hero__logo {
@@ -305,7 +309,7 @@ onUnmounted(() => {
 }
 .hero--cinema .hero__logo {
   max-width: min(640px, 62vw);
-  max-height: 184px;
+  max-height: clamp(100px, 16vh, 184px);
   margin-bottom: 16px;
 }
 .hero__episode {
@@ -328,6 +332,7 @@ onUnmounted(() => {
   font-size: 14px;
   line-height: 1.58;
   color: rgba(255, 255, 255, 0.68);
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.5);
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
@@ -335,7 +340,7 @@ onUnmounted(() => {
 }
 .hero--cinema .hero__desc {
   max-width: 68ch;
-  font-size: 16px;
+  font-size: clamp(13px, 1.2vw, 16px);
   -webkit-line-clamp: 4;
 }
 .hero__dots {
@@ -363,17 +368,18 @@ onUnmounted(() => {
 }
 @media (max-width: 760px) {
   .hero {
-    height: clamp(360px, 62vh, 560px);
-    min-height: 340px;
+    width: calc(100% - 24px);
+    aspect-ratio: 16 / 6.6;
+    min-height: 210px;
   }
   .hero--cinema {
-    height: min(78dvh, 640px);
-    min-height: min(460px, calc(100dvh - 92px));
+    aspect-ratio: 16 / 6.6;
+    min-height: 210px;
   }
   .hero--cinema .hero__content {
     left: 18px;
     right: 18px;
-    bottom: 44px;
+    bottom: 32px;
     max-width: none;
   }
   .hero--cinema .hero__title {
@@ -388,21 +394,68 @@ onUnmounted(() => {
   }
 }
 @media (max-height: 760px) and (min-width: 761px) {
+  .hero {
+    aspect-ratio: 16 / 5.85;
+  }
   .hero--cinema {
-    height: clamp(420px, calc(100dvh - 72px), 620px);
-    min-height: min(420px, calc(100dvh - 72px));
+    aspect-ratio: 16 / 5.85;
+    min-height: 240px;
   }
   .hero--cinema .hero__content {
-    bottom: 52px;
+    bottom: 34px;
+  }
+  .hero--cinema .hero__shade {
+    background:
+      linear-gradient(
+        90deg,
+        rgba(0, 0, 0, 0.96) 0%,
+        rgba(0, 0, 0, 0.7) 52%,
+        rgba(0, 0, 0, 0.35) 100%
+      ),
+      linear-gradient(0deg, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.2) 50%);
   }
   .hero--cinema .hero__title {
-    font-size: 52px;
+    font-size: clamp(34px, 4.5vw, 52px);
   }
   .hero--cinema .hero__logo {
-    max-height: 132px;
+    max-height: 112px;
   }
   .hero--cinema .hero__desc {
-    -webkit-line-clamp: 3;
+    -webkit-line-clamp: 2;
+  }
+}
+@media (max-height: 700px) and (min-width: 761px) and (max-width: 1100px) {
+  .hero {
+    aspect-ratio: 16 / 5.2;
+    min-height: 200px;
+  }
+  .hero--cinema {
+    aspect-ratio: 16 / 5.2;
+    min-height: 200px;
+  }
+  .hero--cinema .hero__content {
+    left: clamp(28px, 5vw, 60px);
+    bottom: 26px;
+    max-width: min(620px, 76%);
+  }
+  .hero--cinema .hero__logo {
+    max-height: 74px;
+    margin-bottom: 8px;
+  }
+  .hero--cinema .hero__title {
+    font-size: clamp(30px, 4.1vw, 42px);
+  }
+  .hero__meta {
+    margin-bottom: 6px;
+  }
+  .hero--cinema .hero__desc {
+    max-width: 58ch;
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-line-clamp: 2;
+  }
+  .hero__dots {
+    bottom: 9px;
   }
 }
 @media (max-width: 420px) {

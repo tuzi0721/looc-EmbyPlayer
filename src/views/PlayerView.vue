@@ -40,7 +40,7 @@ const settings = useSettingsStore();
 
 const embedVideo =
   typeof window !== "undefined" &&
-  Boolean(window.hillsLite || window.__TAURI_INTERNALS__ || window.__TAURI__);
+  Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
 const useHtmlVideo = !embedVideo;
 
 const errorText = ref<string | null>(null);
@@ -1975,6 +1975,8 @@ async function startCurrentPlayback() {
   const localId = (route.query.local as string | undefined) ?? null;
   const recordWhilePlaying = route.query.record === "1";
   const stealthWhenRecording = route.query.stealth !== "0";
+  const lineId = firstQueryString(route.query.lineId) || null;
+  const mediaSourceId = firstQueryString(route.query.mediaSourceId) || null;
 
   if (filePath) {
     resetDanmakuState();
@@ -2001,7 +2003,7 @@ async function startCurrentPlayback() {
     if (!lib.itemCache[props.id]) {
       await lib.loadItem(props.id);
     }
-    await startHtmlPlayback(props.id, start);
+    await startHtmlPlayback(props.id, start, { lineId, mediaSourceId });
   } else {
     if (!lib.itemCache[props.id]) {
       await lib.loadItem(props.id);
@@ -2010,6 +2012,8 @@ async function startCurrentPlayback() {
       itemId: props.id,
       startMs: start,
       preferDirect: true,
+      lineId,
+      mediaSourceId,
       recordWhilePlaying,
       stealthWhenRecording,
     });

@@ -1,12 +1,23 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（添加服务器 UI smoke 覆盖）
+> 更新时间：2026-06-02（视觉与播放回归通过）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-0559-add-server-ui-smoke.md`](./CHANGE_LOG/2026-06-02-0559-add-server-ui-smoke.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-0740-visual-regression-pass.md`](./CHANGE_LOG/2026-06-02-0740-visual-regression-pass.md)
 
 ---
+
+## 0. 最新视觉修正阶段
+
+- 详情页 `/item/:id` 现在使用 fullscreen app shell，隐藏主侧栏和顶栏并铺满窗口，退出依靠详情页自身返回按钮；这是为了匹配用户参考图中“剧集页打满”的视觉目标。
+- 首页/详情 smoke 现在把详情页壳层也纳入断言：详情页仍显示主侧栏/顶栏，或 hero 未从窗口原点铺满，都会失败。
+- 2026-06-02 07:40 回归已通过：`node --check scripts\smoke-electron-home-hero.mjs`、`npm.cmd run build`、`node scripts\smoke-electron-home-hero.mjs`、`node scripts\smoke-electron-embedded-local.mjs` 和保留截图版播放 smoke 均通过；已人工视检首页、紧凑首页、详情页和播放页截图。
+- Electron 播放页为避免 Windows `--wid` 原生嵌入窗口黑屏，当前默认走 HTML video 的应用内直连播放路径；本机解码/禁止转码契约仍由 PlaybackSource 链路保证，Tauri 仍保留原生 mpv 嵌入判断。新版播放 smoke 要求可见截图像素通过，不能再用 mpv 内部截图替代用户实际可见画面。
+- 首页巨幕已从 viewport 高度驱动改为宽度驱动的固定横幅比例，目标是在小窗口下让继续观看与媒体库进入首屏视野，而不是用巨幕挤掉下方内容。
+- 详情页首屏已改为全高沉浸背景：左下保留播放/收藏/下载/标题/元信息，右下展示版本、音频、字幕和本机解码能力信息。
+- 详情页播放入口会携带当前媒体源到播放器，播放器启动时读取 `lineId` / `mediaSourceId`，避免首次播放丢失用户选择。
+- 新一轮视觉 smoke 已升级断言 compact 首页两排可见、详情页 hero 全高和右下控制面板；已通过 `node scripts\smoke-electron-home-hero.mjs`，并人工检查 `home-compact.png`、`home-hero.png`、`detail-hero.png`。
 
 ## 1. 概览
 
@@ -63,12 +74,12 @@
 
 ## 3. 播放核心
 
-- 播放窗口为应用内嵌 mpv；Electron 通过 `electron_mpv_host.exe` 与随包 `mpv.exe` 承载，Tauri 路径继续保留。
+- 播放窗口仍在应用内；Electron 当前默认使用 HTML video 渲染直连流以避开 Windows `--wid` 黑屏，Tauri 路径继续保留原生 mpv 嵌入。
 - 默认只使用应用随包 mpv；不扫描系统 PATH、不读取旧 vendor mpv、不提供用户选择 mpv 路径。
 - 全屏阶段视频舞台铺满 viewport，控制层作为覆盖层，不再挤压视频区域。
 - 后退/前进使用运行时相对 seek；后退、全屏、窗口缩放、控制栏可见性和退出清理已进入 Electron smoke。
-- Electron 内嵌 mpv 的 popup 宿主在控制条显示时会避开顶栏/底栏，且宿主窗口鼠标命中测试透明，避免原生视频窗口盖住或吞掉进度条、后退、播放、全屏等 Web 控制件；控制条显示/隐藏、鼠标唤醒、全屏和窗口缩放后都会重新同步 native rect。
-- Electron 内嵌播放 smoke 已覆盖后退、长按倍速、真全屏、自适应、mpv 截图像素、后端 embed state 和关闭清理；退出后应无 `mpv.exe`、`electron_mpv_host.exe` 或 `Hills Lite` 残留播放进程。
+- Electron 可见播放 smoke 已覆盖 HTML video 启动、直连/非转码 PlaybackInfo 契约、后退、长按倍速、真全屏、自适应、可见截图像素和关闭清理；截图必须有真实画面才允许通过。
+- 原生 `electron_mpv_host.exe` / 随包 `mpv.exe` 仍保留为 Electron 后端能力，但不再作为 Electron 播放页默认渲染路径，避免 mpv 内部有帧而用户窗口纯黑的误判。
 - Electron 默认系统菜单已清空；开发工具只在显式环境变量开启时打开。
 
 ---

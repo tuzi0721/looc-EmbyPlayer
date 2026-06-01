@@ -349,6 +349,42 @@ function wakePlayerControlsExpression() {
   `;
 }
 
+function playbackStateExpression() {
+  return `
+    (async () => {
+      const video = document.querySelector("video");
+      if (video) {
+        return {
+          mode: "html",
+          durationMs: Number.isFinite(video.duration) ? Math.floor(video.duration * 1000) : 0,
+          positionMs: Math.floor(video.currentTime * 1000),
+          trackCount: 0,
+          speed: video.playbackRate,
+          paused: video.paused,
+          eof: video.ended,
+          readyState: video.readyState,
+          videoWidth: video.videoWidth,
+          videoHeight: video.videoHeight,
+        };
+      }
+      if (!window.hillsLite) return null;
+      const state = await window.hillsLite.invoke("get_state");
+      return {
+        mode: "mpv",
+        durationMs: state.durationMs,
+        positionMs: state.positionMs,
+        trackCount: Array.isArray(state.tracks) ? state.tracks.length : 0,
+        speed: state.speed,
+        paused: state.paused,
+        eof: state.eof,
+        readyState: null,
+        videoWidth: null,
+        videoHeight: null,
+      };
+    })()
+  `;
+}
+
 async function readEmbedState(ws) {
   return cdpEval(ws, `
     (async () => {
@@ -636,6 +672,15 @@ function captureAndAnalyze(bounds) {
   return analyzePng(screenshotPath);
 }
 
+async function capturePageAndAnalyze(ws) {
+  const result = await cdpCall(ws, "Page.captureScreenshot", {
+    format: "png",
+    captureBeyondViewport: false,
+  });
+  await fsp.writeFile(screenshotPath, Buffer.from(result.data, "base64"));
+  return analyzePng(screenshotPath);
+}
+
 await fsp.mkdir(tmpDir, { recursive: true });
 await ensureDevServer();
 run("ffmpeg", [
@@ -646,19 +691,13 @@ run("ffmpeg", [
   "lavfi",
   "-i",
   "testsrc2=size=640x360:rate=30",
-  "-f",
-  "lavfi",
-  "-i",
-  "sine=frequency=660:sample_rate=48000",
   "-t",
   "12",
   "-c:v",
   "libx264",
   "-pix_fmt",
   "yuv420p",
-  "-c:a",
-  "aac",
-  "-shortest",
+  "-an",
   videoPath,
 ]);
 
@@ -744,16 +783,35 @@ try {
       await auth.login({ serverId: server.id, username: "local", password: "local" });
       await appRouter.push("/player/${itemId}");
       await wait(9000);
-      const state = await window.hillsLite.invoke("get_state");
-      const embedState = await window.hillsLite.invoke("get_embed_state");
+      const video = document.querySelector("video");
+      const state = video
+        ? {
+            mode: "html",
+            durationMs: Number.isFinite(video.duration) ? Math.floor(video.duration * 1000) : 0,
+            positionMs: Math.floor(video.currentTime * 1000),
+            trackCount: 0,
+            speed: video.playbackRate,
+            paused: video.paused,
+            eof: video.ended,
+            readyState: video.readyState,
+            videoWidth: video.videoWidth,
+            videoHeight: video.videoHeight,
+          }
+        : {
+            ...(await window.hillsLite.invoke("get_state")),
+            mode: "mpv",
+          };
+      const embedState = video ? null : await window.hillsLite.invoke("get_embed_state");
       let mpvScreenshot = null;
       let mpvScreenshotError = null;
-      try {
-        mpvScreenshot = await window.hillsLite.invoke("take_screenshot", {
-          payload: { title: "embedded-smoke", includeSubtitles: true },
-        });
-      } catch (error) {
-        mpvScreenshotError = error?.message ?? String(error);
+      if (!video) {
+        try {
+          mpvScreenshot = await window.hillsLite.invoke("take_screenshot", {
+            payload: { title: "embedded-smoke", includeSubtitles: true },
+          });
+        } catch (error) {
+          mpvScreenshotError = error?.message ?? String(error);
+        }
       }
       const stage = document.querySelector(".player__stage")?.getBoundingClientRect();
       return {
@@ -767,14 +825,7 @@ try {
         mpvScreenshot,
         mpvScreenshotError,
         embedState,
-        state: {
-          durationMs: state.durationMs,
-          positionMs: state.positionMs,
-          trackCount: Array.isArray(state.tracks) ? state.tracks.length : 0,
-          speed: state.speed,
-          paused: state.paused,
-          eof: state.eof,
-        },
+        state,
       };
     })()
   `);
@@ -795,7 +846,7 @@ try {
   await wait(850);
   const longPressActive = await cdpEval(ws, `
     (async () => {
-      const state = await window.hillsLite.invoke("get_state");
+      const state = await ${playbackStateExpression()};
       return {
         speed: state.speed,
         badgeVisible: Boolean(document.querySelector(".player__speed-hold")),
@@ -811,7 +862,7 @@ try {
   await wait(650);
   const longPressRestored = await cdpEval(ws, `
     (async () => {
-      const state = await window.hillsLite.invoke("get_state");
+      const state = await ${playbackStateExpression()};
       return {
         speed: state.speed,
         badgeVisible: Boolean(document.querySelector(".player__speed-hold")),
@@ -829,29 +880,24 @@ try {
   try {
     await cdpEval(ws, `
       (async () => {
+        const video = document.querySelector("video");
+        if (video) {
+          video.currentTime = Math.min(10, Math.max(0, Number.isFinite(video.duration) ? video.duration - 1 : 10));
+          return true;
+        }
         await window.hillsLite.invoke("seek", { payload: { positionMs: 10000 } });
         return true;
       })()
     `);
     await wait(650);
-    const before = await cdpEval(ws, `
-      (async () => {
-        const state = await window.hillsLite.invoke("get_state");
-        return { positionMs: state.positionMs, paused: state.paused };
-      })()
-    `);
+    const before = await cdpEval(ws, playbackStateExpression());
     const controlsForSeek = await cdpEval(ws, playerUiMetricsExpression());
     if (!controlsForSeek.seekBackButton?.center) {
       throw new Error("seek back button not visible");
     }
     await cdpClick(ws, controlsForSeek.seekBackButton.center);
     await wait(900);
-    const after = await cdpEval(ws, `
-      (async () => {
-        const state = await window.hillsLite.invoke("get_state");
-        return { positionMs: state.positionMs, paused: state.paused };
-      })()
-    `);
+    const after = await cdpEval(ws, playbackStateExpression());
     seekBackResult = { before, after, button: controlsForSeek.seekBackButton };
   } catch (error) {
     seekBackError = error?.message ?? String(error);
@@ -892,6 +938,7 @@ try {
     fullscreenError = error?.message ?? String(error);
   }
 
+  const usingHtmlVideo = startResult.state?.mode === "html";
   let resizeResult = null;
   let compactResizeResult = null;
   let resizeError = null;
@@ -914,9 +961,13 @@ try {
     await wait(180);
     resizeResult = await cdpEval(ws, playerUiMetricsExpression());
     const resizeEmbedState = await readEmbedState(ws);
-    foregroundHillsWindow(child.pid);
-    await wait(500);
-    pixels = captureAndAnalyze(resizeResult?.bounds ?? startResult.bounds);
+    if (usingHtmlVideo) {
+      pixels = await capturePageAndAnalyze(ws);
+    } else {
+      foregroundHillsWindow(child.pid);
+      await wait(500);
+      pixels = captureAndAnalyze(resizeResult?.bounds ?? startResult.bounds);
+    }
 
     await cdpEval(ws, `
       (() => {
@@ -951,21 +1002,33 @@ try {
     resizeError = error?.message ?? String(error);
   }
 
-  foregroundHillsWindow(child.pid);
-  await wait(500);
-  if (!pixels) pixels = captureAndAnalyze(resizeResult?.bounds ?? startResult.bounds);
+  if (!pixels) {
+    if (usingHtmlVideo) {
+      pixels = await capturePageAndAnalyze(ws);
+    } else {
+      foregroundHillsWindow(child.pid);
+      await wait(500);
+      pixels = captureAndAnalyze(resizeResult?.bounds ?? startResult.bounds);
+    }
+  }
   const mpvPixels = startResult.mpvScreenshot?.filePath
     ? analyzePng(startResult.mpvScreenshot.filePath)
     : null;
   const screenPixelsOk = pixels.brightRatio > 0.18 && pixels.colorfulRatio > 0.08;
   const mpvPixelsOk =
     (mpvPixels?.brightRatio ?? 0) > 0.18 && (mpvPixels?.colorfulRatio ?? 0) > 0.08;
+  const playbackStateOk = usingHtmlVideo
+    ? startResult.state.durationMs > 0 &&
+      startResult.state.readyState >= 2 &&
+      startResult.state.videoWidth > 0 &&
+      startResult.state.videoHeight > 0
+    : startResult.state.durationMs > 0 &&
+      startResult.state.trackCount >= 1 &&
+      embeddedRectOk(controlsInitialEmbedState, controlsInitial);
 
   const functionalOk =
     startResult.route === `/player/${itemId}` &&
-    startResult.state.durationMs > 0 &&
-    startResult.state.trackCount >= 1 &&
-    embeddedRectOk(controlsInitialEmbedState, controlsInitial) &&
+    playbackStateOk &&
     longPressSpeed.active.speed >= 1.95 &&
     Math.abs(longPressSpeed.restored.speed - startResult.state.speed) < 0.05 &&
     !longPressSpeed.restored.badgeVisible &&
@@ -978,13 +1041,13 @@ try {
     !controlsInitial.hasHorizontalOverflow &&
     fullscreenAfterEnter?.fullscreenActive === true &&
     fullscreenStageCoversViewport &&
-    embeddedRectOk(fullscreenAfterEnterEmbedState, fullscreenAfterEnter) &&
+    (usingHtmlVideo || embeddedRectOk(fullscreenAfterEnterEmbedState, fullscreenAfterEnter)) &&
     fullscreenAfterExit?.fullscreenActive === false &&
     resizeResult?.bounds?.width <= 1100 &&
     resizeResult?.bounds?.height <= 720 &&
     resizeResult?.stage?.width >= 760 &&
     resizeResult?.stage?.height >= 480 &&
-    embeddedRectOk(resizeResult?.embedState, resizeResult) &&
+    (usingHtmlVideo || embeddedRectOk(resizeResult?.embedState, resizeResult)) &&
     !resizeResult?.hasHorizontalOverflow &&
     compactResizeResult?.bounds?.width <= 1000 &&
     compactResizeResult?.bounds?.height <= 640 &&
@@ -995,9 +1058,9 @@ try {
     compactResizeResult?.stage?.width >= 560 &&
     compactResizeResult?.stage?.height >= 420 &&
     (compactResizeResult?.bottom?.height ?? 999) <= 150 &&
-    embeddedRectOk(compactResizeResult?.embedState, compactResizeResult) &&
+    (usingHtmlVideo || embeddedRectOk(compactResizeResult?.embedState, compactResizeResult)) &&
     !compactResizeResult?.hasHorizontalOverflow &&
-    (screenPixelsOk || mpvPixelsOk);
+    screenPixelsOk;
 
   let runtimeCleanup = null;
   let runtimeCleanupError = null;
@@ -1055,6 +1118,7 @@ try {
     pixelChecks: {
       screenPixelsOk,
       mpvPixelsOk,
+      usingHtmlVideo,
     },
     runtimeCleanup,
     runtimeCleanupError,

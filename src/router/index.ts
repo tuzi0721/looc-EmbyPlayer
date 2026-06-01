@@ -71,7 +71,7 @@ const routes: RouteRecordRaw[] = [
     name: "item-detail",
     component: () => import("@/views/DetailView.vue"),
     props: true,
-    meta: { transition: "slide-up" },
+    meta: { transition: "fade", fullscreen: true },
   },
   {
     path: "/studio/:id",

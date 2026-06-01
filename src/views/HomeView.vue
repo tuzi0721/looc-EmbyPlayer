@@ -309,6 +309,40 @@ function gotoAddServer() {
   font-weight: 500;
 }
 
+@media (max-height: 700px) and (max-width: 1100px) {
+  .content__pad {
+    padding-bottom: 6px;
+  }
+  .row-section {
+    margin-bottom: 2px;
+  }
+  .row-head {
+    margin-bottom: 6px;
+  }
+  .row-head h2 {
+    font-size: 16px;
+    line-height: 1.1;
+  }
+  .hscroll {
+    gap: 10px;
+    padding-bottom: 2px;
+  }
+  .resume-card {
+    flex-basis: 150px;
+  }
+  .resume-card__title,
+  .resume-card__sub {
+    display: none;
+  }
+  .lib-thumb {
+    flex-basis: 78px;
+  }
+  .lib-thumb__name {
+    margin-top: 4px;
+    font-size: 11px;
+  }
+}
+
 .empty-state {
   flex: 1;
   display: flex;

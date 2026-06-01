@@ -12,6 +12,8 @@ const remotePort = process.env.HILLS_SMOKE_CDP_PORT
 const tmpDir = path.join(os.tmpdir(), `hills-lite-home-hero-${Date.now()}`);
 const userDataDir = path.join(tmpDir, "user-data");
 const screenshotPath = path.join(tmpDir, "home-hero.png");
+const compactScreenshotPath = path.join(tmpDir, "home-compact.png");
+const detailScreenshotPath = path.join(tmpDir, "detail-hero.png");
 
 const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAkCAYAAAA5DDySAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAD1SURBVGhD7dKxDcMwDETRjJg642SwDJHauzhwYYAQviCRZiwKYvEaFuTpoMfzve0rywJouJIsgIYryQJo6OX7+rih/R7cC6Dw3uiulUsBFPIulEfjUgEUaBTK18NcAIUYjXK2qAugw9FQ7hpVAXQsKspPugugI9HRO0pZAA1LtHwW9B4pC6BhiRbPgt4jNQugpTOhN0n5A2hYosWzoPdIWQANCS2Pjt5RygJoWENHoqL8RFXAgY5FQ7lr1AWc6PBolLPFXMCBQoxC+XpcKuBEge5CeTRcCpAopDe6a+VegEThrWi/h78WMIMsgIYryQJouI5t/wGkpvo5amdmyAAAAABJRU5ErkJggg==",
@@ -73,6 +75,37 @@ const heroMovie = {
   RunTimeTicks: 7_200_000_000,
   ImageTags: { Primary: "primary-tag", Logo: "logo-tag" },
   BackdropImageTags: ["backdrop-tag"],
+  MediaSources: [
+    {
+      Id: "source-main",
+      Name: "WEB-DL Main",
+      Container: "mkv",
+      Size: 1_900_000_000,
+      Bitrate: 2_400_000,
+      SupportsDirectPlay: true,
+      SupportsDirectStream: true,
+      SupportsTranscoding: false,
+      MediaStreams: [
+        { Index: 0, Type: "Video", Codec: "h264", Width: 1920, Height: 1080, BitRate: 2_000_000 },
+        { Index: 1, Type: "Audio", Codec: "aac", Language: "jpn", Channels: 2, IsDefault: true },
+        { Index: 2, Type: "Subtitle", Codec: "subrip", Language: "chi", DisplayTitle: "Chinese Simplified" },
+      ],
+    },
+    {
+      Id: "source-alt",
+      Name: "BluRay Alt",
+      Container: "mp4",
+      Size: 2_400_000_000,
+      Bitrate: 3_100_000,
+      SupportsDirectPlay: true,
+      SupportsDirectStream: false,
+      SupportsTranscoding: false,
+      MediaStreams: [
+        { Index: 0, Type: "Video", Codec: "hevc", Width: 1920, Height: 1080, BitRate: 2_700_000 },
+        { Index: 1, Type: "Audio", Codec: "aac", Language: "jpn", Channels: 2, IsDefault: true },
+      ],
+    },
+  ],
   UserData: {
     PlaybackPositionTicks: 0,
     PlayCount: 1,
@@ -151,6 +184,14 @@ function createFakeEmbyServer({
 
     if (req.method === "GET" && pathname === `/Users/${userId}/Items/Resume`) {
       json(res, { Items: resumeItems, TotalRecordCount: resumeItems.length });
+      return;
+    }
+
+    const detailMatch = pathname.match(new RegExp(`^/Users/${userId}/Items/([^/]+)$`));
+    if (req.method === "GET" && detailMatch) {
+      const targetId = detailMatch[1];
+      const mediaItem = [item, ...resumeItems].find((candidate) => candidate.Id === targetId) ?? item;
+      json(res, mediaItem);
       return;
     }
 
@@ -360,8 +401,10 @@ try {
         hasKindSelect: Boolean(dialog?.querySelector("select")) || dialogText.includes("类型"),
         hasServerNameInput: placeholders.some((placeholder) => /服务器.*名|名称/.test(placeholder) && !placeholder.includes("线路")),
       };
-      dialog?.querySelector('button[aria-label="关闭"]')?.click();
-      await wait(160);
+      dialog?.querySelector(".modal__head .iconbtn, .iconbtn")?.click();
+      for (let i = 0; i < 10 && document.querySelector(".modal-mask, .modal"); i += 1) {
+        await wait(80);
+      }
       const existingServer = await serverStore.addServer({
         name: "Existing Smoke Server",
         kind: "emby",
@@ -429,6 +472,7 @@ try {
         route: appRouter.currentRoute.value.fullPath,
         viewport: { width: window.innerWidth, height: window.innerHeight },
         hero: heroRect ? { x: heroRect.x, y: heroRect.y, width: heroRect.width, height: heroRect.height, bottom: heroRect.bottom } : null,
+        heroAspect: heroRect ? heroRect.width / heroRect.height : null,
         poster: posterRect ? { width: posterRect.width, height: posterRect.height } : null,
         nextSectionTop: nextRect?.top ?? null,
         title: title?.textContent ?? "",
@@ -515,17 +559,54 @@ try {
     })()
   `);
 
-  const heroClick = await cdpEval(ws, `
+  const detailProbe = await cdpEval(ws, `
     (async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
       await appRouter.push("/home");
       await wait(900);
       document.querySelector(".hero")?.click();
-      await wait(500);
-      return appRouter.currentRoute.value.fullPath;
+      await wait(1200);
+      const hero = document.querySelector(".detail .hero");
+      const panel = document.querySelector(".hero__playback-panel");
+      const mediaSelect = document.querySelector("#hero-media-source");
+      const audioSelect = document.querySelector("#hero-audio-source");
+      const subtitleSelect = document.querySelector("#hero-subtitle-source");
+      const heroRect = hero?.getBoundingClientRect();
+      const panelRect = panel?.getBoundingClientRect();
+      const detailRoute = appRouter.currentRoute.value.fullPath;
+      if (mediaSelect && mediaSelect.options.length > 1) {
+        mediaSelect.value = mediaSelect.options[1].value;
+        mediaSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        await wait(100);
+      }
+      document.querySelector(".hero__play")?.click();
+      await wait(200);
+      const playerRoute = appRouter.currentRoute.value.fullPath;
+      await appRouter.push("/item/hero-movie");
+      await wait(300);
+      return {
+        route: detailRoute,
+        playerRoute,
+        hero: heroRect
+          ? { x: heroRect.x, y: heroRect.y, width: heroRect.width, height: heroRect.height, bottom: heroRect.bottom }
+          : null,
+        panel: panelRect
+          ? { width: panelRect.width, height: panelRect.height, bottom: panelRect.bottom }
+          : null,
+        title: document.querySelector(".hero__title")?.textContent ?? "",
+        appSidebarVisible: Boolean(document.querySelector(".app-sidebar")),
+        topbarVisible: Boolean(document.querySelector(".topbar")),
+        mediaSelectOptions: mediaSelect?.options.length ?? 0,
+        audioSelectOptions: audioSelect?.options.length ?? 0,
+        subtitleSelectOptions: subtitleSelect?.options.length ?? 0,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+      };
     })()
   `);
+
+  const detailScreenshot = await cdpCall(ws, "Page.captureScreenshot", { format: "png" });
+  await fsp.writeFile(detailScreenshotPath, Buffer.from(detailScreenshot.data, "base64"));
 
   const multiServerSearch = await cdpEval(ws, `
     (async () => {
@@ -546,6 +627,15 @@ try {
       const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
       const { useLibraryStore } = await import("/src/stores/library.ts");
       const lib = useLibraryStore();
+      const rect = (node) => {
+        const r = node?.getBoundingClientRect();
+        return r ? { top: r.top, bottom: r.bottom, width: r.width, height: r.height } : null;
+      };
+      const visible = (r) => (r ? Math.max(0, Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0)) : 0);
+      const sectionByTitle = (text) =>
+        Array.from(document.querySelectorAll(".row-section")).find((section) =>
+          section.querySelector("h2")?.textContent?.trim().includes(text),
+        );
       lib.searchResults = [];
       await appRouter.push("/home");
       window.moveTo(80, 80);
@@ -554,23 +644,39 @@ try {
         if (lib.heroItems.length === 0) await lib.refreshHome();
         await wait(200);
       }
+      await wait(800);
       const hero = document.querySelector(".hero.hero--cinema");
-      const nextSection = document.querySelector(".row-section");
+      const resumeSection = sectionByTitle("继续观看");
+      const librarySection = sectionByTitle("媒体库");
+      const resumeCard = resumeSection?.querySelector(".resume-card");
+      const libraryCard = librarySection?.querySelector(".lib-thumb");
       const title = document.querySelector(".hero__title");
-      const heroRect = hero?.getBoundingClientRect();
-      const nextRect = nextSection?.getBoundingClientRect();
+      const heroRect = rect(hero);
+      const resumeRect = rect(resumeSection);
+      const libraryRect = rect(librarySection);
+      const resumeCardRect = rect(resumeCard);
+      const libraryCardRect = rect(libraryCard);
       return {
         viewport: { width: window.innerWidth, height: window.innerHeight },
-        hero: heroRect
-          ? { y: heroRect.y, width: heroRect.width, height: heroRect.height, bottom: heroRect.bottom }
-          : null,
-        nextSectionTop: nextRect?.top ?? null,
+        hero: heroRect,
+        heroAspect: heroRect ? heroRect.width / heroRect.height : null,
+        resumeSection: resumeRect,
+        librarySection: libraryRect,
+        resumeCard: resumeCardRect,
+        libraryCard: libraryCardRect,
+        resumeVisible: visible(resumeRect),
+        libraryVisible: visible(libraryRect),
+        resumeCardVisible: visible(resumeCardRect),
+        libraryCardVisible: visible(libraryCardRect),
         titleFontSize: title ? Number.parseFloat(getComputedStyle(title).fontSize) : null,
         hasHorizontalOverflow:
           document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
       };
     })()
   `);
+
+  const compactScreenshot = await cdpCall(ws, "Page.captureScreenshot", { format: "png" });
+  await fsp.writeFile(compactScreenshotPath, Buffer.from(compactScreenshot.data, "base64"));
 
   const failures = [];
   if (result.route !== "/home") failures.push(`route ${result.route}`);
@@ -628,13 +734,33 @@ try {
     }
     if (sidebarCollapse.expandedWidth < 180) failures.push(`sidebar did not expand: ${JSON.stringify(sidebarCollapse)}`);
   }
-  if (result.hero && result.hero.height < result.viewport.height * 0.72) failures.push("hero too short");
-  if (result.hero && result.hero.height > result.viewport.height + 4) failures.push("hero taller than viewport");
+  if (result.heroAspect != null && (result.heroAspect < 2.35 || result.heroAspect > 2.85)) {
+    failures.push(`home hero aspect drifted: ${JSON.stringify(result.hero)}`);
+  }
+  if (result.hero && result.hero.height > result.viewport.height * 0.72) failures.push("hero consumes too much first viewport");
   if (result.nextSectionTop == null || result.nextSectionTop > result.viewport.height + 2) {
     failures.push("next section is not hinted in first viewport");
   }
   if (result.posterExists) failures.push("cinema hero still renders the removed side poster");
-  if (!heroClick.startsWith("/item/hero-movie")) failures.push(`hero click did not open item detail: ${heroClick}`);
+  if (!detailProbe.route.startsWith("/item/hero-movie")) failures.push(`hero click did not open item detail: ${detailProbe.route}`);
+  if (!detailProbe.hero || detailProbe.hero.height < detailProbe.viewport.height * 0.9) {
+    failures.push(`detail hero is not full viewport: ${JSON.stringify(detailProbe)}`);
+  }
+  if (detailProbe.appSidebarVisible || detailProbe.topbarVisible) {
+    failures.push(`detail route did not enter fullscreen shell: ${JSON.stringify(detailProbe)}`);
+  }
+  if (detailProbe.hero && (Math.abs(detailProbe.hero.x) > 2 || Math.abs(detailProbe.hero.y) > 2)) {
+    failures.push(`detail hero does not fill from window origin: ${JSON.stringify(detailProbe)}`);
+  }
+  if (!detailProbe.panel || detailProbe.panel.width < 280) {
+    failures.push(`detail playback panel missing or too small: ${JSON.stringify(detailProbe)}`);
+  }
+  if (detailProbe.mediaSelectOptions < 2 || detailProbe.audioSelectOptions < 1 || detailProbe.subtitleSelectOptions < 1) {
+    failures.push(`detail playback selects missing: ${JSON.stringify(detailProbe)}`);
+  }
+  if (!detailProbe.playerRoute.includes("mediaSourceId=source-alt")) {
+    failures.push(`detail play did not preserve selected media source: ${detailProbe.playerRoute}`);
+  }
   if (result.errors.length > 0) failures.push(`page errors: ${result.errors.join(" | ")}`);
   for (const route of personalRoutes) {
     if (route.errorTexts.length > 0) failures.push(`${route.path} errors: ${route.errorTexts.join(" | ")}`);
@@ -671,11 +797,17 @@ try {
     failures.push("search collapsed duplicate cross-server records");
   }
   if (!compactHome.hero) failures.push("compact home hero missing");
-  if (compactHome.hero && compactHome.hero.bottom > compactHome.viewport.height + 2) {
-    failures.push(`compact home hero exceeds viewport: ${JSON.stringify(compactHome)}`);
+  if (compactHome.heroAspect != null && (compactHome.heroAspect < 2.65 || compactHome.heroAspect > 3.3)) {
+    failures.push(`compact home hero aspect drifted: ${JSON.stringify(compactHome)}`);
   }
-  if (compactHome.nextSectionTop == null || compactHome.nextSectionTop > compactHome.viewport.height + 2) {
-    failures.push(`compact home next section not hinted: ${JSON.stringify(compactHome)}`);
+  if (compactHome.hero && compactHome.hero.height > compactHome.viewport.height * 0.62) {
+    failures.push(`compact home hero consumes too much viewport: ${JSON.stringify(compactHome)}`);
+  }
+  if (compactHome.resumeCardVisible < 90) {
+    failures.push(`compact home resume row is not visibly exposed: ${JSON.stringify(compactHome)}`);
+  }
+  if (compactHome.libraryCardVisible < 88) {
+    failures.push(`compact home library row is not visibly exposed: ${JSON.stringify(compactHome)}`);
   }
   if (compactHome.hasHorizontalOverflow) failures.push("compact home has horizontal overflow");
   if ((compactHome.titleFontSize ?? 999) > 56) {
@@ -684,11 +816,28 @@ try {
 
   if (failures.length > 0) {
     throw new Error(
-      `home hero smoke failed: ${failures.join("; ")}\n${JSON.stringify({ result, sidebarCollapse, heroClick, personalRoutes, multiServerSearch, compactHome }, null, 2)}`,
+      `home hero smoke failed: ${failures.join("; ")}\n${JSON.stringify({ result, sidebarCollapse, detailProbe, personalRoutes, multiServerSearch, compactHome }, null, 2)}`,
     );
   }
 
-  console.log(JSON.stringify({ ok: true, screenshotPath, ...result, sidebarCollapse, heroClick, personalRoutes, multiServerSearch, compactHome }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        screenshotPath,
+        compactScreenshotPath,
+        detailScreenshotPath,
+        ...result,
+        sidebarCollapse,
+        detailProbe,
+        personalRoutes,
+        multiServerSearch,
+        compactHome,
+      },
+      null,
+      2,
+    ),
+  );
 } finally {
   if (ws) ws.close();
   child.kill();

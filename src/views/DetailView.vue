@@ -69,6 +69,11 @@ type MediaSourceCard = {
   detail: string;
   capabilities: string;
 };
+type HeroSelectOption = {
+  key: string;
+  label: string;
+  detail?: string;
+};
 
 function clampPercent(value: number) {
   if (!Number.isFinite(value)) return 0;
@@ -111,6 +116,9 @@ const loadErrorDetail = computed(() => {
 
 const seasons = ref<MediaItem[]>([]);
 const activeSeasonId = ref<string | null>(null);
+const selectedMediaSourceKey = ref<string | null>(null);
+const selectedAudioStreamKey = ref<string | null>(null);
+const selectedSubtitleStreamKey = ref<string | null>(null);
 const episodes = ref<MediaItem[]>([]);
 const loadingEpisodes = ref(false);
 const specialFeatures = ref<MediaItem[]>([]);
@@ -295,6 +303,23 @@ function safeMediaSourceName(source: MediaSourceInfo, index: number) {
   return `版本 ${index + 1}`;
 }
 
+function mediaSourceKey(source: MediaSourceInfo, index: number) {
+  return source.Id?.trim() || `source-${index}`;
+}
+
+function streamKey(stream: MediaStreamInfo, index: number) {
+  return stream.Index != null ? String(stream.Index) : `stream-${index}`;
+}
+
+function streamLabel(stream: MediaStreamInfo, index: number) {
+  return (
+    stream.DisplayTitle?.trim() ||
+    stream.Title?.trim() ||
+    [streamLanguage(stream), streamCodec(stream), audioChannels(stream)].filter(Boolean).join(" ") ||
+    `轨道 ${index + 1}`
+  );
+}
+
 function mediaCapabilityText(source: MediaSourceInfo) {
   const parts: string[] = [];
   if (source.SupportsDirectPlay) parts.push("本机直连");
@@ -309,7 +334,26 @@ function pushMediaInfoRow(rows: MediaInfoRow[], row: MediaInfoRow) {
   rows.push(row);
 }
 
-const primaryMediaSource = computed(() => item.value?.MediaSources?.[0] ?? null);
+const mediaSourceOptions = computed<HeroSelectOption[]>(() =>
+  (item.value?.MediaSources ?? []).map((source, index) => ({
+    key: mediaSourceKey(source, index),
+    label: safeMediaSourceName(source, index),
+    detail: [source.Container?.trim().toUpperCase(), formatBytes(source.Size), formatBitrate(source.Bitrate)]
+      .filter(Boolean)
+      .join(" · "),
+  })),
+);
+
+const selectedMediaSource = computed(() => {
+  const sources = item.value?.MediaSources ?? [];
+  return (
+    sources.find((source, index) => mediaSourceKey(source, index) === selectedMediaSourceKey.value) ??
+    sources[0] ??
+    null
+  );
+});
+
+const selectedMediaSourcePlaybackId = computed(() => selectedMediaSource.value?.Id?.trim() || null);
 
 const mediaSourceCards = computed<MediaSourceCard[]>(() => {
   const sources = item.value?.MediaSources ?? [];
@@ -336,7 +380,7 @@ const mediaSourceCards = computed<MediaSourceCard[]>(() => {
       .join(" · ");
 
     return {
-      key: source.Id?.trim() || `source-${index}`,
+      key: mediaSourceKey(source, index),
       title: safeMediaSourceName(source, index),
       meta,
       detail,
@@ -346,7 +390,7 @@ const mediaSourceCards = computed<MediaSourceCard[]>(() => {
 });
 
 const mediaInfoRows = computed<MediaInfoRow[]>(() => {
-  const source = primaryMediaSource.value;
+  const source = selectedMediaSource.value;
   if (!source) return [];
 
   const sources = item.value?.MediaSources ?? [];
@@ -423,6 +467,64 @@ const mediaInfoRows = computed<MediaInfoRow[]>(() => {
 
   return rows;
 });
+
+const heroMediaInfoRows = computed(() =>
+  mediaInfoRows.value.filter((row) => ["video", "audio", "subtitles", "capabilities"].includes(row.key)).slice(0, 4),
+);
+
+const audioStreamOptions = computed<HeroSelectOption[]>(() =>
+  (selectedMediaSource.value?.MediaStreams ?? [])
+    .filter((stream) => streamType(stream) === "audio")
+    .map((stream, index) => ({
+      key: streamKey(stream, index),
+      label: streamLabel(stream, index),
+      detail: [streamCodec(stream), streamLanguage(stream), audioChannels(stream), formatBitrate(stream.BitRate)]
+        .filter(Boolean)
+        .join(" · "),
+    })),
+);
+
+const subtitleStreamOptions = computed<HeroSelectOption[]>(() => [
+  { key: "off", label: "关闭" },
+  ...(selectedMediaSource.value?.MediaStreams ?? [])
+    .filter((stream) => streamType(stream) === "subtitle")
+    .map((stream, index) => ({
+      key: streamKey(stream, index),
+      label: streamLabel(stream, index),
+      detail: [streamLanguage(stream), streamCodec(stream), stream.IsExternal ? "外置" : ""].filter(Boolean).join(" · "),
+    })),
+]);
+
+watch(
+  mediaSourceOptions,
+  (options) => {
+    if (options.some((option) => option.key === selectedMediaSourceKey.value)) return;
+    selectedMediaSourceKey.value = options[0]?.key ?? null;
+  },
+  { immediate: true },
+);
+
+watch(
+  audioStreamOptions,
+  (options) => {
+    if (options.some((option) => option.key === selectedAudioStreamKey.value)) return;
+    const streams = (selectedMediaSource.value?.MediaStreams ?? []).filter((stream) => streamType(stream) === "audio");
+    const defaultIndex = streams.findIndex((stream) => stream.IsDefault);
+    selectedAudioStreamKey.value = options[Math.max(0, defaultIndex)]?.key ?? null;
+  },
+  { immediate: true },
+);
+
+watch(
+  subtitleStreamOptions,
+  (options) => {
+    if (options.some((option) => option.key === selectedSubtitleStreamKey.value)) return;
+    const streams = (selectedMediaSource.value?.MediaStreams ?? []).filter((stream) => streamType(stream) === "subtitle");
+    const defaultIndex = streams.findIndex((stream) => stream.IsDefault || stream.IsForced);
+    selectedSubtitleStreamKey.value = defaultIndex >= 0 ? options[defaultIndex + 1]?.key ?? "off" : "off";
+  },
+  { immediate: true },
+);
 
 const externalLinks = computed<ExternalLink[]>(() => {
   const i = item.value;
@@ -827,10 +929,14 @@ async function playTarget(id: string, startMs: number) {
   if (playNavigating.value) return;
   playNavigating.value = true;
   try {
+    const query: Record<string, string> = { start: String(startMs), from: props.id };
+    if (id === props.id && selectedMediaSourcePlaybackId.value) {
+      query.mediaSourceId = selectedMediaSourcePlaybackId.value;
+    }
     await router.push({
       name: "player",
       params: { id },
-      query: { start: String(startMs), from: props.id },
+      query,
     });
   } finally {
     playNavigating.value = false;
@@ -1288,6 +1394,55 @@ async function togglePlayed() {
             <p v-if="shareStatus" class="hero__action-status">{{ shareStatus }}</p>
           </div>
 
+          <aside
+            v-if="mediaSourceOptions.length || audioStreamOptions.length || subtitleStreamOptions.length || heroMediaInfoRows.length"
+            class="hero__playback-panel"
+          >
+            <div v-if="mediaSourceOptions.length" class="hero-select">
+              <label for="hero-media-source">版本</label>
+              <select id="hero-media-source" v-model="selectedMediaSourceKey">
+                <option v-for="option in mediaSourceOptions" :key="option.key" :value="option.key">
+                  {{ option.label }}
+                </option>
+              </select>
+              <small v-if="mediaSourceOptions.find((option) => option.key === selectedMediaSourceKey)?.detail">
+                {{ mediaSourceOptions.find((option) => option.key === selectedMediaSourceKey)?.detail }}
+              </small>
+            </div>
+
+            <div v-if="audioStreamOptions.length" class="hero-select">
+              <label for="hero-audio-source">音频</label>
+              <select id="hero-audio-source" v-model="selectedAudioStreamKey">
+                <option v-for="option in audioStreamOptions" :key="option.key" :value="option.key">
+                  {{ option.label }}
+                </option>
+              </select>
+              <small v-if="audioStreamOptions.find((option) => option.key === selectedAudioStreamKey)?.detail">
+                {{ audioStreamOptions.find((option) => option.key === selectedAudioStreamKey)?.detail }}
+              </small>
+            </div>
+
+            <div v-if="subtitleStreamOptions.length" class="hero-select">
+              <label for="hero-subtitle-source">字幕</label>
+              <select id="hero-subtitle-source" v-model="selectedSubtitleStreamKey">
+                <option v-for="option in subtitleStreamOptions" :key="option.key" :value="option.key">
+                  {{ option.label }}
+                </option>
+              </select>
+              <small v-if="subtitleStreamOptions.find((option) => option.key === selectedSubtitleStreamKey)?.detail">
+                {{ subtitleStreamOptions.find((option) => option.key === selectedSubtitleStreamKey)?.detail }}
+              </small>
+            </div>
+
+            <div v-if="heroMediaInfoRows.length" class="hero__playback-meta">
+              <div v-for="row in heroMediaInfoRows" :key="row.key" class="hero__playback-meta-item">
+                <Icon :icon="row.icon" width="15" />
+                <span>{{ row.label }}</span>
+                <strong>{{ row.value }}</strong>
+              </div>
+            </div>
+          </aside>
+
         </div>
       </section>
 
@@ -1586,23 +1741,22 @@ async function togglePlayed() {
 
 .hero {
   position: relative;
-  min-height: clamp(320px, 42vh, 480px);
+  min-height: 100dvh;
+  color: white;
+  isolation: isolate;
 }
 .hero__bg {
   position: absolute;
   inset: 0;
   background-size: cover;
-  background-position: center top;
+  background-position: center;
 }
 .hero__shade {
   position: absolute;
   inset: 0;
-  background: linear-gradient(
-    180deg,
-    rgba(18, 18, 18, 0.05) 0%,
-    rgba(18, 18, 18, 0.45) 55%,
-    rgba(18, 18, 18, 0.92) 100%
-  );
+  background:
+    linear-gradient(90deg, rgba(10, 10, 12, 0.86) 0%, rgba(10, 10, 12, 0.38) 43%, rgba(10, 10, 12, 0.24) 100%),
+    linear-gradient(0deg, rgba(10, 10, 12, 0.96) 0%, rgba(10, 10, 12, 0.5) 34%, rgba(10, 10, 12, 0.08) 72%);
 }
 .hero__back {
   position: absolute;
@@ -1626,13 +1780,15 @@ async function togglePlayed() {
   right: 0;
   bottom: 0;
   z-index: 1;
-  padding: 0 var(--content-pad) 24px;
+  padding: 0 var(--content-pad) clamp(24px, 6vh, 64px);
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
+  gap: clamp(24px, 5vw, 72px);
   align-items: end;
 }
 .hero__main {
   min-width: 0;
+  max-width: min(860px, 100%);
 }
 .hero__badges {
   display: flex;
@@ -1650,7 +1806,7 @@ async function togglePlayed() {
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.09);
-  color: var(--fg-primary);
+  color: rgba(255, 255, 255, 0.92);
   font-size: 12px;
   font-weight: 700;
   line-height: 1;
@@ -1735,12 +1891,81 @@ async function togglePlayed() {
   cursor: progress;
   opacity: 0.7;
 }
+.hero__playback-panel {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(20, 20, 24, 0.42);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.26);
+  backdrop-filter: blur(18px);
+}
+.hero-select {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px 10px;
+}
+.hero-select label {
+  color: rgba(255, 255, 255, 0.74);
+  font-size: 12px;
+  font-weight: 700;
+}
+.hero-select select {
+  min-width: 0;
+  width: 100%;
+  height: 38px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+  padding: 0 34px 0 10px;
+  outline: none;
+}
+.hero-select select:focus {
+  border-color: rgba(168, 85, 247, 0.72);
+}
+.hero-select small {
+  grid-column: 2;
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hero__playback-meta {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+}
+.hero__playback-meta-item {
+  display: grid;
+  grid-template-columns: 18px 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.64);
+  font-size: 12px;
+}
+.hero__playback-meta-item strong {
+  min-width: 0;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .hero__title {
   margin: 0;
-  font-size: 28px;
+  font-size: clamp(28px, 4.8vw, 54px);
   font-weight: 800;
+  color: white;
   letter-spacing: 0;
-  line-height: 1.25;
+  line-height: 1.08;
+  text-shadow: 0 2px 22px rgba(0, 0, 0, 0.56);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -1748,8 +1973,8 @@ async function togglePlayed() {
 }
 .hero__ep {
   margin: 6px 0 0;
-  font-size: 14px;
-  color: var(--fg-secondary);
+  font-size: clamp(13px, 1.4vw, 18px);
+  color: rgba(255, 255, 255, 0.76);
 }
 .hero__tags {
   display: flex;
@@ -1763,14 +1988,14 @@ async function togglePlayed() {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  color: var(--fg-secondary);
+  color: rgba(255, 255, 255, 0.78);
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
 }
 .hero__tags button:hover {
   border-color: rgba(255, 255, 255, 0.28);
-  color: var(--fg-primary);
+  color: white;
   background: rgba(255, 255, 255, 0.15);
 }
 .hero__meta {
@@ -1779,7 +2004,7 @@ async function togglePlayed() {
   gap: 10px;
   margin-top: 10px;
   font-size: 13px;
-  color: var(--fg-secondary);
+  color: rgba(255, 255, 255, 0.72);
 }
 .hero__studios {
   position: relative;
@@ -1793,7 +2018,7 @@ async function togglePlayed() {
 .hero__studios-label {
   flex: 0 0 auto;
   font-size: 12px;
-  color: var(--fg-tertiary);
+  color: rgba(255, 255, 255, 0.58);
 }
 .hero__studios-row {
   display: flex;
@@ -1815,7 +2040,7 @@ async function togglePlayed() {
   white-space: nowrap;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.08);
-  color: var(--fg-secondary);
+  color: rgba(255, 255, 255, 0.76);
   border-radius: 999px;
   padding: 5px 9px;
   font-size: 12px;
@@ -1827,7 +2052,7 @@ async function togglePlayed() {
 }
 .hero__studio-pill:hover,
 .hero__studio-popover-item:hover {
-  color: var(--fg-primary);
+  color: white;
   border-color: rgba(255, 255, 255, 0.24);
   background: rgba(255, 255, 255, 0.13);
 }
@@ -1868,7 +2093,7 @@ async function togglePlayed() {
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.07);
-  color: var(--fg-secondary);
+  color: rgba(255, 255, 255, 0.76);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -1879,7 +2104,7 @@ async function togglePlayed() {
 }
 .hero__link:hover {
   border-color: rgba(255, 255, 255, 0.26);
-  color: var(--fg-primary);
+  color: white;
   background: rgba(255, 255, 255, 0.13);
 }
 .hero__action-error {
@@ -1889,7 +2114,7 @@ async function togglePlayed() {
 }
 .hero__action-status {
   margin: 10px 0 0;
-  color: var(--fg-secondary);
+  color: rgba(255, 255, 255, 0.76);
   font-size: 12px;
 }
 .overview-block {
@@ -2026,14 +2251,17 @@ async function togglePlayed() {
     gap: 16px;
     align-items: stretch;
   }
+  .hero__playback-panel {
+    max-width: 520px;
+  }
 }
 
 @media (max-width: 640px) {
   .hero {
-    min-height: 300px;
+    min-height: 100dvh;
   }
   .hero__title {
-    font-size: 22px;
+    font-size: 28px;
   }
   .hero__actions {
     flex-direction: column;
@@ -2044,6 +2272,15 @@ async function togglePlayed() {
   }
   .hero__circles {
     justify-content: center;
+  }
+  .hero__playback-panel {
+    padding: 12px;
+  }
+  .hero-select {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+  .hero__playback-meta-item {
+    grid-template-columns: 18px 48px minmax(0, 1fr);
   }
   .hero__studios {
     align-items: flex-start;
