@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（Web Preview 详情加载超时）
+> **更新时间**：2026-06-01（Electron 内嵌播放复核）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-0921-web-preview-detail-timeout.md`](./CHANGE_LOG/2026-06-01-0921-web-preview-detail-timeout.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-0927-electron-embedded-smoke.md`](./CHANGE_LOG/2026-06-01-0927-electron-embedded-smoke.md)
 
 ---
 
@@ -127,6 +127,7 @@
 - IPC 模式：命名管道 `\\.\pipe\hills-lite-mpv-{uuid}`
 - error 123 已修复（`ServerOptions::create(&pipe_path)`）
 - **2026-05-31**：播放窗口内嵌宿主已接线：Electron `embed_*` 不再是 no-op，会创建应用托管宿主窗口并把原生句柄以 `--wid` 传给随包 mpv；Tauri IPC 后端也会在已有宿主窗口时传 `--wid` 并关闭独立窗口强制创建。前端默认在 Electron/Tauri 启用内嵌，Web Preview 关闭；Electron 真实内嵌播放 smoke 已在临时 userData 中完成并返回有效 mpv 时长/轨道/播放状态。
+- **2026-06-01**：当前 `main` 再次完成 Electron 内嵌播放冒烟复核：`scripts\smoke-electron-embedded-local.mjs` 使用本地假 Emby 与临时彩色视频进入 `/player/local-embedded-smoke`，mpv 返回 12 秒时长、播放中状态和 2 条轨道，屏幕截图与 mpv 截图均检测到彩色视频像素，确认桌面内嵌路径非黑屏。
 - **2026-05-31**：Electron 内嵌播放宿主从主窗口内部 Win32 child HWND 改为 owned popup 宿主窗口，绕过 Chromium 合成层遮挡；本地 embedded smoke 的屏幕截图和 mpv 自截图均返回彩色视频像素，`electron:build` 已确认 `resources\electron_mpv_host.exe` 与随包 mpv 一起进入 unpacked 产物。
 - **2026-05-31**：Electron release 随包 `release-electron\win-unpacked\resources\mpv\mpv.exe` 已通过真实线路1播放冒烟；测试条目 `21648` 的 `mpv-direct-static` / `direct-stream` 播放源被 mpv accepted，IPC 快照读到 `durationMs = 866026`、`trackCount = 4`、H.264 视频、AAC 音频、`positionMs = 1250` 且 `paused = false` / `eof = false`。
 - **2026-05-31**：Electron release 随包 mpv 的真实控制项冒烟已覆盖字幕轨切换、Stats OSD 和截图；测试条目 `21648` 快照返回视频轨 1 条、音频轨 1 条、字幕轨 2 条，`sid = 1` 切换与 `sid = no` 关闭均成功，`stats/display-page-1` 成功，`screenshot-to-file` 生成 `6990409` bytes 临时 PNG 并已删除。
@@ -572,6 +573,8 @@ npm.cmd run electron:build
 本轮详情页媒体信息已闭环：Emby/Jellyfin 详情请求三端同步补齐 `MediaSources`，PDP 新增“媒体信息”摘要区，真实条目详情页显示媒体源、MKV 容器、H264 1440×1080、AAC 音频、字幕数量、总码率、大小和直连/直流/转码能力；页面文本检查确认未显示完整 URL、Windows 路径或常见 Unix 媒体路径。验证已覆盖 `node --check electron\backend\emby.mjs`、`cargo fmt --manifest-path src-tauri\Cargo.toml`、`npm.cmd run build`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、in-app Browser 1420 真实详情页目检、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`。
 
 本轮 Web Preview 详情加载超时已闭环：`src/platform` 的浏览器直连请求与 `__hills_web_proxy` fallback 统一使用设置里的请求超时，Vite 本地代理会按前端传入的 `timeoutMs` 取消真实 API 请求，`DetailView` 主详情加载超过超时后进入既有错误态；HLS/播放流代理保持不加短超时，避免影响播放分片。验证已覆盖 `npm.cmd run build`、`git diff --check` 与敏感关键字扫描；未写入测试账号、密码、token 或完整线路地址。
+
+本轮 Electron 内嵌播放复核已闭环：`node scripts\smoke-electron-embedded-local.mjs` 启动 Electron 桌面窗口、本地假 Emby 和临时彩色视频，播放器进入 `/player/local-embedded-smoke`，mpv 快照返回 `durationMs = 12000`、`positionMs ≈ 7300`、`trackCount = 2`、`paused = false`，屏幕截图与 mpv 截图的彩色像素检测均通过，确认当前桌面内嵌路径非黑屏。验证过程未写入测试账号、密码、token 或完整线路地址。
 
 ---
 
