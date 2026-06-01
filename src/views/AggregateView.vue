@@ -58,8 +58,8 @@ function gotoHistory() {
   router.push("/history").catch(() => {});
 }
 
-function itemAspect(item: MediaItem): "backdrop" | "auto" {
-  return item.Type === "Episode" ? "backdrop" : "auto";
+function itemAspect(_item: MediaItem): "backdrop" {
+  return "backdrop";
 }
 
 function emptyMessage() {
@@ -457,11 +457,11 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
   padding-bottom: 8px;
 }
 .row-scroll--poster {
-  grid-auto-columns: minmax(132px, 156px);
+  grid-auto-columns: minmax(220px, 260px);
 }
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 18px;
 }
 .empty {
@@ -522,10 +522,10 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
     grid-auto-columns: minmax(190px, 220px);
   }
   .row-scroll--poster {
-    grid-auto-columns: minmax(128px, 148px);
+    grid-auto-columns: minmax(190px, 220px);
   }
   .grid {
-    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     gap: 14px;
   }
 }

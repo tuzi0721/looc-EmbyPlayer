@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { Icon } from "@iconify/vue";
 
 import { useAuthStore } from "@/stores/auth";
@@ -24,6 +24,7 @@ const emit = defineEmits<{
 const artEl = ref<HTMLDivElement | null>(null);
 const { visible } = useLazyVisible(artEl, { rootMargin: "300px 0px" });
 const loaded = ref(false);
+const imageCandidateIndex = ref(0);
 
 const auth = useAuthStore();
 const serverStore = useServerStore();
@@ -45,23 +46,75 @@ const activeServer = computed(() => {
   return serverStore.byId(acc.serverId) ?? null;
 });
 
+interface ImageCandidate {
+  itemId: string;
+  imageType: "Primary" | "Backdrop";
+  tag?: string | null;
+}
+
+const imageCandidates = computed<ImageCandidate[]>(() => {
+  const item = props.item;
+  const useBackdrop = resolvedAspect.value === "backdrop" && !isCollection.value;
+  const candidates: ImageCandidate[] = [];
+  const seen = new Set<string>();
+
+  function add(itemId: string | null | undefined, imageType: "Primary" | "Backdrop", tag?: string | null, allowUntagged = false) {
+    if (!itemId || (!tag && !allowUntagged)) return;
+    const key = `${itemId}:${imageType}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push({ itemId, imageType, tag });
+  }
+
+  if (useBackdrop) {
+    add(item.Id, "Backdrop", item.BackdropImageTags?.[0]);
+    if (item.Type === "Episode") add(item.SeriesId, "Backdrop", null, true);
+    add(item.Id, "Primary", item.ImageTags?.Primary, true);
+    if (item.Type === "Episode") add(item.SeriesId, "Primary", null, true);
+  } else {
+    add(item.Id, "Primary", item.ImageTags?.Primary, true);
+    if (item.Type === "Episode") add(item.SeriesId, "Primary", null, true);
+    if (item.Type === "Episode") add(item.SeriesId, "Backdrop", null, true);
+    add(item.Id, "Backdrop", item.BackdropImageTags?.[0]);
+  }
+
+  return candidates;
+});
+
+watch(
+  () => `${props.item.Id}:${props.item._source?.serverId ?? ""}:${props.item._source?.accountId ?? ""}:${resolvedAspect.value}`,
+  () => {
+    imageCandidateIndex.value = 0;
+    loaded.value = false;
+  },
+);
+
 const imageUrl = computed(() => {
   const server = activeServer.value;
   if (!server) return null;
 
-  const id = props.item.Id;
-  const useBackdrop = resolvedAspect.value === "backdrop" && !isCollection.value;
-  const imageType = useBackdrop ? "Backdrop" : "Primary";
-  const tag = useBackdrop ? props.item.BackdropImageTags?.[0] : props.item.ImageTags?.Primary;
+  const candidate = imageCandidates.value[Math.min(imageCandidateIndex.value, imageCandidates.value.length - 1)];
+  if (!candidate) return null;
   const maxWidth = resolvedAspect.value === "backdrop" ? "640" : "320";
-  return mediaImageUrl(server, id, imageType, {
+  return mediaImageUrl(server, candidate.itemId, candidate.imageType, {
     accountId: props.item._source?.accountId,
     maxWidth,
     quality: 82,
     format: "webp",
-    tag,
+    tag: candidate.tag,
   });
 });
+
+function onImageLoad() {
+  loaded.value = true;
+}
+
+function onImageError() {
+  loaded.value = false;
+  if (imageCandidateIndex.value < imageCandidates.value.length - 1) {
+    imageCandidateIndex.value += 1;
+  }
+}
 
 const progress = computed(() => props.item.UserData?.PlayedPercentage ?? 0);
 const watched = computed(() => props.item.UserData?.Played === true);
@@ -92,8 +145,8 @@ const sourceLabel = computed(() => mediaItemSourceLabel(props.item));
         loading="lazy"
         decoding="async"
         :class="{ loaded }"
-        @load="loaded = true"
-        @error="loaded = false"
+        @load="onImageLoad"
+        @error="onImageError"
       />
       <div v-if="!imageUrl || !loaded" class="poster__placeholder" :class="{ shimmer: imageUrl && !loaded }">
         <span v-if="!imageUrl">{{ item.Name?.slice(0, 1) }}</span>

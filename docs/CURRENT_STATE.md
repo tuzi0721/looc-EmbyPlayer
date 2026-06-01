@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（多服务器个人媒体来源）
+> 更新时间：2026-06-02（收藏/历史卡片图片与尺寸）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-0354-multi-server-personal-media.md`](./CHANGE_LOG/2026-06-02-0354-multi-server-personal-media.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-0400-personal-card-image-fit.md`](./CHANGE_LOG/2026-06-02-0400-personal-card-image-fit.md)
 
 ---
 
@@ -50,6 +50,7 @@
 - 线路延迟显示不展示 `0ms` / `1ms` 这种误导性精确值，`0-9ms` 统一显示为 `<10ms`。
 - 首页巨幕默认启用 cinema 布局，从当前媒体库候选读取 Backdrop、Primary 海报、简介、年份、播放状态与运行时信息。
 - 收藏、历史、聚合视界和搜索已支持跨已登录账号聚合；条目保留来源服务器/账号，同名或同 ID 的不同服务器记录不会互相覆盖，点进条目会切到对应账号再进入详情/播放链路。
+- 收藏、历史和聚合视界中的个人媒体卡统一为横向比例；卡片取图会从自身 Backdrop 回退到系列图或 Primary，Electron smoke 已覆盖缺 Backdrop 时仍能成功解码。
 - 详情页展示媒体信息、版本能力、剧集、演职人员、相似内容、附加内容、类型/人员/工作室跳转和桌面下载入口。
 
 ---
@@ -124,7 +125,7 @@ node scripts\smoke-electron-home-hero.mjs
 - `node --check electron\main.mjs`
 - `node --check scripts\smoke-electron-home-hero.mjs`
 - `node scripts\smoke-electron-home-hero.mjs`
-- 当前工作区无意外未跟踪文件；Electron 命令覆盖为 104/104，显式 no-op 命令为 0。首页 smoke 已覆盖双服务器同名同 ID 收藏/历史/聚合/搜索记录不会被合并。
+- 当前工作区无意外未跟踪文件；Electron 命令覆盖为 104/104，显式 no-op 命令为 0。首页 smoke 已覆盖双服务器同名同 ID 收藏/历史/聚合/搜索记录不会被合并，并覆盖收藏/历史/聚合卡片缺 Backdrop 时的图片回退解码。
 
 ---
 

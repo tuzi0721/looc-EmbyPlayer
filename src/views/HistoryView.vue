@@ -203,7 +203,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadHistory());
           <article v-for="item in items" :key="mediaItemKey(item)" class="history-card">
             <PosterCard
               :item="item"
-              :aspect="item.Type === 'Episode' ? 'backdrop' : 'auto'"
+              aspect="backdrop"
               @activate="openItem(item)"
             />
             <div class="history-card__meta">
@@ -333,7 +333,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadHistory());
 }
 .history-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 18px;
 }
 .history-card {
@@ -462,7 +462,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadHistory());
     padding: 0 7px;
   }
   .history-grid {
-    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     gap: 14px;
   }
 }

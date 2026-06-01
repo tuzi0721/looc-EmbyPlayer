@@ -95,6 +95,7 @@ const resumeItem = {
 const duplicateMovie = {
   ...heroMovie,
   ProductionYear: 2025,
+  BackdropImageTags: [],
   UserData: {
     ...heroMovie.UserData,
     LastPlayedDate: "2026-06-01T10:30:00.000Z",
@@ -153,7 +154,18 @@ function createFakeEmbyServer({
       return;
     }
 
-    if (req.method === "GET" && /^\/Items\/[^/]+\/Images\/(?:Primary|Backdrop)$/.test(pathname)) {
+    const imageMatch = pathname.match(/^\/Items\/([^/]+)\/Images\/(Primary|Backdrop)$/);
+    if (req.method === "GET" && imageMatch) {
+      const [, itemId, imageType] = imageMatch;
+      const mediaItem = [item, ...resumeItems].find((candidate) => candidate.Id === itemId);
+      if (imageType === "Backdrop" && !mediaItem?.BackdropImageTags?.length) {
+        json(res, { error: "backdrop not found", path: pathname }, 404);
+        return;
+      }
+      if (imageType === "Primary" && !mediaItem?.ImageTags?.Primary) {
+        json(res, { error: "primary not found", path: pathname }, 404);
+        return;
+      }
       image(res);
       return;
     }
@@ -378,6 +390,7 @@ try {
           path,
           body: document.body.innerText,
           posterCount: document.querySelectorAll(".poster").length,
+          loadedImageCount: document.querySelectorAll(".poster__art img.loaded").length,
           sourceLabels: Array.from(document.querySelectorAll(".poster__source")).map((node) => node.textContent?.trim()).filter(Boolean),
           historyCardCount: document.querySelectorAll(".history-card").length,
           errorTexts: Array.from(document.querySelectorAll(".empty--error, .toast--error")).map((node) => node.textContent?.trim()),
@@ -440,11 +453,17 @@ try {
     if (route.path === "/favorites" && route.posterCount < 2) {
       failures.push("/favorites did not preserve duplicate cross-server favorites");
     }
+    if (route.path === "/favorites" && route.loadedImageCount < 2) {
+      failures.push("/favorites did not decode fallback card images");
+    }
     if (route.path === "/history" && (!route.body.includes(heroMovie.Name) || route.historyCardCount < 1)) {
       failures.push("/history did not render played media");
     }
     if (route.path === "/history" && route.historyCardCount < 2) {
       failures.push("/history did not preserve duplicate cross-server history");
+    }
+    if (route.path === "/history" && route.loadedImageCount < 2) {
+      failures.push("/history did not decode fallback card images");
     }
     if (route.path === "/aggregate" && (!route.body.includes(heroMovie.Name) || route.posterCount < 1)) {
       failures.push("/aggregate did not render aggregate media");
