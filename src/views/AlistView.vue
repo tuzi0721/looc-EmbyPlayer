@@ -7,6 +7,7 @@ import { api, type AlistEntry, type AlistListing } from "@/api";
 import { useAlistStore } from "@/stores/alist";
 import { usePlayerStore, type DirectQueueEntry } from "@/stores/player";
 import { writeTextToClipboard } from "@/utils/clipboard";
+import { connectorPathLabel, connectorTitle, hasConnectorPath } from "@/utils/fileConnectorPaths";
 
 type SortMode = "name" | "modified" | "size" | "type";
 
@@ -447,11 +448,14 @@ onMounted(() => {
             class="connection-pill"
             :class="{ active: connection.id === selectedConnectionId }"
             type="button"
-            :title="connection.baseUrl"
+            :title="connectorTitle(connection.baseUrl, connection.lastPath)"
             @click="selectConnection(connection.id)"
           >
             <Icon icon="lucide:list-tree" width="14" />
-            <span>{{ connection.name }}</span>
+            <div class="connection-pill__text">
+              <span>{{ connection.name }}</span>
+              <small v-if="hasConnectorPath(connection.lastPath)">{{ connectorPathLabel(connection.lastPath) }}</small>
+            </div>
           </button>
         </div>
 
@@ -514,11 +518,14 @@ onMounted(() => {
                 :key="connection.id"
                 class="shortcut-pill"
                 type="button"
-                :title="connection.baseUrl"
+                :title="connectorTitle(connection.baseUrl, connection.lastPath)"
                 @click="selectConnection(connection.id)"
               >
                 <Icon icon="lucide:star" width="14" />
-                <span>{{ connection.name }}</span>
+                <div class="shortcut-pill__text">
+                  <span>{{ connection.name }}</span>
+                  <small v-if="hasConnectorPath(connection.lastPath)">{{ connectorPathLabel(connection.lastPath) }}</small>
+                </div>
               </button>
             </div>
           </div>
@@ -530,11 +537,14 @@ onMounted(() => {
                 :key="connection.id"
                 class="shortcut-pill"
                 type="button"
-                :title="connection.baseUrl"
+                :title="connectorTitle(connection.baseUrl, connection.lastPath)"
                 @click="selectConnection(connection.id)"
               >
                 <Icon icon="lucide:list-tree" width="14" />
-                <span>{{ connection.name }}</span>
+                <div class="shortcut-pill__text">
+                  <span>{{ connection.name }}</span>
+                  <small v-if="hasConnectorPath(connection.lastPath)">{{ connectorPathLabel(connection.lastPath) }}</small>
+                </div>
               </button>
             </div>
           </div>
@@ -758,7 +768,7 @@ onMounted(() => {
   grid-template-columns: 16px minmax(0, 1fr);
   align-items: center;
   gap: 6px;
-  padding: 0 9px;
+  padding: 6px 9px;
   cursor: pointer;
 }
 .connection-pill.active,
@@ -771,6 +781,27 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.connection-pill__text,
+.shortcut-pill__text {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.connection-pill__text span,
+.connection-pill__text small,
+.shortcut-pill__text span,
+.shortcut-pill__text small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connection-pill__text small,
+.shortcut-pill__text small {
+  color: var(--fg-tertiary);
+  font-size: 10px;
+  line-height: 1.2;
 }
 .field {
   display: grid;
@@ -1035,7 +1066,7 @@ onMounted(() => {
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
-  padding: 0 10px;
+  padding: 6px 10px;
   cursor: pointer;
   text-align: left;
 }

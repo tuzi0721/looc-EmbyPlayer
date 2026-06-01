@@ -14,6 +14,7 @@ import { useWebDavStore } from "@/stores/webdav";
 import { openFileDialog } from "@/platform";
 import LineStatusDot from "@/components/common/LineStatusDot.vue";
 import AddServerDialog from "@/components/login/AddServerDialog.vue";
+import { connectorPathLabel, connectorTitle, hasConnectorPath } from "@/utils/fileConnectorPaths";
 import { serverActiveLine, serverKindIcon, serverKindLabel } from "@/utils/serverVisuals";
 
 const router = useRouter();
@@ -442,11 +443,14 @@ async function openLocalFolder() {
           v-for="entry in favoriteAlistConnections"
           :key="entry.id"
           class="local-recent__item"
-          :title="entry.baseUrl"
+          :title="connectorTitle(entry.baseUrl, entry.lastPath)"
           @click="openAlistConnection(entry.id)"
         >
           <Icon icon="lucide:star" width="14" />
-          <span>{{ entry.name }}</span>
+          <div class="local-recent__text">
+            <span>{{ entry.name }}</span>
+            <small v-if="hasConnectorPath(entry.lastPath)">{{ connectorPathLabel(entry.lastPath) }}</small>
+          </div>
         </button>
       </div>
 
@@ -458,11 +462,14 @@ async function openLocalFolder() {
           v-for="entry in recentAlistConnections"
           :key="entry.id"
           class="local-recent__item"
-          :title="entry.baseUrl"
+          :title="connectorTitle(entry.baseUrl, entry.lastPath)"
           @click="openAlistConnection(entry.id)"
         >
           <Icon icon="lucide:list-tree" width="14" />
-          <span>{{ entry.name }}</span>
+          <div class="local-recent__text">
+            <span>{{ entry.name }}</span>
+            <small v-if="hasConnectorPath(entry.lastPath)">{{ connectorPathLabel(entry.lastPath) }}</small>
+          </div>
         </button>
       </div>
 
@@ -477,11 +484,14 @@ async function openLocalFolder() {
           v-for="entry in favoriteWebDavConnections"
           :key="entry.id"
           class="local-recent__item"
-          :title="entry.baseUrl"
+          :title="connectorTitle(entry.baseUrl, entry.lastPath)"
           @click="openWebDavConnection(entry.id)"
         >
           <Icon icon="lucide:star" width="14" />
-          <span>{{ entry.name }}</span>
+          <div class="local-recent__text">
+            <span>{{ entry.name }}</span>
+            <small v-if="hasConnectorPath(entry.lastPath)">{{ connectorPathLabel(entry.lastPath) }}</small>
+          </div>
         </button>
       </div>
 
@@ -493,11 +503,14 @@ async function openLocalFolder() {
           v-for="entry in recentWebDavConnections"
           :key="entry.id"
           class="local-recent__item"
-          :title="entry.baseUrl"
+          :title="connectorTitle(entry.baseUrl, entry.lastPath)"
           @click="openWebDavConnection(entry.id)"
         >
           <Icon icon="lucide:cloud" width="14" />
-          <span>{{ entry.name }}</span>
+          <div class="local-recent__text">
+            <span>{{ entry.name }}</span>
+            <small v-if="hasConnectorPath(entry.lastPath)">{{ connectorPathLabel(entry.lastPath) }}</small>
+          </div>
         </button>
       </div>
 
@@ -980,6 +993,23 @@ async function openLocalFolder() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.local-recent__text {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.local-recent__text span,
+.local-recent__text small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.local-recent__text small {
+  color: var(--fg-tertiary);
+  font-size: 10px;
+  line-height: 1.2;
 }
 
 .settings-btn .chev {
