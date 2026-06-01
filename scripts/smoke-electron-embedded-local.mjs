@@ -698,6 +698,7 @@ try {
   const controlsInitial = await cdpEval(ws, playerUiMetricsExpression());
   let fullscreenAfterEnter = null;
   let fullscreenAfterExit = null;
+  let fullscreenStageCoversViewport = false;
   let fullscreenError = null;
   try {
     if (!controlsInitial.fullscreenButton?.center) {
@@ -706,6 +707,9 @@ try {
     await cdpClick(ws, controlsInitial.fullscreenButton.center);
     await wait(1100);
     fullscreenAfterEnter = await cdpEval(ws, playerUiMetricsExpression());
+    fullscreenStageCoversViewport =
+      fullscreenAfterEnter?.stage?.width >= fullscreenAfterEnter?.viewport?.width - 4 &&
+      fullscreenAfterEnter?.stage?.height >= fullscreenAfterEnter?.viewport?.height - 4;
     if (fullscreenAfterEnter.fullscreenActive) {
       await cdpEval(ws, `
         (async () => {
@@ -803,6 +807,7 @@ try {
     controlsInitial.fullscreenButtonVisible &&
     !controlsInitial.hasHorizontalOverflow &&
     fullscreenAfterEnter?.fullscreenActive === true &&
+    fullscreenStageCoversViewport &&
     fullscreenAfterExit?.fullscreenActive === false &&
     resizeResult?.bounds?.width <= 1100 &&
     resizeResult?.bounds?.height <= 720 &&
@@ -848,6 +853,7 @@ try {
     fullscreen: {
       afterEnter: fullscreenAfterEnter,
       afterExit: fullscreenAfterExit,
+      stageCoversViewport: fullscreenStageCoversViewport,
       error: fullscreenError,
     },
     resize: {

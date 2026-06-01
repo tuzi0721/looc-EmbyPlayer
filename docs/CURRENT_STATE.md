@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（本机解码构建门禁）
+> **更新时间**：2026-06-01（播放器全屏舞台铺满）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1803-local-decode-build-guard.md`](./CHANGE_LOG/2026-06-01-1803-local-decode-build-guard.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1812-player-fullscreen-stage.md`](./CHANGE_LOG/2026-06-01-1812-player-fullscreen-stage.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：播放器全屏舞台铺满已修正：内嵌 mpv 的 rect 同步不再因顶部 / 底部控制栏显示而扣减高度，视频窗口始终跟随完整 `.player__stage`，控制栏只是覆盖层，不再把画面挤成“伪全屏”。播放器同步 document fullscreen 状态，全屏按钮进入全屏后切换为退出图标。内嵌 smoke 新增 `stageCoversViewport` 断言，本轮全屏后窗口 / viewport 为 2560×1440，`.player__stage` 同为 2560×1440；后退从 10633ms 退到 866ms，960×620 与 960×600 缩放无水平溢出，退出后 `electron_mpv_host.exe` 与随包 `mpv.exe` 均无残留。验证已覆盖 `node --check scripts\smoke-electron-embedded-local.mjs`、`npm.cmd run build`、`node scripts\smoke-electron-embedded-local.mjs` 与 `npm.cmd run electron:build`。
 
 **2026-06-01**：本机解码硬约束升级为构建门禁：新增 `scripts/check-local-decode-guard.mjs` 与 `npm run check:local-decode`，扫描 Electron、Web Preview、Tauri 和脚本源码，禁止 `TranscodingUrl`、`master.m3u8`、`EnableTranscoding: true` / `enable_transcoding: true`、`PlayMethod=Transcode` 和非空 `TranscodingProfiles` 重新进入播放链路；`npm run build` 已前置执行该门禁，因此 Electron 打包和 Tauri 前端构建都会自动拦截服务端转码回归。Tauri `PlaybackInfo` 请求同步补齐 Direct Play only `DeviceProfile`，明确发送空 `TranscodingProfiles`，与 Electron / Web Preview 的本机解码策略保持一致。验证已覆盖 `node --check scripts\check-local-decode-guard.mjs`、`npm.cmd run check:local-decode`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run build` 与 `npm.cmd run electron:build`。
 

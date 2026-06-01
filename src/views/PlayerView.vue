@@ -77,6 +77,7 @@ const playbackSwitching = ref(false);
 const longPressSpeedActive = ref(false);
 const statsPage = ref<StatsPage>("summary");
 const alwaysOnTop = ref(false);
+const documentFullscreen = ref(false);
 const nativeFullscreen = ref(false);
 const screenshotBusy = ref(false);
 const screenshotMessage = ref<string | null>(null);
@@ -1475,6 +1476,10 @@ function activeFullscreenElement(): Element | null {
   return doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
 }
 
+function refreshDocumentFullscreen() {
+  documentFullscreen.value = Boolean(activeFullscreenElement());
+}
+
 async function syncSecondaryDisplayBlackout() {
   const shouldEnable =
     settings.settings.blackoutOtherDisplays &&
@@ -1499,6 +1504,7 @@ async function syncSecondaryDisplayBlackout() {
 }
 
 function onFullscreenChange() {
+  refreshDocumentFullscreen();
   void syncSecondaryDisplayBlackout();
   scheduleEmbedRectSync();
 }
@@ -1522,7 +1528,8 @@ async function requestDocumentFullscreen(enabled: boolean) {
 }
 
 async function toggleFullscreen() {
-  const next = activeFullscreenElement() ? false : !nativeFullscreen.value;
+  refreshDocumentFullscreen();
+  const next = documentFullscreen.value || nativeFullscreen.value ? false : true;
   if (embedVideo) {
     try {
       nativeFullscreen.value = await api.setFullscreen(next);
@@ -1578,22 +1585,11 @@ function currentEmbedRect() {
   const el = stageEl.value;
   if (!el) return null;
   const rect = el.getBoundingClientRect();
-  let topInset = 0;
-  let bottomInset = 0;
-  if (showControls.value) {
-    const topEl = document.querySelector<HTMLElement>(".player__top");
-    const bottomEl = document.querySelector<HTMLElement>(".player__bottom");
-    const topRect = topEl?.getBoundingClientRect();
-    const bottomRect = bottomEl?.getBoundingClientRect();
-    if (topRect) topInset = Math.max(0, Math.min(rect.height, topRect.bottom - rect.top));
-    if (bottomRect) bottomInset = Math.max(0, Math.min(rect.height, rect.bottom - bottomRect.top));
-  }
-  const top = rect.top + topInset;
-  const height = Math.max(1, Math.round(rect.height - topInset - bottomInset));
+  const height = Math.max(1, Math.round(rect.height));
   const width = Math.max(1, Math.round(rect.width));
   return {
     x: Math.round(rect.left),
-    y: Math.round(top),
+    y: Math.round(rect.top),
     width,
     height,
     scale: window.devicePixelRatio || 1,
@@ -2623,8 +2619,13 @@ onBeforeUnmount(async () => {
               </div>
             </div>
 
-            <button class="iconbtn" data-control="fullscreen" title="全屏" @click="toggleFullscreen">
-              <Icon icon="lucide:maximize" width="18" />
+            <button
+              class="iconbtn"
+              data-control="fullscreen"
+              :title="documentFullscreen || nativeFullscreen ? '退出全屏' : '全屏'"
+              @click="toggleFullscreen"
+            >
+              <Icon :icon="documentFullscreen || nativeFullscreen ? 'lucide:minimize' : 'lucide:maximize'" width="18" />
             </button>
           </div>
         </div>
