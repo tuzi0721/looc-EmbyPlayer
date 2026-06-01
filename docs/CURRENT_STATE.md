@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（远程文件源封面）
+> **更新时间**：2026-06-01（本地文件夹手动路径）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1235-remote-file-posters.md`](./CHANGE_LOG/2026-06-01-1235-remote-file-posters.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1246-local-folder-manual-path.md`](./CHANGE_LOG/2026-06-01-1246-local-folder-manual-path.md)
 
 ---
 
@@ -625,9 +625,11 @@ npm.cmd run electron:build
 
 本轮远程文件源封面已闭环：WebDAV 与 Alist/OpenList 目录解析会识别同层同名 `.jpg/.jpeg/.png/.webp/.avif/.bmp` 图片，并以 `poster`、`cover`、`folder` 图片作为目录级兜底；Alist/OpenList 还会优先复用接口返回的 `thumb`。`/webdav` 与 `/alist` 视频行会显示缩略图，加载失败时回退文件图标，设置页“同名封面”能力同步扩展到远程文件源。
 
+本轮本地文件夹手动路径已闭环：`/local-folder` 空状态新增路径输入框，可直接粘贴盘符路径或当前系统已授权可访问的 UNC 共享路径并复用现有真实目录扫描链路；设置页新增“手动路径”可用能力，SMB 仍保持“待接入”，仅说明已授权 UNC 路径可先通过该入口访问。
+
 ---
 
 ## 10. Phase 2 待办
 
 - 播放窗口内嵌已通过本地屏幕像素 smoke；后续仍建议用真实媒体人工走一遍控制栏显示/隐藏、全屏和窗口 resize 体验。
-- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层/递归视频浏览、本地文件夹列表搜索/排序/分组与播放队列、同名封面、同名 NFO 元数据、同名字幕自动关联及列表提示、同名 XML 弹幕自动关联及列表提示、最近本地文件入口、最近本地文件夹入口、收藏本地文件、收藏本地文件夹、WebDAV 基础目录浏览/直链播放、WebDAV 播放队列、WebDAV 收藏/最近入口、WebDAV 上次目录/路径标签、WebDAV 列表搜索/排序、WebDAV 同名封面提示、WebDAV 同名字幕提示/加载、WebDAV 同名 XML 弹幕提示/加载、WebDAV 路径面包屑、WebDAV 当前路径操作、Alist/OpenList 基础目录浏览/直链播放、Alist/OpenList 收藏/最近入口、Alist/OpenList 上次目录/路径标签、Alist/OpenList 同名封面提示、Alist/OpenList 播放前刷新视频和侧挂直链、Alist/OpenList 同名字幕/XML 弹幕提示与加载；在线元数据刮削、SMB 和 Plex 仍待后续分阶段接入。
+- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹手动路径输入、本地文件夹一层/递归视频浏览、本地文件夹列表搜索/排序/分组与播放队列、同名封面、同名 NFO 元数据、同名字幕自动关联及列表提示、同名 XML 弹幕自动关联及列表提示、最近本地文件入口、最近本地文件夹入口、收藏本地文件、收藏本地文件夹、WebDAV 基础目录浏览/直链播放、WebDAV 播放队列、WebDAV 收藏/最近入口、WebDAV 上次目录/路径标签、WebDAV 列表搜索/排序、WebDAV 同名封面提示、WebDAV 同名字幕提示/加载、WebDAV 同名 XML 弹幕提示/加载、WebDAV 路径面包屑、WebDAV 当前路径操作、Alist/OpenList 基础目录浏览/直链播放、Alist/OpenList 收藏/最近入口、Alist/OpenList 上次目录/路径标签、Alist/OpenList 同名封面提示、Alist/OpenList 播放前刷新视频和侧挂直链、Alist/OpenList 同名字幕/XML 弹幕提示与加载；在线元数据刮削、SMB 完整发现/凭据存储和 Plex 仍待后续分阶段接入。

@@ -684,6 +684,13 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
     status: "available",
   },
   {
+    key: "manual-folder-path",
+    label: "手动路径",
+    detail: "本地文件夹页可粘贴盘符路径或已授权 UNC 共享路径",
+    icon: "lucide:folder-input",
+    status: "available",
+  },
+  {
     key: "local-folder-grouping",
     label: "文件夹分组",
     detail: "递归浏览时可按所在子目录聚合视频列表",
@@ -707,7 +714,7 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
   {
     key: "smb",
     label: "SMB",
-    detail: "未接入 Windows 共享发现与凭据存储",
+    detail: "完整发现与凭据存储未接入；已授权 UNC 路径可通过手动路径打开",
     icon: "lucide:network",
     status: "planned",
   },

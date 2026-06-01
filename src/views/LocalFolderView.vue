@@ -28,6 +28,7 @@ const searchText = ref("");
 const sortMode = ref<SortMode>("path");
 const groupByFolder = ref(true);
 const posterFailures = ref<Set<string>>(new Set());
+const manualFolderDraft = ref("");
 
 const folderPath = computed(() => {
   const value = route.query.folder;
@@ -193,6 +194,12 @@ async function chooseFolder() {
   openFolderPath(selected);
 }
 
+function openManualFolder() {
+  const nextPath = manualFolderDraft.value.trim();
+  if (!nextPath) return;
+  openFolderPath(nextPath);
+}
+
 async function loadFolder(directory = folderPath.value) {
   if (!directory) {
     listing.value = null;
@@ -275,6 +282,7 @@ function openVideo(item: LocalFolderVideo, index: number) {
 
 watch(folderPath, (directory) => {
   searchText.value = "";
+  manualFolderDraft.value = directory;
   posterFailures.value = new Set();
   void loadFolder(directory);
 }, { immediate: true });
@@ -334,6 +342,21 @@ watch(recursive, () => {
 
     <div v-if="!folderPath" class="empty glass">
       <Icon icon="lucide:folder-open" width="36" />
+      <form class="manual-folder" @submit.prevent="openManualFolder">
+        <label for="manual-folder-path">手动输入路径</label>
+        <div class="manual-folder__row">
+          <input
+            id="manual-folder-path"
+            v-model="manualFolderDraft"
+            type="text"
+            placeholder="A:\\Movies 或 \\\\server\\share"
+          />
+          <button class="tool-btn" type="submit" :disabled="!manualFolderDraft.trim()">
+            <Icon icon="lucide:folder-input" width="16" />
+            <span>打开</span>
+          </button>
+        </div>
+      </form>
       <button class="tool-btn" type="button" @click="chooseFolder">
         <Icon icon="lucide:folder-open" width="16" />
         <span>选择文件夹</span>
@@ -836,6 +859,36 @@ watch(recursive, () => {
 .empty--error {
   color: var(--danger);
 }
+.manual-folder {
+  width: min(520px, 100%);
+  display: grid;
+  gap: 8px;
+}
+.manual-folder label {
+  justify-self: start;
+  color: var(--fg-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+}
+.manual-folder__row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.manual-folder input {
+  min-width: 0;
+  height: 36px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-primary);
+  padding: 0 10px;
+  outline: none;
+}
+.manual-folder input:focus {
+  border-color: var(--accent);
+}
 .recent-folders {
   width: min(520px, 100%);
   display: grid;
@@ -906,6 +959,9 @@ watch(recursive, () => {
     max-width: 100%;
   }
   .recent-folders {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .manual-folder__row {
     grid-template-columns: minmax(0, 1fr);
   }
 }
