@@ -20,7 +20,7 @@ const index = ref(0);
 let timer: number | null = null;
 
 const items = computed(() => {
-  const pool = [...lib.resume, ...lib.views].filter(Boolean);
+  const pool = [...lib.heroItems, ...lib.resume].filter(Boolean);
   const seen = new Set<string>();
   return pool.filter((x) => {
     if (seen.has(x.Id)) return false;
@@ -33,21 +33,35 @@ const current = computed(() => items.value[index.value] ?? null);
 const heroStyle = computed(() => settings.settings.homeHeroStyle ?? "classic");
 const heroImageWidth = computed(() => (heroStyle.value === "cinema" ? "2200" : "1280"));
 
-function posterUrl(item: MediaItem): string | null {
+function itemImageUrl(item: MediaItem, imageType: "Backdrop" | "Primary", width: string): string | null {
   const acc = auth.activeAccount;
   if (!acc) return null;
   const server = serverStore.byId(acc.serverId);
-  const tag = item.ImageTags?.Primary ?? item.BackdropImageTags?.[0];
+  const tag = imageType === "Backdrop" ? item.BackdropImageTags?.[0] : item.ImageTags?.Primary;
   if (!tag && !item.Id) return null;
-  return mediaImageUrl(server, item.Id, "Backdrop", {
+  return mediaImageUrl(server, item.Id, imageType, {
     tag,
-    width: heroImageWidth.value,
+    width,
     format: "webp",
   });
 }
 
+function backgroundUrl(item: MediaItem): string | null {
+  if (item.BackdropImageTags?.length) {
+    return itemImageUrl(item, "Backdrop", heroImageWidth.value);
+  }
+  return itemImageUrl(item, "Primary", heroImageWidth.value);
+}
+
+function primaryPosterUrl(item: MediaItem): string | null {
+  return itemImageUrl(item, "Primary", "520");
+}
+
 function metaLine(item: MediaItem): string {
   const parts: string[] = [];
+  if (item.Type === "Series") parts.push("剧集");
+  if (item.Type === "Movie") parts.push("电影");
+  if (item.Type === "Episode" && item.SeriesName) parts.push(item.SeriesName);
   if (item.CommunityRating != null) parts.push(`★ ${item.CommunityRating.toFixed(1)}`);
   if (item.ProductionYear) parts.push(String(item.ProductionYear));
   if (item.OfficialRating) parts.push(item.OfficialRating);
@@ -79,7 +93,7 @@ onUnmounted(() => {
   <section v-if="current" class="hero" :class="`hero--${heroStyle}`">
     <div
       class="hero__bg"
-      :style="posterUrl(current) ? { backgroundImage: `url(${posterUrl(current)})` } : undefined"
+      :style="backgroundUrl(current) ? { backgroundImage: `url(${backgroundUrl(current)})` } : undefined"
     />
     <div class="hero__shade" />
     <button class="hero__nav hero__nav--prev" aria-label="上一张" @click="prev">
@@ -87,6 +101,9 @@ onUnmounted(() => {
     </button>
     <button class="hero__nav hero__nav--next" aria-label="下一张" @click="next">
       <Icon icon="lucide:chevron-right" width="22" />
+    </button>
+    <button v-if="primaryPosterUrl(current)" class="hero__poster" type="button" @click="openItem">
+      <img :src="primaryPosterUrl(current) || ''" :alt="current.Name" draggable="false" />
     </button>
     <div class="hero__content" @click="openItem">
       <h2 class="hero__title">{{ current.Name }}</h2>
@@ -108,15 +125,15 @@ onUnmounted(() => {
 <style scoped>
 .hero {
   position: relative;
-  height: min(42vh, 360px);
-  min-height: 220px;
+  height: min(48vh, 420px);
+  min-height: 260px;
   border-radius: 0;
   overflow: hidden;
   flex-shrink: 0;
 }
 .hero--cinema {
-  height: min(68vh, 620px);
-  min-height: 360px;
+  height: clamp(500px, 72vh, 760px);
+  min-height: 480px;
 }
 .hero__bg {
   position: absolute;
@@ -137,11 +154,11 @@ onUnmounted(() => {
   background:
     linear-gradient(
       90deg,
-      rgba(0, 0, 0, 0.88) 0%,
-      rgba(0, 0, 0, 0.34) 52%,
-      rgba(0, 0, 0, 0.08) 100%
+      rgba(0, 0, 0, 0.9) 0%,
+      rgba(0, 0, 0, 0.48) 48%,
+      rgba(0, 0, 0, 0.16) 100%
     ),
-    linear-gradient(0deg, rgba(0, 0, 0, 0.62) 0%, rgba(0, 0, 0, 0.05) 42%);
+    linear-gradient(0deg, rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0.05) 48%);
 }
 .hero__nav {
   position: absolute;
@@ -170,8 +187,30 @@ onUnmounted(() => {
 }
 .hero--cinema .hero__content {
   left: clamp(28px, 6vw, 72px);
-  bottom: clamp(54px, 10vh, 104px);
-  max-width: min(680px, 62%);
+  bottom: clamp(70px, 12vh, 128px);
+  max-width: min(720px, 56%);
+}
+.hero__poster {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.24);
+  position: absolute;
+  right: clamp(34px, 7vw, 100px);
+  bottom: clamp(42px, 8vh, 92px);
+  width: clamp(132px, 15vw, 230px);
+  aspect-ratio: 2 / 3;
+  border-radius: 8px;
+  overflow: hidden;
+  padding: 0;
+  z-index: 2;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.38);
+  cursor: pointer;
+}
+.hero__poster img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .hero__title {
   margin: 0 0 8px;
@@ -181,7 +220,7 @@ onUnmounted(() => {
   letter-spacing: 0;
 }
 .hero--cinema .hero__title {
-  font-size: 58px;
+  font-size: 64px;
   max-width: 12em;
 }
 .hero__meta {
@@ -229,8 +268,8 @@ onUnmounted(() => {
 }
 @media (max-width: 760px) {
   .hero--cinema {
-    height: min(58vh, 520px);
-    min-height: 300px;
+    height: min(64vh, 560px);
+    min-height: 340px;
   }
   .hero--cinema .hero__content {
     left: 18px;
@@ -240,6 +279,9 @@ onUnmounted(() => {
   }
   .hero--cinema .hero__title {
     font-size: 40px;
+  }
+  .hero__poster {
+    display: none;
   }
   .hero__title {
     font-size: 28px;

@@ -10,6 +10,7 @@ export const useLibraryStore = defineStore("library", () => {
   const settings = useSettingsStore();
   const views = ref<MediaItem[]>([]);
   const resume = ref<MediaItem[]>([]);
+  const heroItems = ref<MediaItem[]>([]);
   const itemsByParent = ref<Record<string, MediaItem[]>>({});
   const itemCache = ref<Record<string, MediaItem>>({});
   const loading = ref(false);
@@ -19,12 +20,24 @@ export const useLibraryStore = defineStore("library", () => {
   async function refreshHome() {
     loading.value = true;
     try {
-      const [viewsResp, resumeResp] = await Promise.all([
+      const [viewsResp, resumeResp, heroResp] = await Promise.all([
         api.listViews(),
         api.resumeItems(),
+        api.listItems({
+          params: [
+            ["Recursive", "true"],
+            ["IncludeItemTypes", "Movie,Series,Episode"],
+            ["Fields", "PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo,RunTimeTicks"],
+            ["SortBy", "DateCreated"],
+            ["SortOrder", "Descending"],
+            ["Limit", "18"],
+          ],
+        }),
       ]);
       views.value = viewsResp.Items;
       resume.value = filterJavItems(resumeResp.Items, settings.settings.hideJavCodes);
+      const filteredHeroItems = filterJavItems(heroResp.Items, settings.settings.hideJavCodes);
+      heroItems.value = filteredHeroItems.length > 0 ? filteredHeroItems : resume.value;
     } finally {
       loading.value = false;
     }
@@ -96,6 +109,7 @@ export const useLibraryStore = defineStore("library", () => {
     }
 
     resume.value = resume.value.map(apply);
+    heroItems.value = heroItems.value.map(apply);
     searchResults.value = searchResults.value.map(apply);
     itemsByParent.value = Object.fromEntries(
       Object.entries(itemsByParent.value).map(([parentId, items]) => [
@@ -125,6 +139,7 @@ export const useLibraryStore = defineStore("library", () => {
   function reset() {
     views.value = [];
     resume.value = [];
+    heroItems.value = [];
     itemsByParent.value = {};
     itemCache.value = {};
     searchResults.value = [];
@@ -135,6 +150,7 @@ export const useLibraryStore = defineStore("library", () => {
   return {
     views,
     resume,
+    heroItems,
     itemsByParent,
     itemCache,
     loading,

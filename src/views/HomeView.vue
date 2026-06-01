@@ -99,7 +99,7 @@ function gotoAddServer() {
         <Icon icon="lucide:server-cog" width="44" />
       </div>
       <h2>添加一台媒体服务器</h2>
-      <p>从左侧栏「添加服务器」开始，或点击下方按钮。</p>
+      <p>从设置里的服务器面板开始，或点击下方按钮。</p>
       <div class="empty-state__actions">
         <GlassButton variant="primary" size="lg" @click="gotoAddServer">
           <Icon icon="lucide:plus" width="16" />
