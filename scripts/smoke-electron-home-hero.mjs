@@ -470,6 +470,38 @@ try {
     })()
   `);
 
+  const compactHome = await cdpEval(ws, `
+    (async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+      const { useLibraryStore } = await import("/src/stores/library.ts");
+      const lib = useLibraryStore();
+      lib.searchResults = [];
+      await appRouter.push("/home");
+      window.moveTo(80, 80);
+      window.resizeTo(960, 600);
+      for (let i = 0; i < 10 && !document.querySelector(".hero.hero--cinema"); i += 1) {
+        if (lib.heroItems.length === 0) await lib.refreshHome();
+        await wait(200);
+      }
+      const hero = document.querySelector(".hero.hero--cinema");
+      const nextSection = document.querySelector(".row-section");
+      const title = document.querySelector(".hero__title");
+      const heroRect = hero?.getBoundingClientRect();
+      const nextRect = nextSection?.getBoundingClientRect();
+      return {
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        hero: heroRect
+          ? { y: heroRect.y, width: heroRect.width, height: heroRect.height, bottom: heroRect.bottom }
+          : null,
+        nextSectionTop: nextRect?.top ?? null,
+        titleFontSize: title ? Number.parseFloat(getComputedStyle(title).fontSize) : null,
+        hasHorizontalOverflow:
+          document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+      };
+    })()
+  `);
+
   const failures = [];
   if (result.route !== "/home") failures.push(`route ${result.route}`);
   if (!result.hero) failures.push("hero missing");
@@ -552,14 +584,25 @@ try {
   if (new Set(multiServerSearch.keys).size !== multiServerSearch.keys.length) {
     failures.push("search collapsed duplicate cross-server records");
   }
+  if (!compactHome.hero) failures.push("compact home hero missing");
+  if (compactHome.hero && compactHome.hero.bottom > compactHome.viewport.height + 2) {
+    failures.push(`compact home hero exceeds viewport: ${JSON.stringify(compactHome)}`);
+  }
+  if (compactHome.nextSectionTop == null || compactHome.nextSectionTop > compactHome.viewport.height + 2) {
+    failures.push(`compact home next section not hinted: ${JSON.stringify(compactHome)}`);
+  }
+  if (compactHome.hasHorizontalOverflow) failures.push("compact home has horizontal overflow");
+  if ((compactHome.titleFontSize ?? 999) > 56) {
+    failures.push(`compact home title too large: ${JSON.stringify(compactHome)}`);
+  }
 
   if (failures.length > 0) {
     throw new Error(
-      `home hero smoke failed: ${failures.join("; ")}\n${JSON.stringify({ result, sidebarCollapse, heroClick, personalRoutes, multiServerSearch }, null, 2)}`,
+      `home hero smoke failed: ${failures.join("; ")}\n${JSON.stringify({ result, sidebarCollapse, heroClick, personalRoutes, multiServerSearch, compactHome }, null, 2)}`,
     );
   }
 
-  console.log(JSON.stringify({ ok: true, screenshotPath, ...result, sidebarCollapse, heroClick, personalRoutes, multiServerSearch }, null, 2));
+  console.log(JSON.stringify({ ok: true, screenshotPath, ...result, sidebarCollapse, heroClick, personalRoutes, multiServerSearch, compactHome }, null, 2));
 } finally {
   if (ws) ws.close();
   child.kill();

@@ -153,8 +153,8 @@ onUnmounted(() => {
   outline: none;
 }
 .hero--cinema {
-  height: clamp(620px, calc(100dvh - 72px), 1080px);
-  min-height: 620px;
+  height: clamp(520px, calc(100dvh - 72px), 900px);
+  min-height: min(520px, calc(100dvh - 72px));
 }
 .hero__bg {
   position: absolute;
@@ -282,8 +282,8 @@ onUnmounted(() => {
     min-height: 340px;
   }
   .hero--cinema {
-    height: min(82dvh, 720px);
-    min-height: 520px;
+    height: min(78dvh, 640px);
+    min-height: min(460px, calc(100dvh - 92px));
   }
   .hero--cinema .hero__content {
     left: 18px;
@@ -300,14 +300,17 @@ onUnmounted(() => {
 }
 @media (max-height: 760px) and (min-width: 761px) {
   .hero--cinema {
-    height: clamp(560px, calc(100dvh - 64px), 720px);
-    min-height: 560px;
+    height: clamp(420px, calc(100dvh - 72px), 620px);
+    min-height: min(420px, calc(100dvh - 72px));
   }
   .hero--cinema .hero__content {
-    bottom: clamp(52px, 8vh, 86px);
+    bottom: 52px;
   }
   .hero--cinema .hero__title {
-    font-size: 60px;
+    font-size: 52px;
+  }
+  .hero--cinema .hero__desc {
+    -webkit-line-clamp: 3;
   }
 }
 @media (max-width: 420px) {
