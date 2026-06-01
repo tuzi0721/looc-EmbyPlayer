@@ -408,12 +408,58 @@ try {
           durationMs: state.durationMs,
           positionMs: state.positionMs,
           trackCount: Array.isArray(state.tracks) ? state.tracks.length : 0,
+          speed: state.speed,
           paused: state.paused,
           eof: state.eof,
         },
       };
     })()
   `);
+
+  const holdPoint = startResult.stage
+    ? {
+        x: Math.round(startResult.stage.x + startResult.stage.width / 2),
+        y: Math.round(startResult.stage.y + startResult.stage.height / 2),
+      }
+    : { x: 640, y: 360 };
+  await cdpCall(ws, "Input.dispatchMouseEvent", { type: "mouseMoved", ...holdPoint, button: "none" });
+  await cdpCall(ws, "Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    ...holdPoint,
+    button: "left",
+    clickCount: 1,
+  });
+  await wait(850);
+  const longPressActive = await cdpEval(ws, `
+    (async () => {
+      const state = await window.hillsLite.invoke("get_state");
+      return {
+        speed: state.speed,
+        badgeVisible: Boolean(document.querySelector(".player__speed-hold")),
+      };
+    })()
+  `);
+  await cdpCall(ws, "Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    ...holdPoint,
+    button: "left",
+    clickCount: 1,
+  });
+  await wait(650);
+  const longPressRestored = await cdpEval(ws, `
+    (async () => {
+      const state = await window.hillsLite.invoke("get_state");
+      return {
+        speed: state.speed,
+        badgeVisible: Boolean(document.querySelector(".player__speed-hold")),
+      };
+    })()
+  `);
+  const longPressSpeed = {
+    point: holdPoint,
+    active: longPressActive,
+    restored: longPressRestored,
+  };
 
   foregroundHillsWindow();
   await wait(500);
@@ -435,6 +481,9 @@ try {
     startResult.route === `/player/${itemId}` &&
     startResult.state.durationMs > 0 &&
     startResult.state.trackCount >= 1 &&
+    longPressSpeed.active.speed >= 1.95 &&
+    Math.abs(longPressSpeed.restored.speed - startResult.state.speed) < 0.05 &&
+    !longPressSpeed.restored.badgeVisible &&
     pixels.brightRatio > 0.18 &&
     pixels.colorfulRatio > 0.08;
 
@@ -445,6 +494,7 @@ try {
     bodyText: startResult.bodyText,
     state: startResult.state,
     stage: startResult.stage,
+    longPressSpeed,
     mpvScreenshot: startResult.mpvScreenshot,
     mpvScreenshotError: startResult.mpvScreenshotError,
     mpvPixels,

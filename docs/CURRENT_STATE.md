@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（Electron 内嵌播放复核）
+> **更新时间**：2026-06-01（播放器长按倍速）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-0927-electron-embedded-smoke.md`](./CHANGE_LOG/2026-06-01-0927-electron-embedded-smoke.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-0935-player-long-press-speed.md`](./CHANGE_LOG/2026-06-01-0935-player-long-press-speed.md)
 
 ---
 
@@ -111,6 +111,8 @@
 
 **2026-05-30**：播放器 Stats 浮层升级为综合、视频、音频、轨道、Whisper 五页；设置页播放器面板新增“统计浮层”模式，默认 WinUI，也可切到 mpv OSD，播放器统计入口会调用 mpv `stats/display-page-N` / `stats/display-stats`。
 
+**2026-06-01**：播放器画面区域新增长按倍速手势；按住非控件区域 420ms 后临时切到 2.0x，并显示居中 `2.0x` 徽标，松开后恢复原倍速。控件、进度条、菜单、提示和错误浮层不触发，移动超过阈值会取消未触发的长按。
+
 **2026-05-30**：Electron mpv resolver 移除旧 `src-tauri\vendor\mpv` 与 exe 旁 `mpv` 候选路径，缺失时报 `bundled mpv executable not found`；`scripts/test-playback-flow.ps1` 改为 `npm.cmd run ...` 并把 Tauri release 随包 mpv 缺失视为硬失败，不再提示系统 PATH mpv。
 
 ---
@@ -201,6 +203,7 @@
 - **2026-05-29**：截图保存提示改为显示短文件名，并在播放器提示条内提供“打开目录”动作；Electron 通过 `shell.openPath` 打开目录，Tauri 通过 `open_path` 命令调用系统打开能力。
 - **2026-05-29**：设置页播放器面板和播放器设置菜单新增“截图包含字幕”开关，截图按钮会按该持久设置决定传给 mpv 的 screenshot 模式。
 - **2026-05-31**：播放器截图前会临时收起顶部/底部控制层、关闭临时面板并强制同步 embedded mpv rect，避免截图继承控制栏显示时的内嵌避让区域；截图完成或失败后恢复控制层提示计时。
+- **2026-06-01**：播放器画面空白区域支持长按临时 2.0x；该手势复用当前播放后端的倍速命令，Web Preview HTML video 与 Electron/Tauri mpv 路径都会在松开后恢复长按前倍速。
 - **2026-05-29**：播放器底栏播放按钮两侧新增“后退 10 秒”和“前进 30 秒”按钮，复用现有 seek 逻辑，鼠标/触控操作不再只能依赖键盘左右键。
 - **2026-05-29**：设置页播放器面板新增“自动跳过片头/片尾”开关和片头/片尾秒数；播放器设置菜单占位项改为真实开关，播放页会在每个条目内至多自动跳一次片头，并在片尾且队列有下一项时自动切到下一项。
 - **2026-05-29**：字幕面板的“字幕大小”扩展为“字幕样式”，支持持久化比例、文字/描边颜色、描边宽度、阴影偏移、垂直位置和强制覆盖 ASS；Electron/Tauri 新播放会话会自动把这些设置套用到 mpv。
@@ -575,6 +578,8 @@ npm.cmd run electron:build
 本轮 Web Preview 详情加载超时已闭环：`src/platform` 的浏览器直连请求与 `__hills_web_proxy` fallback 统一使用设置里的请求超时，Vite 本地代理会按前端传入的 `timeoutMs` 取消真实 API 请求，`DetailView` 主详情加载超过超时后进入既有错误态；HLS/播放流代理保持不加短超时，避免影响播放分片。验证已覆盖 `npm.cmd run build`、`git diff --check` 与敏感关键字扫描；未写入测试账号、密码、token 或完整线路地址。
 
 本轮 Electron 内嵌播放复核已闭环：`node scripts\smoke-electron-embedded-local.mjs` 启动 Electron 桌面窗口、本地假 Emby 和临时彩色视频，播放器进入 `/player/local-embedded-smoke`，mpv 快照返回 `durationMs = 12000`、`positionMs ≈ 7300`、`trackCount = 2`、`paused = false`，屏幕截图与 mpv 截图的彩色像素检测均通过，确认当前桌面内嵌路径非黑屏。验证过程未写入测试账号、密码、token 或完整线路地址。
+
+本轮播放器长按倍速已闭环：`PlayerView` 在画面空白区域长按时临时切到 2.0x，松开后恢复原倍速，控件/进度条/菜单区域不会触发；Electron 内嵌 smoke 已扩展为模拟长按，验证 `speed` 从 1.0 到 2.0 再恢复到 1.0，且 `2.0x` 徽标随按住/松开显示与消失。验证已覆盖 `npm.cmd run build`、`node --check scripts\smoke-electron-embedded-local.mjs`、`node scripts\smoke-electron-embedded-local.mjs`、`git diff --check` 与敏感关键字扫描；未写入测试账号、密码、token 或完整线路地址。
 
 ---
 

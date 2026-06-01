@@ -61,6 +61,10 @@ let blackoutSyncSeq = 0;
 let introSkipAppliedItemId: string | null = null;
 let outroSkipAppliedItemId: string | null = null;
 let localQueueEofHandled = false;
+let longPressSpeedTimer: number | null = null;
+let longPressRestoreSpeed: number | null = null;
+let longPressPointerId: number | null = null;
+let longPressStart: { x: number; y: number } | null = null;
 
 const subtitlePanelOpen = ref(false);
 const settingsMenuOpen = ref(false);
@@ -70,6 +74,7 @@ const danmakuMenuOpen = ref(false);
 const sourceMenuOpen = ref(false);
 const statsOpen = ref(false);
 const playbackSwitching = ref(false);
+const longPressSpeedActive = ref(false);
 const statsPage = ref<StatsPage>("summary");
 const alwaysOnTop = ref(false);
 const screenshotBusy = ref(false);
@@ -1021,6 +1026,88 @@ function clearControlsHideTimer() {
   }
 }
 
+function clearLongPressSpeedTimer() {
+  if (longPressSpeedTimer != null) {
+    window.clearTimeout(longPressSpeedTimer);
+    longPressSpeedTimer = null;
+  }
+}
+
+function isLongPressSpeedTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return !target.closest(
+    [
+      "button",
+      "input",
+      "select",
+      "a",
+      ".player__top",
+      ".player__bottom",
+      ".player__hint",
+      ".player__error",
+      ".popup-menu",
+      ".stats-panel",
+    ].join(","),
+  );
+}
+
+async function activateLongPressSpeed() {
+  longPressSpeedTimer = null;
+  if (longPressSpeedActive.value || paused.value) return;
+  longPressRestoreSpeed = speed.value;
+  longPressSpeedActive.value = true;
+  try {
+    await setSpeed(2);
+  } catch (error) {
+    longPressSpeedActive.value = false;
+    longPressRestoreSpeed = null;
+    errorText.value = error instanceof Error ? error.message : String(error);
+    showControls.value = true;
+  }
+}
+
+async function stopLongPressSpeed(pointerId?: number) {
+  if (pointerId != null && longPressPointerId != null && pointerId !== longPressPointerId) return;
+  clearLongPressSpeedTimer();
+  longPressPointerId = null;
+  longPressStart = null;
+  if (!longPressSpeedActive.value) {
+    longPressRestoreSpeed = null;
+    return;
+  }
+  const restoreSpeed = longPressRestoreSpeed ?? 1;
+  longPressSpeedActive.value = false;
+  longPressRestoreSpeed = null;
+  if (Math.abs(speed.value - restoreSpeed) < 0.01) return;
+  await setSpeed(restoreSpeed).catch((error) => {
+    errorText.value = error instanceof Error ? error.message : String(error);
+    showControls.value = true;
+  });
+}
+
+function onPlayerPointerDown(event: PointerEvent) {
+  if (event.button !== 0 || paused.value || !isLongPressSpeedTarget(event.target)) return;
+  clearLongPressSpeedTimer();
+  longPressPointerId = event.pointerId;
+  longPressStart = { x: event.clientX, y: event.clientY };
+  try {
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  } catch {
+    // Pointer capture is best-effort; pointerup/cancel still restores the speed.
+  }
+  longPressSpeedTimer = window.setTimeout(() => {
+    void activateLongPressSpeed();
+  }, 420);
+}
+
+function onPlayerPointerMove(event: PointerEvent) {
+  if (longPressPointerId == null || event.pointerId !== longPressPointerId || !longPressStart) return;
+  const moved = Math.hypot(event.clientX - longPressStart.x, event.clientY - longPressStart.y);
+  if (moved > 18 && !longPressSpeedActive.value) {
+    clearLongPressSpeedTimer();
+  }
+}
+
 function bumpControls() {
   showControls.value = true;
   clearControlsHideTimer();
@@ -1742,6 +1829,7 @@ onBeforeUnmount(async () => {
   document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
   blackoutSyncSeq += 1;
   clearControlsHideTimer();
+  clearLongPressSpeedTimer();
   if (screenshotMessageTimer != null) window.clearTimeout(screenshotMessageTimer);
   clearErrorCopyStatus();
   if (useHtmlVideo) {
@@ -1761,7 +1849,16 @@ onBeforeUnmount(async () => {
 </script>
 
 <template>
-  <main class="player" :class="{ 'player--embedded': embedVideo }" @mousemove="bumpControls">
+  <main
+    class="player"
+    :class="{ 'player--embedded': embedVideo }"
+    @mousemove="bumpControls"
+    @pointerdown="onPlayerPointerDown"
+    @pointermove="onPlayerPointerMove"
+    @pointerup="(event) => void stopLongPressSpeed(event.pointerId)"
+    @pointercancel="(event) => void stopLongPressSpeed(event.pointerId)"
+    @pointerleave="(event) => void stopLongPressSpeed(event.pointerId)"
+  >
     <div ref="stageEl" class="player__stage">
       <div
         v-if="backdropUrl && !htmlHasFrame"
@@ -1839,6 +1936,12 @@ onBeforeUnmount(async () => {
         </div>
         <span v-if="errorCopyStatus" class="player__error-status">{{ errorCopyStatus }}</span>
       </div>
+
+      <transition name="fade">
+        <div v-if="longPressSpeedActive" class="player__speed-hold" aria-live="polite">
+          2.0x
+        </div>
+      </transition>
 
       <aside v-if="statsOpen" class="stats-panel glass glass-strong">
         <header>
@@ -2470,6 +2573,26 @@ onBeforeUnmount(async () => {
 .player__hint button:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+.player__speed-hold {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 8;
+  transform: translate(-50%, -50%);
+  min-width: 92px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.48);
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  pointer-events: none;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(14px);
 }
 .player__error {
   position: absolute;
