@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
 
@@ -14,8 +14,6 @@ const route = useRoute();
 const auth = useAuthStore();
 const serverStore = useServerStore();
 const settings = useSettingsStore();
-
-const showVisibility = ref(false);
 
 const hiddenIds = computed(() => settings.settings.hiddenServerIds ?? []);
 const visibleServers = computed(() =>
@@ -41,14 +39,6 @@ async function pickServer(serverId: string) {
     router.push("/home").catch(() => {});
   } else {
     router.push({ name: "login", query: { server: serverId } }).catch(() => {});
-  }
-}
-
-async function toggleHidden(serverId: string, hidden: boolean) {
-  try {
-    await settings.toggleHidden(serverId, hidden);
-  } catch {
-    /* ignore */
   }
 }
 
@@ -117,32 +107,7 @@ function gotoAggregate() {
     <section class="sb__section">
       <header class="sec-head">
         <span>服务器</span>
-        <div class="sec-head__actions">
-          <button
-            class="iconbtn"
-            :class="{ active: showVisibility }"
-            aria-label="管理可见性"
-            @click="showVisibility = !showVisibility"
-          >
-            <Icon icon="lucide:settings-2" width="14" />
-          </button>
-        </div>
       </header>
-
-      <div v-if="showVisibility" class="visibility glass-thin">
-        <div class="visibility__title">显示哪些服务器</div>
-        <div v-if="serverStore.servers.length === 0" class="visibility__empty">
-          还没有服务器
-        </div>
-        <label v-for="s in serverStore.servers" :key="s.id" class="visibility__row">
-          <input
-            type="checkbox"
-            :checked="!hiddenIds.includes(s.id)"
-            @change="(e: any) => toggleHidden(s.id, !e.target.checked)"
-          />
-          <span class="visibility__name">{{ s.name }}</span>
-        </label>
-      </div>
 
       <ul class="srv-list">
         <li
@@ -168,25 +133,18 @@ function gotoAggregate() {
               </div>
             </div>
           </button>
-          <button
-            class="srv-row__minus"
-            aria-label="隐藏服务器"
-            @click.stop="toggleHidden(s.id, true)"
-          >
-            <Icon icon="lucide:minus" width="14" />
-          </button>
         </li>
         <li
           v-if="visibleServers.length === 0 && serverStore.servers.length === 0"
           class="srv-empty"
         >
-          马上添加 Emby 服务器，以开始您的媒体之旅！
+          还没有服务器
         </li>
         <li
           v-else-if="visibleServers.length === 0"
           class="srv-empty"
         >
-          全部服务器被隐藏，点击右上 ⚙️ 取消隐藏。
+          服务器已隐藏，可在设置中恢复显示。
         </li>
       </ul>
     </section>
@@ -315,77 +273,13 @@ function gotoAggregate() {
 .sec-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   padding: 4px 6px 2px;
   font-size: 10px;
   color: var(--fg-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-weight: 700;
-}
-.sec-head__actions {
-  display: inline-flex;
-  gap: 2px;
-}
-.iconbtn {
-  appearance: none;
-  border: none;
-  background: transparent;
-  color: var(--fg-secondary);
-  width: 22px;
-  height: 22px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 160ms var(--easing-glide);
-}
-.iconbtn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--fg-primary);
-}
-.iconbtn.active {
-  background: rgba(10, 132, 255, 0.18);
-  color: var(--accent);
-}
-
-.visibility {
-  margin: 4px 4px 4px;
-  padding: 10px 10px 8px;
-  border-radius: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  border: 1px solid var(--glass-border);
-}
-.visibility__title {
-  font-size: 11px;
-  color: var(--fg-tertiary);
-  margin-bottom: 2px;
-}
-.visibility__empty {
-  font-size: 12px;
-  color: var(--fg-tertiary);
-  padding: 4px 0;
-}
-.visibility__row {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--fg-secondary);
-  cursor: pointer;
-  user-select: none;
-}
-.visibility__row input {
-  accent-color: var(--accent);
-}
-.visibility__name {
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .srv-list {
@@ -409,24 +303,6 @@ function gotoAggregate() {
   padding: 0;
   display: flex;
   align-items: center;
-  gap: 2px;
-}
-.srv-row__minus {
-  appearance: none;
-  border: none;
-  background: transparent;
-  color: var(--fg-tertiary);
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-}
-.srv-row__minus:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--fg-primary);
 }
 .srv-row__btn {
   appearance: none;

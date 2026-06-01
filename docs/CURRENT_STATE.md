@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-01（服务器线路编辑体验修正）
+> 更新时间：2026-06-01（侧边栏服务器管理控件收敛）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-01-2121-server-settings-line-edit.md`](./CHANGE_LOG/2026-06-01-2121-server-settings-line-edit.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-01-2125-sidebar-server-controls-prune.md`](./CHANGE_LOG/2026-06-01-2125-sidebar-server-controls-prune.md)
 
 ---
 
@@ -35,7 +35,7 @@
 
 ## 2. 当前产品面
 
-- 主导航保留首页、收藏、历史、聚合视界、服务器与设置；下载、通知、遥控集中到设置页工具分组。
+- 主导航保留首页、收藏、历史、聚合视界、服务器状态/切换与设置；下载、通知、遥控、服务器显示/隐藏等管理动作集中到设置页。
 - 添加服务器表单直接提供用户名、密码、线路地址和任意端口输入；服务端名称与 Emby/Jellyfin 类型由公开信息接口自动识别。
 - 保存服务器会追加记录，不覆盖原服务器；已保存服务器的线路编辑同样使用地址 + 端口输入，线路名为高级可选项，线路级高级设置保留 User-Agent 与 headers。
 - 线路延迟显示不展示 `0ms` / `1ms` 这种误导性精确值，`0-9ms` 统一显示为 `<10ms`。
