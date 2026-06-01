@@ -18,6 +18,7 @@ import { useSettingsStore } from "@/stores/settings";
 import { useServerStore } from "@/stores/server";
 import type { Line, Server } from "@/types/models";
 import { headersToText, normalizeNullableText, parseHeaderText } from "@/utils/headerText";
+import { normalizeServerBaseUrl } from "@/utils/serverUrl";
 
 type PanelId =
   | null
@@ -80,6 +81,7 @@ type ServerLineDraft = {
   id?: string;
   name: string;
   baseUrl: string;
+  port: string;
   userAgent: string;
   headersText: string;
   enabled: boolean;
@@ -231,6 +233,35 @@ function maskHostLabel(label: string): string {
   if (label.length <= 1) return label;
   if (label.length <= 3) return `${label[0]}*${label.slice(-1)}`;
   return `${label.slice(0, 2)}***${label.slice(-1)}`;
+}
+
+function explicitPortFromUrl(value: string): string {
+  const match = value
+    .trim()
+    .match(/^[a-z][a-z0-9+.-]*:\/\/(?:\[[^\]]+\]|[^/:?#]+):(\d{1,5})(?=[/?#]|$)/i);
+  return match?.[1] ?? "";
+}
+
+function splitServerBaseUrl(baseUrl: string): { address: string; port: string } {
+  const raw = baseUrl.trim();
+  if (!raw) return { address: "", port: "" };
+
+  try {
+    const explicitPort = explicitPortFromUrl(raw);
+    const url = new URL(raw);
+    const port = explicitPort || url.port;
+    url.port = "";
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    const text = url.toString();
+    const address =
+      url.pathname === "/" && text.endsWith("/") ? text.slice(0, -1) : text.replace(/\/+$/, "");
+    return { address, port };
+  } catch {
+    return { address: raw, port: "" };
+  }
 }
 
 async function onServerCreated(_id: string, loggedIn = false) {
@@ -414,10 +445,12 @@ async function toggleHidden(serverId: string, currentlyHidden: boolean) {
 }
 
 function createServerLineDraft(line: Partial<Line> = {}, index = 0): ServerLineDraft {
+  const { address, port } = splitServerBaseUrl(line.baseUrl ?? "");
   return {
     id: line.id,
     name: line.name ?? `线路 ${index + 1}`,
-    baseUrl: line.baseUrl ?? "",
+    baseUrl: address,
+    port,
     userAgent: line.userAgent ?? "",
     headersText: headersToText(line.headers),
     enabled: line.enabled ?? true,
@@ -462,8 +495,8 @@ async function saveServerDraft(server: Server) {
   let lines: ServerLinePayload[];
   try {
     lines = draft.lines.map((line, index) => {
-      const baseUrl = line.baseUrl.trim();
-      if (!baseUrl) throw new Error(`线路 ${index + 1} 需要填写 URL`);
+      const baseUrl = normalizeServerBaseUrl(line.baseUrl, line.port);
+      if (!baseUrl) throw new Error(`线路 ${index + 1} 需要填写地址`);
       return {
         id: line.id,
         name: line.name.trim() || `线路 ${index + 1}`,
@@ -920,15 +953,19 @@ const danmakuSummary = computed(() => {
               </div>
               <div class="server-edit__grid">
                 <label class="field">
-                  <span>名称</span>
-                  <input v-model="line.name" class="plain-input" />
+                  <span>地址</span>
+                  <input
+                    v-model="line.baseUrl"
+                    class="plain-input"
+                    placeholder="https://example.com 或 192.168.1.2"
+                  />
                 </label>
                 <label class="field">
-                  <span>URL</span>
-                  <input v-model="line.baseUrl" class="plain-input" />
+                  <span>端口</span>
+                  <input v-model="line.port" class="plain-input" placeholder="443 / 8096 / 任意" />
                 </label>
               </div>
-              <label class="field field--inline">
+              <label class="field field--inline server-edit__toggle">
                 <span>启用线路</span>
                 <input v-model="line.enabled" class="switch" type="checkbox" />
               </label>
@@ -937,6 +974,14 @@ const danmakuSummary = computed(() => {
                   <Icon icon="lucide:sliders-horizontal" width="14" />
                   高级
                 </summary>
+                <label class="field">
+                  <span>线路名（可选）</span>
+                  <input
+                    v-model="line.name"
+                    class="plain-input"
+                    placeholder="留空自动使用线路序号"
+                  />
+                </label>
                 <label class="field">
                   <span>User-Agent</span>
                   <input
@@ -1799,14 +1844,15 @@ const danmakuSummary = computed(() => {
 .server-edit {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 10px;
   border-top: 1px solid var(--separator);
   padding-top: 12px;
 }
 .server-edit__line {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px 12px;
   border-top: 1px solid var(--separator);
   padding: 12px 0 0;
 }
@@ -1815,6 +1861,7 @@ const danmakuSummary = computed(() => {
   padding-top: 0;
 }
 .server-edit__line-head {
+  grid-column: 1 / -1;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1825,6 +1872,7 @@ const danmakuSummary = computed(() => {
   color: var(--fg-secondary);
 }
 .server-edit__advanced {
+  grid-column: 1 / -1;
   padding-top: 0;
 }
 .server-edit__advanced summary {
@@ -1841,8 +1889,14 @@ const danmakuSummary = computed(() => {
 }
 .server-edit__grid {
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.6fr);
+  grid-template-columns: minmax(0, 1fr) minmax(108px, 0.25fr);
   gap: 10px;
+}
+.server-edit__toggle {
+  min-height: 39px;
+  justify-content: flex-start;
+  gap: 8px;
+  white-space: nowrap;
 }
 .dim {
   color: var(--fg-tertiary);
@@ -1898,6 +1952,16 @@ const danmakuSummary = computed(() => {
 .plain-textarea {
   min-height: 82px;
   resize: vertical;
+}
+@media (max-width: 760px) {
+  .server-edit__line,
+  .server-edit__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .server-edit__toggle {
+    justify-content: space-between;
+  }
 }
 .status-line.error {
   color: var(--danger);
