@@ -13,7 +13,9 @@ import { useAuthStore } from "@/stores/auth";
 import { useLibraryStore } from "@/stores/library";
 import { useServerStore } from "@/stores/server";
 import { useSettingsStore } from "@/stores/settings";
+import type { MediaItem } from "@/types/models";
 import { serverActiveLine, serverKindIcon } from "@/utils/serverVisuals";
+import { mediaItemKey, openMediaItemFromSource } from "@/utils/sourceContext";
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -74,8 +76,8 @@ function onSearchInput() {
   }, 280);
 }
 
-function openItem(id: string) {
-  router.push(`/item/${id}`);
+function openItem(item: MediaItem) {
+  openMediaItemFromSource(router, auth, item).catch(() => {});
 }
 function openLibrary(id: string) {
   router.push(`/library/${id}`);
@@ -145,9 +147,9 @@ function gotoAddServer() {
           <div class="grid">
             <PosterCard
               v-for="item in lib.searchResults"
-              :key="item.Id"
+              :key="mediaItemKey(item)"
               :item="item"
-              @activate="openItem(item.Id)"
+              @activate="openItem(item)"
             />
           </div>
         </section>
@@ -167,9 +169,9 @@ function gotoAddServer() {
           <div class="hscroll content__pad">
             <button
               v-for="(item, idx) in lib.resume"
-              :key="item.Id"
+              :key="mediaItemKey(item)"
               class="resume-card"
-              @click="openItem(item.Id)"
+              @click="openItem(item)"
             >
               <PosterCard :item="item" aspect="backdrop" :eager="idx < 4" />
               <div class="resume-card__title">{{ item.Name }}</div>

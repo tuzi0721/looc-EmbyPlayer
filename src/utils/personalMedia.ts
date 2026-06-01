@@ -1,5 +1,6 @@
 import { api } from "@/api";
 import type { ItemsResponse, MediaItem } from "@/types/models";
+import { mediaItemKey } from "@/utils/sourceContext";
 
 export type PersonalMediaTypes = "Movie,Episode" | "Movie" | "Episode";
 
@@ -14,7 +15,7 @@ const PERSONAL_FIELDS =
 const PERSONAL_IMAGE_PARAMS: [string, string][] = [
   ["EnableUserData", "true"],
   ["EnableImages", "true"],
-  ["ImageTypeLimit", "1"],
+  ["ImageTypeLimit", "2"],
   ["EnableImageTypes", "Primary,Backdrop"],
 ];
 
@@ -32,9 +33,10 @@ export function mergeMediaItems(groups: MediaItem[][]) {
   const merged = new Map<string, MediaItem>();
   for (const group of groups) {
     for (const item of group) {
-      const previous = merged.get(item.Id);
+      const key = mediaItemKey(item);
+      const previous = merged.get(key);
       merged.set(
-        item.Id,
+        key,
         previous
           ? {
               ...previous,
@@ -69,7 +71,7 @@ export function sortHistoryItems(items: MediaItem[]) {
 }
 
 function listItems(params: [string, string][]) {
-  return api.listItems({
+  return api.listItemsAllAccounts({
     params,
   });
 }
@@ -201,7 +203,7 @@ export async function fetchPersonalHistory(payload: {
   const includeResume = payload.includeResume ?? startIndex === 0;
   const [playedResult, resumeResult] = await Promise.all([
     settle(fetchPlayedItems(includeTypes, startIndex, limit)),
-    includeResume ? settle(api.resumeItems()) : Promise.resolve(null),
+    includeResume ? settle(api.resumeItemsAllAccounts()) : Promise.resolve(null),
   ]);
 
   if (playedResult.status === "rejected" && (!includeResume || resumeResult?.status === "rejected")) {
@@ -226,8 +228,8 @@ export async function fetchPersonalHistory(payload: {
     : { Items: [], TotalRecordCount: 0 };
   const resumeItems = resume.Items.filter((item) => hasType(item, includeTypes));
   const mergedItems = sortHistoryItems(mergeMediaItems([resumeItems, played.Items]));
-  const playedIds = new Set(played.Items.map((item) => item.Id));
-  const resumeOnlyCount = resumeItems.filter((item) => !playedIds.has(item.Id)).length;
+  const playedIds = new Set(played.Items.map(mediaItemKey));
+  const resumeOnlyCount = resumeItems.filter((item) => !playedIds.has(mediaItemKey(item))).length;
 
   return {
     Items: mergedItems,

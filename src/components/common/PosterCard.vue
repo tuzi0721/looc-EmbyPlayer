@@ -7,6 +7,7 @@ import { useServerStore } from "@/stores/server";
 import { useLazyVisible } from "@/composables/useLazyVisible";
 import type { MediaItem } from "@/types/models";
 import { mediaImageUrl } from "@/utils/mediaImages";
+import { mediaItemSourceLabel } from "@/utils/sourceContext";
 
 type PosterAspect = "portrait" | "backdrop" | "square";
 
@@ -37,6 +38,8 @@ const resolvedAspect = computed<PosterAspect>(() => {
 });
 
 const activeServer = computed(() => {
+  const sourceServerId = props.item._source?.serverId;
+  if (sourceServerId) return serverStore.byId(sourceServerId) ?? null;
   const acc = auth.activeAccount;
   if (!acc) return null;
   return serverStore.byId(acc.serverId) ?? null;
@@ -52,6 +55,7 @@ const imageUrl = computed(() => {
   const tag = useBackdrop ? props.item.BackdropImageTags?.[0] : props.item.ImageTags?.Primary;
   const maxWidth = resolvedAspect.value === "backdrop" ? "640" : "320";
   return mediaImageUrl(server, id, imageType, {
+    accountId: props.item._source?.accountId,
     maxWidth,
     quality: 82,
     format: "webp",
@@ -71,6 +75,7 @@ const subtitle = computed(() => {
   if (i.ProductionYear) return String(i.ProductionYear);
   return "";
 });
+const sourceLabel = computed(() => mediaItemSourceLabel(props.item));
 </script>
 
 <template>
@@ -103,6 +108,7 @@ const subtitle = computed(() => {
     <div class="poster__meta">
       <h4>{{ item.Name }}</h4>
       <p v-if="subtitle">{{ subtitle }}</p>
+      <p v-if="sourceLabel" class="poster__source">{{ sourceLabel }}</p>
     </div>
   </article>
 </template>
@@ -216,5 +222,8 @@ const subtitle = computed(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.poster__source {
+  color: var(--accent) !important;
 }
 </style>

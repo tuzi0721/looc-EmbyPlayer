@@ -142,9 +142,17 @@ export interface MediaSourceInfo {
   MediaStreams?: MediaStreamInfo[] | null;
 }
 
+export interface MediaItemSourceContext {
+  serverId: string;
+  accountId: string;
+  serverName?: string | null;
+  username?: string | null;
+}
+
 export interface MediaItem {
   Id: string;
   Name: string;
+  _source?: MediaItemSourceContext | null;
   Type?: string | null;
   Overview?: string | null;
   ProductionYear?: number | null;

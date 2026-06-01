@@ -283,9 +283,13 @@ export const api = {
   listViews: () => invoke<ViewsResponse>("list_views"),
   listItems: (payload: { parentId?: string; params?: [string, string][] }) =>
     invoke<ItemsResponse>("list_items", { payload }),
+  listItemsAllAccounts: (payload: { parentId?: string; params?: [string, string][] }) =>
+    invoke<ItemsResponse>("list_items_all_accounts", { payload }),
   getItemDetail: (itemId: string) => invoke<MediaItem>("get_item_detail", { itemId }),
   search: (term: string) => invoke<ItemsResponse>("search", { term }),
+  searchAllAccounts: (term: string) => invoke<ItemsResponse>("search_all_accounts", { term }),
   resumeItems: () => invoke<ItemsResponse>("resume_items"),
+  resumeItemsAllAccounts: () => invoke<ItemsResponse>("resume_items_all_accounts"),
   playbackHistory: (
     payload: {
       includeTypes?: "Movie,Episode" | "Movie" | "Episode";

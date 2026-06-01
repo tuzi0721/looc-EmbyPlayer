@@ -482,10 +482,14 @@ function parseImageProtocolUrl(value) {
   if (url.hostname !== "media") {
     throw new Error("invalid image cache protocol");
   }
-  const [serverId, lineId, itemId, imageType] = url.pathname
+  const parts = url.pathname
     .split("/")
     .filter(Boolean)
     .map((part) => decodeURIComponent(part));
+  const [serverId, lineId, maybeAccountId, maybeItemId, maybeImageType] = parts;
+  const accountId = parts.length >= 5 ? maybeAccountId : null;
+  const itemId = parts.length >= 5 ? maybeItemId : maybeAccountId;
+  const imageType = parts.length >= 5 ? maybeImageType : maybeItemId;
   if (!serverId || !lineId || !itemId || !["Primary", "Backdrop"].includes(imageType)) {
     throw new Error("invalid image cache route");
   }
@@ -496,7 +500,7 @@ function parseImageProtocolUrl(value) {
     const value = String(rawValue).trim();
     if (value) query.set(key, value);
   }
-  return { kind: "remote", serverId, lineId, itemId, imageType, query };
+  return { kind: "remote", serverId, lineId, accountId, itemId, imageType, query };
 }
 
 function localImageProtocolUrl(filePath) {
@@ -585,6 +589,7 @@ function imageCacheKey(spec) {
     .update(JSON.stringify({
       serverId: spec.serverId,
       lineId: spec.lineId,
+      accountId: spec.accountId ?? null,
       itemId: spec.itemId,
       imageType: spec.imageType,
       query: [...spec.query.entries()].sort(([left], [right]) => left.localeCompare(right)),
@@ -710,7 +715,10 @@ async function resolveImageSource(spec) {
     server.lines.find((item) => item.id === server.activeLineId) ??
     server.lines[0];
   if (!line) throw new Error(`image line not found: ${spec.lineId}`);
-  const account = accounts.find((item) => item.serverId === server.id) ?? null;
+  const account =
+    accounts.find((item) => item.id === spec.accountId) ??
+    accounts.find((item) => item.serverId === server.id) ??
+    null;
   return { server, line, account, settings };
 }
 
@@ -1742,6 +1750,60 @@ async function requireActivePair() {
   return store.activePair();
 }
 
+async function accountPairs() {
+  const [servers, accounts] = await Promise.all([store.listServers(), store.listAccounts()]);
+  return accounts
+    .map((account) => ({
+      account,
+      server: servers.find((server) => server.id === account.serverId) ?? null,
+    }))
+    .filter((pair) => pair.server);
+}
+
+function mediaItemSource(server, account) {
+  return {
+    serverId: server.id,
+    accountId: account.id,
+    serverName: server.name ?? null,
+    username: account.username ?? null,
+  };
+}
+
+function annotateMediaResponse(response, server, account) {
+  const source = mediaItemSource(server, account);
+  const items = Array.isArray(response?.Items) ? response.Items : [];
+  return {
+    Items: items.map((item) => ({ ...item, _source: source })),
+    TotalRecordCount: Number(response?.TotalRecordCount ?? items.length),
+  };
+}
+
+async function mapAllAccountMedia(loader) {
+  const pairs = await accountPairs();
+  if (pairs.length === 0) return { Items: [], TotalRecordCount: 0 };
+
+  const results = await Promise.allSettled(
+    pairs.map(async ({ server, account }) => annotateMediaResponse(await loader(server, account), server, account)),
+  );
+  const fulfilled = results
+    .filter((result) => result.status === "fulfilled")
+    .map((result) => result.value);
+
+  if (fulfilled.length === 0) {
+    const firstError = results.find((result) => result.status === "rejected");
+    if (firstError?.status === "rejected") throw firstError.reason;
+    return { Items: [], TotalRecordCount: 0 };
+  }
+
+  return {
+    Items: fulfilled.flatMap((response) => response.Items),
+    TotalRecordCount: fulfilled.reduce(
+      (sum, response) => sum + Number(response.TotalRecordCount ?? response.Items.length),
+      0,
+    ),
+  };
+}
+
 async function pairForSession(session) {
   const [servers, accounts] = await Promise.all([store.listServers(), store.listAccounts()]);
   const server = servers.find((item) => item.id === session.serverId);
@@ -2217,6 +2279,13 @@ async function handleInvoke(command, args = {}) {
     return emby.listItems(server, account, payload.parentId ?? null, payload.params ?? []);
   }
 
+  if (command === "list_items_all_accounts") {
+    const payload = args.payload ?? {};
+    return mapAllAccountMedia((server, account) =>
+      emby.listItems(server, account, payload.parentId ?? null, payload.params ?? []),
+    );
+  }
+
   if (command === "get_item_detail") {
     const { server, account } = await requireActivePair();
     return emby.getItem(server, account, args.itemId);
@@ -2227,9 +2296,17 @@ async function handleInvoke(command, args = {}) {
     return emby.search(server, account, args.term ?? "");
   }
 
+  if (command === "search_all_accounts") {
+    return mapAllAccountMedia((server, account) => emby.search(server, account, args.term ?? ""));
+  }
+
   if (command === "resume_items") {
     const { server, account } = await requireActivePair();
     return emby.resumeItems(server, account);
+  }
+
+  if (command === "resume_items_all_accounts") {
+    return mapAllAccountMedia((server, account) => emby.resumeItems(server, account));
   }
 
   if (command === "list_seasons") {

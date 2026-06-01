@@ -1408,6 +1408,7 @@ function normalizeMediaItem(value: any): MediaItem {
   return {
     Id: stringFrom(value?.Id) ?? "",
     Name: stringFrom(value?.Name) ?? "",
+    _source: value?._source ?? null,
     Type: stringFrom(value?.Type),
     Overview: stringFrom(value?.Overview),
     ProductionYear: numberFrom(value?.ProductionYear),
@@ -1438,6 +1439,23 @@ function normalizeItemsResponse(value: any): ItemsResponse {
   return {
     Items: items,
     TotalRecordCount: numberFrom(value?.TotalRecordCount) ?? items.length,
+  };
+}
+
+function annotateWebItemsResponse(value: any): ItemsResponse {
+  const pair = webActivePair();
+  const response = normalizeItemsResponse(value);
+  return {
+    ...response,
+    Items: response.Items.map((item) => ({
+      ...item,
+      _source: {
+        serverId: pair.server.id,
+        accountId: pair.account.id,
+        serverName: pair.server.name,
+        username: pair.account.username,
+      },
+    })),
   };
 }
 
@@ -1830,12 +1848,31 @@ function invokeWebFallback<T>(
         Limit: "120",
       })
         .then(normalizeItemsResponse) as Promise<T>;
+    case "resume_items_all_accounts":
+      return webAuthedJson("GET", `Users/${webActivePair().account.userId}/Items/Resume`, {
+        Recursive: "true",
+        MediaTypes: "Video",
+        Fields: PERSONAL_ITEM_FIELDS,
+        EnableUserData: "true",
+        EnableImages: "true",
+        ImageTypeLimit: "1",
+        EnableImageTypes: "Primary,Backdrop",
+        Limit: "120",
+      })
+        .then(annotateWebItemsResponse) as Promise<T>;
     case "list_items": {
       const payload = args?.payload as any;
       const query = Object.fromEntries((payload?.params as [string, string][] | undefined) ?? []);
       if (payload?.parentId) query.ParentId = payload.parentId;
       return webAuthedJson("GET", `Users/${webActivePair().account.userId}/Items`, query)
         .then(normalizeItemsResponse) as Promise<T>;
+    }
+    case "list_items_all_accounts": {
+      const payload = args?.payload as any;
+      const query = Object.fromEntries((payload?.params as [string, string][] | undefined) ?? []);
+      if (payload?.parentId) query.ParentId = payload.parentId;
+      return webAuthedJson("GET", `Users/${webActivePair().account.userId}/Items`, query)
+        .then(annotateWebItemsResponse) as Promise<T>;
     }
     case "get_item_detail": {
       const pair = webActivePair();
@@ -1851,6 +1888,13 @@ function invokeWebFallback<T>(
         Fields: "PrimaryImageAspectRatio,Overview,ProductionYear,UserData",
         Limit: "50",
       }).then(normalizeItemsResponse) as Promise<T>;
+    case "search_all_accounts":
+      return webAuthedJson("GET", `Users/${webActivePair().account.userId}/Items`, {
+        SearchTerm: args?.term ?? "",
+        Recursive: "true",
+        Fields: "PrimaryImageAspectRatio,Overview,ProductionYear,UserData",
+        Limit: "50",
+      }).then(annotateWebItemsResponse) as Promise<T>;
     case "list_seasons":
       return webAuthedJson("GET", `Shows/${args?.seriesId}/Seasons`, {
         UserId: webActivePair().account.userId,

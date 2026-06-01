@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（删除旧 portable exe）
+> 更新时间：2026-06-02（多服务器个人媒体来源）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-0309-remove-stale-portable-exe.md`](./CHANGE_LOG/2026-06-02-0309-remove-stale-portable-exe.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-0354-multi-server-personal-media.md`](./CHANGE_LOG/2026-06-02-0354-multi-server-personal-media.md)
 
 ---
 
@@ -49,7 +49,7 @@
 - 首页 smoke 已覆盖随机端口本地测试 Emby 的 `detect_server -> add_server -> login -> refreshHome` 链路，并断言新增服务器只追加 1 条。
 - 线路延迟显示不展示 `0ms` / `1ms` 这种误导性精确值，`0-9ms` 统一显示为 `<10ms`。
 - 首页巨幕默认启用 cinema 布局，从当前媒体库候选读取 Backdrop、Primary 海报、简介、年份、播放状态与运行时信息。
-- 收藏、历史、聚合视界已接入真实账号只读接口兼容查询；收藏为空会显示为空态，不再当作加载失败。
+- 收藏、历史、聚合视界和搜索已支持跨已登录账号聚合；条目保留来源服务器/账号，同名或同 ID 的不同服务器记录不会互相覆盖，点进条目会切到对应账号再进入详情/播放链路。
 - 详情页展示媒体信息、版本能力、剧集、演职人员、相似内容、附加内容、类型/人员/工作室跳转和桌面下载入口。
 
 ---
@@ -118,9 +118,13 @@ node scripts\smoke-electron-home-hero.mjs
 当前最新阶段已验证：
 
 - `npm.cmd run check:workspace`
+- `npm.cmd run build`
 - `npm.cmd run check:no-planned-ui`
 - `npm.cmd run check:electron-commands`
-- 当前工作区无意外未跟踪文件；Electron 命令覆盖为 101/101，显式 no-op 命令为 0。
+- `node --check electron\main.mjs`
+- `node --check scripts\smoke-electron-home-hero.mjs`
+- `node scripts\smoke-electron-home-hero.mjs`
+- 当前工作区无意外未跟踪文件；Electron 命令覆盖为 104/104，显式 no-op 命令为 0。首页 smoke 已覆盖双服务器同名同 ID 收藏/历史/聚合/搜索记录不会被合并。
 
 ---
 

@@ -3,6 +3,7 @@ import type { Line, MediaItem, Server } from "@/types/models";
 export type MediaImageType = "Primary" | "Backdrop";
 
 export interface MediaImageOptions {
+  accountId?: string | null;
   tag?: string | null;
   maxWidth?: number | string | null;
   width?: number | string | null;
@@ -48,6 +49,7 @@ export function mediaImageUrl(
     const route = [
       encodeURIComponent(server.id),
       encodeURIComponent(line.id),
+      ...(options.accountId ? [encodeURIComponent(options.accountId)] : []),
       encodeURIComponent(itemId),
       encodeURIComponent(imageType),
     ].join("/");
@@ -72,6 +74,7 @@ export function mediaItemImageUrl(
       ? item.BackdropImageTags?.[0] ?? item.ImageTags?.Primary
       : item.ImageTags?.Primary;
   return mediaImageUrl(server, item.Id, imageType, {
+    accountId: item._source?.accountId,
     maxWidth,
     quality: 82,
     format: "webp",

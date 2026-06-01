@@ -10,6 +10,7 @@ import { useSettingsStore } from "@/stores/settings";
 import type { MediaItem } from "@/types/models";
 import { filterJavItems } from "@/utils/javFilter";
 import { fetchFavoriteItems, fetchPersonalHistory } from "@/utils/personalMedia";
+import { mediaItemKey, openMediaItemFromSource } from "@/utils/sourceContext";
 
 type AggregateTab = "overview" | "favorites" | "history";
 
@@ -45,8 +46,8 @@ function formatCount(count: number) {
   return `${count} 项`;
 }
 
-function openItem(id: string) {
-  router.push(`/item/${id}`).catch(() => {});
+function openItem(item: MediaItem) {
+  openMediaItemFromSource(router, auth, item).catch(() => {});
 }
 
 function gotoFavorites() {
@@ -80,7 +81,7 @@ async function loadAggregate() {
   loading.value = true;
   error.value = null;
   const [resume, favorites, history] = await Promise.allSettled([
-    api.resumeItems(),
+    api.resumeItemsAllAccounts(),
     fetchFavoriteItems(36),
     fetchPersonalHistory({ limit: 36 }),
   ]);
@@ -118,7 +119,7 @@ function onSearchInput() {
   searching.value = true;
   searchTimer = window.setTimeout(async () => {
     try {
-      const result = await api.search(term);
+      const result = await api.searchAllAccounts(term);
       if (searchTerm.value.trim() === term) {
         searchResults.value = filterJavItems(result.Items, settings.settings.hideJavCodes);
       }
@@ -206,10 +207,10 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
         <div v-else class="grid">
           <PosterCard
             v-for="item in searchResults"
-            :key="item.Id"
+            :key="mediaItemKey(item)"
             :item="item"
             :aspect="itemAspect(item)"
-            @activate="openItem(item.Id)"
+            @activate="openItem(item)"
           />
         </div>
       </section>
@@ -223,10 +224,10 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
           <div class="row-scroll">
             <PosterCard
               v-for="item in resumeItems"
-              :key="item.Id"
+              :key="mediaItemKey(item)"
               :item="item"
               aspect="backdrop"
-              @activate="openItem(item.Id)"
+              @activate="openItem(item)"
             />
           </div>
         </section>
@@ -241,10 +242,10 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
           <div class="row-scroll row-scroll--poster">
             <PosterCard
               v-for="item in favoriteItems.slice(0, 18)"
-              :key="item.Id"
+              :key="mediaItemKey(item)"
               :item="item"
               :aspect="itemAspect(item)"
-              @activate="openItem(item.Id)"
+              @activate="openItem(item)"
             />
           </div>
         </section>
@@ -259,10 +260,10 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
           <div class="row-scroll row-scroll--poster">
             <PosterCard
               v-for="item in historyItems.slice(0, 18)"
-              :key="item.Id"
+              :key="mediaItemKey(item)"
               :item="item"
               :aspect="itemAspect(item)"
-              @activate="openItem(item.Id)"
+              @activate="openItem(item)"
             />
           </div>
         </section>
@@ -285,10 +286,10 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
         <div v-else class="grid">
           <PosterCard
             v-for="item in activeTab === 'favorites' ? favoriteItems : historyItems"
-            :key="item.Id"
+            :key="mediaItemKey(item)"
             :item="item"
             :aspect="itemAspect(item)"
-            @activate="openItem(item.Id)"
+            @activate="openItem(item)"
           />
         </div>
       </section>

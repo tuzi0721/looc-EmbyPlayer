@@ -9,6 +9,7 @@ import { useSettingsStore } from "@/stores/settings";
 import type { MediaItem } from "@/types/models";
 import { filterJavItems } from "@/utils/javFilter";
 import { fetchPersonalHistory, mergeMediaItems } from "@/utils/personalMedia";
+import { mediaItemKey, openMediaItemFromSource } from "@/utils/sourceContext";
 
 type HistoryFilter = "all" | "movie" | "episode";
 
@@ -93,8 +94,8 @@ async function loadHistory(reset = true) {
   }
 }
 
-function openItem(id: string) {
-  router.push(`/item/${id}`).catch(() => {});
+function openItem(item: MediaItem) {
+  openMediaItemFromSource(router, auth, item).catch(() => {});
 }
 
 function itemKind(item: MediaItem) {
@@ -199,11 +200,11 @@ watch(() => settings.settings.hideJavCodes, () => void loadHistory());
 
       <template v-else>
         <div class="history-grid">
-          <article v-for="item in items" :key="item.Id" class="history-card">
+          <article v-for="item in items" :key="mediaItemKey(item)" class="history-card">
             <PosterCard
               :item="item"
               :aspect="item.Type === 'Episode' ? 'backdrop' : 'auto'"
-              @activate="openItem(item.Id)"
+              @activate="openItem(item)"
             />
             <div class="history-card__meta">
               <span class="history-card__date">

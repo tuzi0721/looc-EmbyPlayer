@@ -9,6 +9,7 @@ import { useSettingsStore } from "@/stores/settings";
 import type { MediaItem } from "@/types/models";
 import { filterJavItems } from "@/utils/javFilter";
 import { fetchFavoriteItems } from "@/utils/personalMedia";
+import { mediaItemKey, openMediaItemFromSource } from "@/utils/sourceContext";
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -43,8 +44,8 @@ onMounted(load);
 watch(() => auth.activeId, load);
 watch(() => settings.settings.hideJavCodes, load);
 
-function open(id: string) {
-  router.push(`/item/${id}`).catch(() => {});
+function open(item: MediaItem) {
+  openMediaItemFromSource(router, auth, item).catch(() => {});
 }
 </script>
 
@@ -77,9 +78,9 @@ function open(id: string) {
       <div v-else class="grid">
         <PosterCard
           v-for="item in items"
-          :key="item.Id"
+          :key="mediaItemKey(item)"
           :item="item"
-          @activate="open(item.Id)"
+          @activate="open(item)"
         />
       </div>
     </div>

@@ -92,26 +92,42 @@ const resumeItem = {
   IndexNumber: 2,
 };
 
-function createFakeEmbyServer() {
+const duplicateMovie = {
+  ...heroMovie,
+  ProductionYear: 2025,
+  UserData: {
+    ...heroMovie.UserData,
+    LastPlayedDate: "2026-06-01T10:30:00.000Z",
+  },
+};
+
+function createFakeEmbyServer({
+  serverName = "Home Hero Smoke",
+  userId = "home-user",
+  username = "Home Smoke",
+  token = "home-token",
+  item = heroMovie,
+  resumeItems = [resumeItem],
+} = {}) {
   return http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     const pathname = decodeURIComponent(url.pathname);
 
     if (req.method === "GET" && pathname === "/System/Info/Public") {
-      json(res, { ProductName: "Emby Server", ServerName: "Home Hero Smoke", Version: "4.8.0" });
+      json(res, { ProductName: "Emby Server", ServerName: serverName, Version: "4.8.0" });
       return;
     }
 
     if (req.method === "POST" && pathname === "/Users/AuthenticateByName") {
       req.resume();
       json(res, {
-        User: { Id: "home-user", Name: "Home Smoke" },
-        AccessToken: "home-token",
+        User: { Id: userId, Name: username },
+        AccessToken: token,
       });
       return;
     }
 
-    if (req.method === "GET" && pathname === "/Users/home-user/Views") {
+    if (req.method === "GET" && pathname === `/Users/${userId}/Views`) {
       json(res, {
         Items: [
           {
@@ -127,13 +143,13 @@ function createFakeEmbyServer() {
       return;
     }
 
-    if (req.method === "GET" && pathname === "/Users/home-user/Items/Resume") {
-      json(res, { Items: [resumeItem], TotalRecordCount: 1 });
+    if (req.method === "GET" && pathname === `/Users/${userId}/Items/Resume`) {
+      json(res, { Items: resumeItems, TotalRecordCount: resumeItems.length });
       return;
     }
 
-    if (req.method === "GET" && pathname === "/Users/home-user/Items") {
-      json(res, { Items: [heroMovie], TotalRecordCount: 1 });
+    if (req.method === "GET" && pathname === `/Users/${userId}/Items`) {
+      json(res, { Items: [item], TotalRecordCount: 1 });
       return;
     }
 
@@ -203,6 +219,15 @@ await fsp.mkdir(userDataDir, { recursive: true });
 
 const fakeServer = createFakeEmbyServer();
 const fakeBaseUrl = await listen(fakeServer);
+const duplicateServer = createFakeEmbyServer({
+  serverName: "Duplicate Smoke",
+  userId: "duplicate-user",
+  username: "Duplicate Smoke",
+  token: "duplicate-token",
+  item: duplicateMovie,
+  resumeItems: [],
+});
+const duplicateBaseUrl = await listen(duplicateServer);
 const electron = path.resolve("node_modules/electron/dist/electron.exe");
 const child = spawn(electron, [`--remote-debugging-port=${remotePort}`, "electron/main.mjs"], {
   cwd: process.cwd(),
@@ -245,7 +270,7 @@ try {
       const serverStore = useServerStore();
       const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
       if (!appRouter) throw new Error("mounted Vue router not found");
-      await serverStore.addServer({
+      const existingServer = await serverStore.addServer({
         name: "Existing Smoke Server",
         kind: "emby",
         activeLineId: "existing-line",
@@ -253,13 +278,14 @@ try {
         lines: [{
           id: "existing-line",
           name: "Existing",
-          baseUrl: ${JSON.stringify(fakeBaseUrl)},
+          baseUrl: ${JSON.stringify(duplicateBaseUrl)},
           userAgent: null,
           headers: [],
           priority: 0,
           enabled: true,
         }],
       });
+      await auth.login({ serverId: existingServer.id, username: "duplicate", password: "duplicate" });
       const beforeServerCount = serverStore.servers.length;
       const detected = await serverStore.detectServer({
         defaultUserAgent: null,
@@ -352,11 +378,25 @@ try {
           path,
           body: document.body.innerText,
           posterCount: document.querySelectorAll(".poster").length,
+          sourceLabels: Array.from(document.querySelectorAll(".poster__source")).map((node) => node.textContent?.trim()).filter(Boolean),
           historyCardCount: document.querySelectorAll(".history-card").length,
           errorTexts: Array.from(document.querySelectorAll(".empty--error, .toast--error")).map((node) => node.textContent?.trim()),
         });
       }
       return routes;
+    })()
+  `);
+
+  const multiServerSearch = await cdpEval(ws, `
+    (async () => {
+      const { useLibraryStore } = await import("/src/stores/library.ts");
+      const lib = useLibraryStore();
+      await lib.search("Giant Screen Smoke");
+      return {
+        count: lib.searchResults.length,
+        sourceLabels: lib.searchResults.map((item) => item._source?.serverName ?? "").filter(Boolean),
+        keys: lib.searchResults.map((item) => \`\${item._source?.serverId ?? ""}:\${item._source?.accountId ?? ""}:\${item.Id}\`),
+      };
     })()
   `);
 
@@ -397,25 +437,42 @@ try {
     if (route.path === "/favorites" && (!route.body.includes(heroMovie.Name) || route.posterCount < 1)) {
       failures.push("/favorites did not render favorite media");
     }
+    if (route.path === "/favorites" && route.posterCount < 2) {
+      failures.push("/favorites did not preserve duplicate cross-server favorites");
+    }
     if (route.path === "/history" && (!route.body.includes(heroMovie.Name) || route.historyCardCount < 1)) {
       failures.push("/history did not render played media");
+    }
+    if (route.path === "/history" && route.historyCardCount < 2) {
+      failures.push("/history did not preserve duplicate cross-server history");
     }
     if (route.path === "/aggregate" && (!route.body.includes(heroMovie.Name) || route.posterCount < 1)) {
       failures.push("/aggregate did not render aggregate media");
     }
+    if (route.path === "/aggregate" && !route.sourceLabels.includes("Existing Smoke Server")) {
+      failures.push("/aggregate did not show cross-server source labels");
+    }
+  }
+  if (multiServerSearch.count < 2) failures.push("search did not query all logged-in servers");
+  if (!multiServerSearch.sourceLabels.includes("Home Hero Smoke") || !multiServerSearch.sourceLabels.includes("Existing Smoke Server")) {
+    failures.push(`search source labels missing: ${multiServerSearch.sourceLabels.join(", ")}`);
+  }
+  if (new Set(multiServerSearch.keys).size !== multiServerSearch.keys.length) {
+    failures.push("search collapsed duplicate cross-server records");
   }
 
   if (failures.length > 0) {
     throw new Error(
-      `home hero smoke failed: ${failures.join("; ")}\n${JSON.stringify({ result, personalRoutes }, null, 2)}`,
+      `home hero smoke failed: ${failures.join("; ")}\n${JSON.stringify({ result, personalRoutes, multiServerSearch }, null, 2)}`,
     );
   }
 
-  console.log(JSON.stringify({ ok: true, screenshotPath, ...result, personalRoutes }, null, 2));
+  console.log(JSON.stringify({ ok: true, screenshotPath, ...result, personalRoutes, multiServerSearch }, null, 2));
 } finally {
   if (ws) ws.close();
   child.kill();
   fakeServer.close();
+  duplicateServer.close();
   await wait(500);
   try {
     run("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });

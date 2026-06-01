@@ -151,7 +151,7 @@ export const useLibraryStore = defineStore("library", () => {
   async function search(term: string) {
     searching.value = true;
     try {
-      const r = await api.search(term);
+      const r = await api.searchAllAccounts(term);
       const filteredItems = filterJavItems(r.Items, settings.settings.hideJavCodes);
       searchResults.value = filteredItems;
       return filteredItems;
