@@ -17,12 +17,12 @@ export const useLibraryStore = defineStore("library", () => {
   const searching = ref(false);
   const searchResults = ref<MediaItem[]>([]);
 
-  const heroFields = "PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo,RunTimeTicks,CommunityRating,OfficialRating,ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag";
+  const heroFields = "PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo,RunTimeTicks,CommunityRating,OfficialRating,ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,ParentLogoItemId,ParentLogoImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag";
   const heroImageParams: [string, string][] = [
     ["EnableUserData", "true"],
     ["EnableImages", "true"],
-    ["ImageTypeLimit", "3"],
-    ["EnableImageTypes", "Primary,Backdrop,Thumb"],
+    ["ImageTypeLimit", "4"],
+    ["EnableImageTypes", "Primary,Backdrop,Thumb,Logo"],
   ];
 
   async function loadHeroCandidates(includeTypes: string, limit = "36") {

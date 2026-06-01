@@ -1,6 +1,6 @@
 import type { Line, MediaItem, Server } from "@/types/models";
 
-export type MediaImageType = "Primary" | "Backdrop" | "Thumb";
+export type MediaImageType = "Primary" | "Backdrop" | "Thumb" | "Logo";
 
 export interface MediaImageOptions {
   accountId?: string | null;

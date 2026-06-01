@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
 
@@ -8,7 +8,7 @@ import { useLibraryStore } from "@/stores/library";
 import { useServerStore } from "@/stores/server";
 import { useSettingsStore } from "@/stores/settings";
 import type { MediaItem } from "@/types/models";
-import { mediaImageUrl } from "@/utils/mediaImages";
+import { mediaImageUrl, type MediaImageType } from "@/utils/mediaImages";
 import { openMediaItemFromSource } from "@/utils/sourceContext";
 
 const router = useRouter();
@@ -18,6 +18,8 @@ const serverStore = useServerStore();
 const settings = useSettingsStore();
 
 const index = ref(0);
+const logoLoaded = ref(false);
+const logoFailed = ref(false);
 let timer: number | null = null;
 
 const items = computed(() => {
@@ -34,25 +36,65 @@ const current = computed(() => items.value[index.value] ?? null);
 const heroStyle = computed(() => settings.settings.homeHeroStyle ?? "cinema");
 const heroImageWidth = computed(() => (heroStyle.value === "cinema" ? "2200" : "1280"));
 
-function itemImageUrl(item: MediaItem, imageType: "Backdrop" | "Primary", width: string): string | null {
+interface ImageCandidate {
+  itemId: string | null | undefined;
+  imageType: MediaImageType;
+  tag?: string | null;
+  allowUntagged?: boolean;
+}
+
+function imageUrl(candidate: ImageCandidate | null | undefined, options: { width?: string; maxWidth?: string }): string | null {
   const acc = auth.activeAccount;
-  if (!acc) return null;
+  if (!acc || !candidate?.itemId) return null;
+  if (!candidate.tag && !candidate.allowUntagged) return null;
   const server = serverStore.byId(acc.serverId);
-  const tag = imageType === "Backdrop" ? item.BackdropImageTags?.[0] : item.ImageTags?.Primary;
-  if (!tag && !item.Id) return null;
-  return mediaImageUrl(server, item.Id, imageType, {
-    tag,
-    width,
+  return mediaImageUrl(server, candidate.itemId, candidate.imageType, {
+    tag: candidate.tag,
+    width: options.width,
+    maxWidth: options.maxWidth,
     format: "webp",
   });
 }
 
-function backgroundUrl(item: MediaItem): string | null {
-  if (item.BackdropImageTags?.length) {
-    return itemImageUrl(item, "Backdrop", heroImageWidth.value);
+function firstImageUrl(candidates: ImageCandidate[], options: { width?: string; maxWidth?: string }): string | null {
+  for (const candidate of candidates) {
+    const url = imageUrl(candidate, options);
+    if (url) return url;
   }
-  return itemImageUrl(item, "Primary", heroImageWidth.value);
+  return null;
 }
+
+function backgroundCandidates(item: MediaItem): ImageCandidate[] {
+  const parentBackdropId = item.ParentBackdropItemId ?? item.SeriesId;
+  const parentBackdropTag = item.ParentBackdropImageTags?.[0] ?? item.BackdropImageTags?.[0];
+  const parentThumbId = item.ParentThumbItemId ?? item.SeriesId;
+  const parentThumbTag = item.ParentThumbImageTag ?? item.SeriesThumbImageTag ?? item.ImageTags?.Thumb;
+  const parentPrimaryId = item.ParentPrimaryImageItemId ?? item.SeriesId;
+  const parentPrimaryTag = item.ParentPrimaryImageTag ?? item.SeriesPrimaryImageTag;
+  const allowParent = item.Type === "Episode";
+  return [
+    { itemId: item.Id, imageType: "Backdrop", tag: item.BackdropImageTags?.[0] },
+    { itemId: parentBackdropId, imageType: "Backdrop", tag: parentBackdropTag, allowUntagged: allowParent },
+    { itemId: parentThumbId, imageType: "Thumb", tag: parentThumbTag, allowUntagged: allowParent },
+    { itemId: item.Id, imageType: "Primary", tag: item.ImageTags?.Primary, allowUntagged: true },
+    { itemId: parentPrimaryId, imageType: "Primary", tag: parentPrimaryTag, allowUntagged: allowParent },
+  ];
+}
+
+function backgroundUrl(item: MediaItem): string | null {
+  return firstImageUrl(backgroundCandidates(item), { width: heroImageWidth.value });
+}
+
+function titleLogoCandidates(item: MediaItem): ImageCandidate[] {
+  const parentLogoId = item.ParentLogoItemId ?? item.SeriesId;
+  const parentLogoTag = item.ParentLogoImageTag;
+  return [
+    { itemId: item.Id, imageType: "Logo", tag: item.ImageTags?.Logo },
+    { itemId: parentLogoId, imageType: "Logo", tag: parentLogoTag, allowUntagged: item.Type === "Episode" },
+  ];
+}
+
+const titleLogoUrl = computed(() => (current.value ? firstImageUrl(titleLogoCandidates(current.value), { maxWidth: "900" }) : null));
 
 function displayTitle(item: MediaItem): string {
   if (item.Type === "Episode" && item.SeriesName) return item.SeriesName;
@@ -93,6 +135,11 @@ function openItem() {
   if (current.value) openMediaItemFromSource(router, auth, current.value).catch(() => {});
 }
 
+watch(titleLogoUrl, () => {
+  logoLoaded.value = false;
+  logoFailed.value = false;
+});
+
 onMounted(() => {
   timer = window.setInterval(next, 8000);
 });
@@ -124,7 +171,19 @@ onUnmounted(() => {
       <Icon icon="lucide:chevron-right" width="22" />
     </button>
     <div class="hero__content">
-      <h2 class="hero__title">{{ displayTitle(current) }}</h2>
+      <img
+        v-if="titleLogoUrl && !logoFailed"
+        class="hero__logo"
+        :class="{ loaded: logoLoaded }"
+        :src="titleLogoUrl"
+        :alt="displayTitle(current)"
+        decoding="async"
+        @load="logoLoaded = true"
+        @error="logoFailed = true"
+      />
+      <h2 class="hero__title" :class="{ 'hero__title--with-logo': titleLogoUrl && logoLoaded && !logoFailed }">
+        {{ displayTitle(current) }}
+      </h2>
       <p v-if="episodeSubtitle(current)" class="hero__episode">{{ episodeSubtitle(current) }}</p>
       <p v-if="metaLine(current)" class="hero__meta">{{ metaLine(current) }}</p>
       <p v-if="current.Overview" class="hero__desc">{{ current.Overview }}</p>
@@ -219,9 +278,35 @@ onUnmounted(() => {
   letter-spacing: 0;
   line-height: 1.08;
 }
+.hero__title--with-logo {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
 .hero--cinema .hero__title {
   font-size: 74px;
   max-width: 12em;
+}
+.hero__logo {
+  display: block;
+  max-width: min(520px, 58vw);
+  max-height: 132px;
+  object-fit: contain;
+  object-position: left center;
+  margin: 0 0 14px;
+  opacity: 0;
+  filter: drop-shadow(0 12px 34px rgba(0, 0, 0, 0.5));
+  transition: opacity 220ms var(--easing-glide);
+}
+.hero__logo.loaded {
+  opacity: 1;
+}
+.hero--cinema .hero__logo {
+  max-width: min(640px, 62vw);
+  max-height: 184px;
+  margin-bottom: 16px;
 }
 .hero__episode {
   margin: 0 0 8px;
@@ -294,6 +379,10 @@ onUnmounted(() => {
   .hero--cinema .hero__title {
     font-size: 40px;
   }
+  .hero--cinema .hero__logo {
+    max-width: min(520px, 82vw);
+    max-height: 126px;
+  }
   .hero__title {
     font-size: 28px;
   }
@@ -308,6 +397,9 @@ onUnmounted(() => {
   }
   .hero--cinema .hero__title {
     font-size: 52px;
+  }
+  .hero--cinema .hero__logo {
+    max-height: 132px;
   }
   .hero--cinema .hero__desc {
     -webkit-line-clamp: 3;

@@ -278,6 +278,10 @@ pub struct MediaItem {
     pub parent_primary_image_item_id: Option<String>,
     #[serde(default, deserialize_with = "optional_string")]
     pub parent_primary_image_tag: Option<String>,
+    #[serde(default, deserialize_with = "optional_string")]
+    pub parent_logo_item_id: Option<String>,
+    #[serde(default, deserialize_with = "optional_string")]
+    pub parent_logo_image_tag: Option<String>,
     #[serde(default, deserialize_with = "optional_i32")]
     pub index_number: Option<i32>,
     #[serde(default, deserialize_with = "optional_i32")]

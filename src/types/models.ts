@@ -174,6 +174,8 @@ export interface MediaItem {
   ParentThumbImageTag?: string | null;
   ParentPrimaryImageItemId?: string | null;
   ParentPrimaryImageTag?: string | null;
+  ParentLogoItemId?: string | null;
+  ParentLogoImageTag?: string | null;
   IndexNumber?: number | null;
   ParentIndexNumber?: number | null;
   ImageTags?: Record<string, string> | null;

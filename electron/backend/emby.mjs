@@ -149,6 +149,8 @@ export function normalizeItem(value) {
     ParentThumbImageTag: stringFrom(item.ParentThumbImageTag),
     ParentPrimaryImageItemId: stringFrom(item.ParentPrimaryImageItemId),
     ParentPrimaryImageTag: stringFrom(item.ParentPrimaryImageTag),
+    ParentLogoItemId: stringFrom(item.ParentLogoItemId),
+    ParentLogoImageTag: stringFrom(item.ParentLogoImageTag),
     IndexNumber: numberFrom(item.IndexNumber),
     ParentIndexNumber: numberFrom(item.ParentIndexNumber),
     ImageTags: item.ImageTags && typeof item.ImageTags === "object" ? item.ImageTags : null,
@@ -371,7 +373,7 @@ const DIRECT_VIDEO_CONTAINERS = [
 ];
 const DIRECT_AUDIO_CONTAINERS = ["mp3", "aac", "flac", "ogg", "opus", "wav", "m4a", "ape", "alac"];
 const IMAGE_FALLBACK_FIELDS =
-  "ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag";
+  "ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,ParentLogoItemId,ParentLogoImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag";
 const PERSONAL_ITEM_FIELDS =
   `PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks,${IMAGE_FALLBACK_FIELDS}`;
 

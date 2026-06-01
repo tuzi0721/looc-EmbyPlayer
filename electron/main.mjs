@@ -490,7 +490,7 @@ function parseImageProtocolUrl(value) {
   const accountId = parts.length >= 5 ? maybeAccountId : null;
   const itemId = parts.length >= 5 ? maybeItemId : maybeAccountId;
   const imageType = parts.length >= 5 ? maybeImageType : maybeItemId;
-  if (!serverId || !lineId || !itemId || !["Primary", "Backdrop", "Thumb"].includes(imageType)) {
+  if (!serverId || !lineId || !itemId || !["Primary", "Backdrop", "Thumb", "Logo"].includes(imageType)) {
     throw new Error("invalid image cache route");
   }
 

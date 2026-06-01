@@ -20,11 +20,12 @@ const DEVICE_ID: &str = "emby-player-desktop-001";
 const CLIENT_NAME: &str = "EmbyPlayer";
 const CLIENT_VERSION: &str = "0.1.0";
 const IMAGE_FALLBACK_FIELDS: &str =
-    "ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag";
+    "ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,ParentLogoItemId,ParentLogoImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag";
 const PERSONAL_ITEM_FIELDS: &str = concat!(
     "PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks,",
     "ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,",
-    "ParentPrimaryImageItemId,ParentPrimaryImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag",
+    "ParentPrimaryImageItemId,ParentPrimaryImageTag,ParentLogoItemId,ParentLogoImageTag,",
+    "SeriesPrimaryImageTag,SeriesThumbImageTag",
 );
 
 #[derive(Clone)]

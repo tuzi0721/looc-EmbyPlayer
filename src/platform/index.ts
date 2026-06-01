@@ -597,7 +597,7 @@ const DIRECT_VIDEO_CONTAINERS = [
 ];
 const DIRECT_AUDIO_CONTAINERS = ["mp3", "aac", "flac", "ogg", "opus", "wav", "m4a", "ape", "alac"];
 const IMAGE_FALLBACK_FIELDS =
-  "ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag";
+  "ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,ParentLogoItemId,ParentLogoImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag";
 const PERSONAL_ITEM_FIELDS =
   `PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks,${IMAGE_FALLBACK_FIELDS}`;
 
@@ -1432,6 +1432,8 @@ function normalizeMediaItem(value: any): MediaItem {
     ParentThumbImageTag: stringFrom(value?.ParentThumbImageTag),
     ParentPrimaryImageItemId: stringFrom(value?.ParentPrimaryImageItemId),
     ParentPrimaryImageTag: stringFrom(value?.ParentPrimaryImageTag),
+    ParentLogoItemId: stringFrom(value?.ParentLogoItemId),
+    ParentLogoImageTag: stringFrom(value?.ParentLogoImageTag),
     IndexNumber: numberFrom(value?.IndexNumber),
     ParentIndexNumber: numberFrom(value?.ParentIndexNumber),
     ImageTags: value?.ImageTags && typeof value.ImageTags === "object" ? value.ImageTags : null,

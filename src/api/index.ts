@@ -303,7 +303,7 @@ export const api = {
           ["IsPlayed", "true"],
           ["Recursive", "true"],
           ["IncludeItemTypes", payload.includeTypes ?? "Movie,Episode"],
-          ["Fields", "PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks,ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag"],
+          ["Fields", "PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks,ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,ParentLogoItemId,ParentLogoImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag"],
           ["SortBy", "DatePlayed"],
           ["SortOrder", "Descending"],
           ["StartIndex", String(Math.max(0, payload.startIndex ?? 0))],

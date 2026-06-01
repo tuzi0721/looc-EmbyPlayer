@@ -71,7 +71,7 @@ const heroMovie = {
   CommunityRating: 8.7,
   OfficialRating: "PG-13",
   RunTimeTicks: 7_200_000_000,
-  ImageTags: { Primary: "primary-tag" },
+  ImageTags: { Primary: "primary-tag", Logo: "logo-tag" },
   BackdropImageTags: ["backdrop-tag"],
   UserData: {
     PlaybackPositionTicks: 0,
@@ -159,7 +159,7 @@ function createFakeEmbyServer({
       return;
     }
 
-    const imageMatch = pathname.match(/^\/Items\/([^/]+)\/Images\/(Primary|Backdrop|Thumb)$/);
+    const imageMatch = pathname.match(/^\/Items\/([^/]+)\/Images\/(Primary|Backdrop|Thumb|Logo)$/);
     if (req.method === "GET" && imageMatch) {
       const [, itemId, imageType] = imageMatch;
       const mediaItem = [item, ...resumeItems].find((candidate) => candidate.Id === itemId);
@@ -181,6 +181,10 @@ function createFakeEmbyServer({
         image(res);
         return;
       }
+      if (imageType === "Logo" && parentItem?.ParentLogoImageTag) {
+        image(res);
+        return;
+      }
       if (imageType === "Backdrop" && !mediaItem?.BackdropImageTags?.length) {
         json(res, { error: "backdrop not found", path: pathname }, 404);
         return;
@@ -191,6 +195,10 @@ function createFakeEmbyServer({
       }
       if (imageType === "Thumb" && !mediaItem?.ImageTags?.Thumb) {
         json(res, { error: "thumb not found", path: pathname }, 404);
+        return;
+      }
+      if (imageType === "Logo" && !mediaItem?.ImageTags?.Logo) {
+        json(res, { error: "logo not found", path: pathname }, 404);
         return;
       }
       image(res);
@@ -387,9 +395,11 @@ try {
       const title = document.querySelector(".hero__title");
       const desc = document.querySelector(".hero__desc");
       const poster = document.querySelector(".hero__poster");
+      const logo = document.querySelector(".hero__logo");
       const nextSection = document.querySelector(".row-section");
       const heroRect = hero?.getBoundingClientRect();
       const posterRect = poster?.getBoundingClientRect();
+      const logoRect = logo?.getBoundingClientRect();
       const nextRect = nextSection?.getBoundingClientRect();
       return {
         route: appRouter.currentRoute.value.fullPath,
@@ -398,6 +408,14 @@ try {
         poster: posterRect ? { width: posterRect.width, height: posterRect.height } : null,
         nextSectionTop: nextRect?.top ?? null,
         title: title?.textContent ?? "",
+        logo: logoRect
+          ? {
+              width: logoRect.width,
+              height: logoRect.height,
+              loaded: logo.classList.contains("loaded"),
+              naturalWidth: logo.naturalWidth,
+            }
+          : null,
         desc: desc?.textContent ?? "",
         heroItems: lib.heroItems.length,
         resumeItems: lib.resume.length,
@@ -534,6 +552,9 @@ try {
   if (!result.hero) failures.push("hero missing");
   if (result.firstRunVisible) failures.push("first-run guide blocks the home hero");
   if (!result.title.includes(heroMovie.Name)) failures.push("hero title missing media item");
+  if (!result.logo?.loaded || result.logo.naturalWidth < 1) {
+    failures.push(`hero logo image did not load: ${JSON.stringify(result.logo)}`);
+  }
   if (!result.desc.includes("real media-library candidate")) failures.push("hero overview missing");
   if (result.heroItems < 1) failures.push("hero items missing");
   if (result.views < 1) failures.push("library views missing");
