@@ -17,6 +17,9 @@ export const usePlayerStore = defineStore("player", () => {
   const itemId = ref<string | null>(null);
   const localFilePath = ref<string | null>(null);
   const localFileTitle = ref<string | null>(null);
+  const directUrl = ref<string | null>(null);
+  const directTitle = ref<string | null>(null);
+  const directSourceLabel = ref<string | null>(null);
   const queue = ref<string[]>([]);
   const queueIndex = ref(-1);
   const queueKind = ref<PlaybackQueueKind>("remote");
@@ -42,6 +45,9 @@ export const usePlayerStore = defineStore("player", () => {
     if (queueKind.value === "local") clearQueue();
     localFilePath.value = null;
     localFileTitle.value = null;
+    directUrl.value = null;
+    directTitle.value = null;
+    directSourceLabel.value = null;
     lastEof = false;
     void pushNowPlaying();
     startPolling();
@@ -66,12 +72,53 @@ export const usePlayerStore = defineStore("player", () => {
     if (!keepsLocalQueue) clearQueue();
     localFilePath.value = payload.filePath;
     localFileTitle.value = payload.title?.trim() || fileNameFromPath(payload.filePath);
+    directUrl.value = null;
+    directTitle.value = null;
+    directSourceLabel.value = null;
+    lastEof = false;
+    void pushNowPlaying();
+    startPolling();
+  }
+
+  async function playWebDavFile(payload: {
+    url: string;
+    title?: string | null;
+    username?: string | null;
+    password?: string | null;
+    startMs?: number | null;
+  }) {
+    await api.playWebDavFile(payload);
+    itemId.value = null;
+    playSessionId.value = null;
+    playbackSource.value = null;
+    clearQueue();
+    localFilePath.value = null;
+    localFileTitle.value = null;
+    directUrl.value = payload.url;
+    directTitle.value = payload.title?.trim() || fileNameFromPath(new URL(payload.url).pathname);
+    directSourceLabel.value = "WebDAV";
     lastEof = false;
     void pushNowPlaying();
     startPolling();
   }
 
   async function pushNowPlaying() {
+    if (directTitle.value) {
+      try {
+        await api.setNowPlaying({
+          title: directTitle.value,
+          subtitle: directSourceLabel.value ?? "网络文件",
+          durationMs: snapshot.value?.durationMs ?? null,
+          positionMs: snapshot.value?.positionMs ?? null,
+          thumbnailUrl: null,
+        });
+        await api.setNowPlayingStatus(snapshot.value?.paused ? "paused" : "playing");
+      } catch {
+        /* SMTC is best-effort */
+      }
+      return;
+    }
+
     if (localFileTitle.value) {
       try {
         await api.setNowPlaying({
@@ -216,6 +263,9 @@ export const usePlayerStore = defineStore("player", () => {
     playSessionId.value = null;
     localFilePath.value = null;
     localFileTitle.value = null;
+    directUrl.value = null;
+    directTitle.value = null;
+    directSourceLabel.value = null;
     try {
       await api.clearNowPlaying();
     } catch {
@@ -300,7 +350,7 @@ export const usePlayerStore = defineStore("player", () => {
       pollBusy = true;
       try {
         await refresh();
-        if (snapshot.value && localFileTitle.value) {
+        if (snapshot.value && (localFileTitle.value || directTitle.value)) {
           try {
             await api.setNowPlayingStatus(snapshot.value.paused ? "paused" : "playing");
             await api.setNowPlayingPosition({
@@ -369,11 +419,15 @@ export const usePlayerStore = defineStore("player", () => {
     itemId,
     localFilePath,
     localFileTitle,
+    directUrl,
+    directTitle,
+    directSourceLabel,
     queue,
     queueIndex,
     queueKind,
     play,
     playFile,
+    playWebDavFile,
     playQueue,
     setLocalQueue,
     nextTrack,

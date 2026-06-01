@@ -111,6 +111,9 @@ function gotoDownloads() {
 function gotoRemote() {
   router.push("/remote").catch(() => {});
 }
+function gotoWebDav() {
+  router.push("/webdav").catch(() => {});
+}
 function gotoLocalFolder(folderPath?: string) {
   router
     .push({
@@ -365,6 +368,15 @@ async function openLocalFolder() {
       >
         <Icon icon="lucide:folder-open" width="14" />
         <span>打开本地文件夹</span>
+      </button>
+
+      <button
+        class="add-srv"
+        :class="{ active: route.name === 'webdav' }"
+        @click="gotoWebDav"
+      >
+        <Icon icon="lucide:cloud" width="14" />
+        <span>WebDAV</span>
       </button>
 
       <div v-if="favoriteLocalFolders.length > 0" class="local-recent">

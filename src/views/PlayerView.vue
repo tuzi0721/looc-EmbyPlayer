@@ -299,22 +299,26 @@ const localFileTitle = computed(() =>
   localFilePath.value ? fileNameFromPath(localFilePath.value) : null,
 );
 const isLocalFilePlayback = computed(() => Boolean(localFilePath.value));
+const isDirectUrlPlayback = computed(() => Boolean(player.directUrl || player.directTitle));
 const isLocalQueue = computed(() => player.queueKind === "local");
 const displayTitle = computed(
   () =>
     item.value?.SeriesName ??
     item.value?.Name ??
+    player.directTitle ??
     player.localFileTitle ??
     localFileTitle.value ??
-    "本地文件",
+    (props.id === "webdav-file" ? "WebDAV" : "本地文件"),
 );
 const displaySubtitle = computed(() => {
+  if (isDirectUrlPlayback.value) return player.directSourceLabel ?? "网络文件";
   if (item.value?.Type === "Episode") {
     return `S${item.value.ParentIndexNumber ?? 1}:E${item.value.IndexNumber ?? "?"} - ${item.value.Name}`;
   }
   return isLocalFilePlayback.value ? "本地文件" : "";
 });
 const subtitleSearchQuery = computed(() => {
+  if (player.directTitle) return player.directTitle.replace(/\.[^.]+$/, "");
   if (localFileTitle.value) return localFileTitle.value.replace(/\.[^.]+$/, "");
   const target = item.value;
   if (!target) return "";
@@ -563,6 +567,7 @@ watch(
 watch(
   currentItemId,
   (id) => {
+    if (props.id === "local-file" || props.id === "webdav-file") return;
     if (id && !lib.itemCache[id]) {
       void lib.loadItem(id).catch(() => {});
     }
@@ -770,6 +775,7 @@ function networkBarHeight(value: number): string {
 
 async function maybeAutoSkipIntroOutro() {
   if (!skipIntroOutroEnabled.value || paused.value) return;
+  if (isLocalFilePlayback.value || isDirectUrlPlayback.value) return;
   const itemId = currentItemId.value;
   const duration = durationMs.value;
   const position = positionMs.value;
@@ -1718,6 +1724,7 @@ function formatPlayerErrorDetails(): string {
     `Time: ${new Date().toISOString()}`,
     `ItemId: ${currentItemId.value}`,
     `Title: ${title}`,
+    player.directUrl ? `Source: ${player.directSourceLabel ?? "Direct URL"}` : null,
     localFilePath.value ? `File: ${localFilePath.value}` : null,
     "",
     errorText.value ?? "",
@@ -1749,6 +1756,25 @@ async function startCurrentPlayback() {
       startMs: start,
       title: fileNameFromPath(filePath),
     });
+  } else if (props.id === "webdav-file") {
+    if (!player.directUrl || !player.directTitle) {
+      throw new Error("请从 WebDAV 页面打开一个视频文件");
+    }
+    if (useHtmlVideo && videoEl.value) {
+      destroyHtmlPlayback();
+      videoEl.value.src = player.directUrl;
+      videoEl.value.volume = Math.max(0, Math.min(1, htmlVolume.value / 100));
+      videoEl.value.muted = htmlMuted.value;
+      videoEl.value.playbackRate = htmlSpeed.value;
+      pendingStartSeconds = start > 0 ? start / 1000 : null;
+      await videoEl.value.play().catch((error) => {
+        if (!(error instanceof DOMException) || error.name !== "NotAllowedError") throw error;
+        htmlPaused.value = true;
+        showControls.value = true;
+      });
+    } else {
+      await player.refresh();
+    }
   } else if (localId) {
     if (!lib.itemCache[props.id]) {
       await lib.loadItem(props.id);

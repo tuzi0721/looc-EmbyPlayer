@@ -11,6 +11,7 @@ import { DownloadManager } from "./backend/downloads.mjs";
 import { DanmakuClient } from "./backend/danmaku.mjs";
 import { DesktopIntegration, extractProtocolUrls } from "./backend/desktop.mjs";
 import { JsonStore, createServer } from "./backend/store.mjs";
+import { WebDavClient } from "./backend/webdav.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -117,6 +118,7 @@ app.on("open-url", (event, url) => {
 const store = new JsonStore(userDataDir);
 const emby = new EmbyClient(store);
 const danmaku = new DanmakuClient(store, emby);
+const webdav = new WebDavClient();
 const mpv = new MpvController(store, { logDir: userDataDir });
 const downloads = new DownloadManager(store, emby, mpv, {
   userDataDir,
@@ -1087,6 +1089,41 @@ async function playLocalFilePath(filePath, startMs = null) {
   writePlaybackLog("play_file_loaded", {
     fileName: path.basename(resolved),
     startMs: startMs ?? null,
+  });
+}
+
+async function playWebDavFile(payload = {}) {
+  const url = typeof payload.url === "string" ? payload.url.trim() : "";
+  if (!url) throw new Error("WebDAV file URL is required");
+  const parsed = new URL(url);
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("WebDAV file URL must use http or https");
+  }
+  let decodedPath = parsed.pathname;
+  try {
+    decodedPath = decodeURIComponent(parsed.pathname);
+  } catch {
+    decodedPath = parsed.pathname;
+  }
+  const title = typeof payload.title === "string" && payload.title.trim()
+    ? payload.title.trim()
+    : path.basename(decodedPath);
+  const settings = await store.getSettings();
+  await mpv.load({
+    url: parsed.toString(),
+    headers: webdav.headersFor(payload),
+    userAgent: payload.userAgent ?? settings.defaultUserAgent ?? null,
+    startMs: payload.startMs ?? null,
+    autoloadSubtitles: false,
+  });
+  await applySubtitleStyle(settings).catch((error) => {
+    console.warn("failed to apply subtitle style", error);
+  });
+  currentPlaySession = null;
+  writePlaybackLog("webdav_file_loaded", {
+    title,
+    url: parsed.toString(),
+    startMs: payload.startMs ?? null,
   });
 }
 
@@ -2134,6 +2171,11 @@ async function handleInvoke(command, args = {}) {
     return null;
   }
   if (command === "list_local_folder") return listLocalFolder(args.payload ?? {});
+  if (command === "list_webdav_folder") return webdav.list(args.payload ?? {});
+  if (command === "play_webdav_file") {
+    await playWebDavFile(args.payload ?? {});
+    return null;
+  }
   if (command === "list_notifications") return store.listNotifications();
   if (command === "unread_count") return store.unreadCount();
   if (command === "list_danmaku_providers") return danmaku.listProviders();

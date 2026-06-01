@@ -525,7 +525,7 @@ const enhancementSummary = computed(() =>
   isWindowsPlatform.value ? "HDR 系统入口" : "等待硬件路径",
 );
 const aiSubtitleSummary = computed(() => "待接入");
-const fileServicesSummary = computed(() => "本地可用 / 服务待接入");
+const fileServicesSummary = computed(() => "本地 / WebDAV 可用");
 
 const enhancementCapabilities = computed<EnhancementCapability[]>(() => {
   const mpvPath =
@@ -700,9 +700,9 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
   {
     key: "webdav",
     label: "WebDAV",
-    detail: "未接入账号、目录浏览与直链播放",
+    detail: "可保存连接、PROPFIND 浏览目录，并把视频直链交给内嵌 mpv 播放",
     icon: "lucide:cloud",
-    status: "planned",
+    status: "available",
   },
   {
     key: "smb",

@@ -10,7 +10,13 @@ import type {
   Server,
   ServerKind,
 } from "@/types/models";
-import type { PlaybackLineOption, PlaybackMediaSource, PlaybackSource } from "@/api";
+import type {
+  PlaybackLineOption,
+  PlaybackMediaSource,
+  PlaybackSource,
+  WebDavEntry,
+  WebDavListing,
+} from "@/api";
 
 export type UnlistenFn = () => void;
 
@@ -98,6 +104,23 @@ const WEB_DEFAULT_SETTINGS: AppSettings = {
 };
 
 const WEB_STATE_KEY = "hills-lite:web-preview-state:v1";
+const WEB_DAV_VIDEO_EXTENSIONS = new Set([
+  "mp4",
+  "mkv",
+  "mov",
+  "avi",
+  "wmv",
+  "flv",
+  "webm",
+  "m4v",
+  "ts",
+  "m2ts",
+  "mpeg",
+  "mpg",
+  "3gp",
+  "ogv",
+  "rmvb",
+]);
 let webSettings: AppSettings = { ...WEB_DEFAULT_SETTINGS };
 let webServers: Server[] = [];
 let webAccounts: Account[] = [];
@@ -690,6 +713,169 @@ async function webJson(
   const text = await response.text();
   if (!text.trim()) return null;
   return JSON.parse(text);
+}
+
+function webDavRootUrl(value: unknown): URL {
+  let url: URL;
+  try {
+    url = new URL(String(value ?? "").trim());
+  } catch {
+    throw new Error("WebDAV URL 无效");
+  }
+  if (!["http:", "https:"].includes(url.protocol)) {
+    throw new Error("WebDAV URL 必须使用 http 或 https");
+  }
+  if (!url.pathname.endsWith("/")) url.pathname = `${url.pathname}/`;
+  return url;
+}
+
+function webDavRelativePath(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .split("/")
+    .filter(Boolean)
+    .map((part) => {
+      try {
+        return decodeURIComponent(part);
+      } catch {
+        return part;
+      }
+    })
+    .join("/");
+}
+
+function webDavJoin(root: URL, path: string): URL {
+  if (!path) return new URL(root.toString());
+  const encoded = path
+    .split("/")
+    .filter(Boolean)
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return new URL(`${encoded}/`, root);
+}
+
+function webDavAuthorization(username?: string | null, password?: string | null) {
+  if (!username && !password) return null;
+  const bytes = new TextEncoder().encode(`${username ?? ""}:${password ?? ""}`);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `Basic ${btoa(binary)}`;
+}
+
+function webDavNameFromUrl(url: URL) {
+  const path = url.pathname.replace(/\/+$/, "");
+  const name = path.split("/").filter(Boolean).pop() ?? url.hostname;
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
+}
+
+function webDavRelativeFromUrl(root: URL, item: URL, isDirectory: boolean) {
+  const decode = (value: string) => {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  };
+  const rootPath = decode(root.pathname).replace(/\/+$/, "");
+  const itemPath = decode(item.pathname).replace(/\/+$/, "");
+  let relative = itemPath.replace(/^\/+/, "");
+  if (rootPath && itemPath.toLowerCase().startsWith(`${rootPath.toLowerCase()}/`)) {
+    relative = itemPath.slice(rootPath.length + 1);
+  }
+  return isDirectory && relative && !relative.endsWith("/") ? `${relative}/` : relative;
+}
+
+function webDavComparable(value: URL) {
+  const url = new URL(value.toString());
+  url.hash = "";
+  url.search = "";
+  url.pathname = url.pathname.replace(/\/+$/, "");
+  return url.toString();
+}
+
+function webDavListingFromXml(xml: string, root: URL, requestUrl: URL): WebDavListing {
+  const document = new DOMParser().parseFromString(xml, "application/xml");
+  const parserError = document.querySelector("parsererror");
+  if (parserError) throw new Error("WebDAV 返回的 XML 无法解析");
+  const current = webDavComparable(requestUrl);
+  const responses = Array.from(document.getElementsByTagNameNS("*", "response"));
+  const items: WebDavEntry[] = responses
+    .map((response): WebDavEntry | null => {
+      const href = response.getElementsByTagNameNS("*", "href")[0]?.textContent?.trim();
+      if (!href) return null;
+      let url: URL;
+      try {
+        url = new URL(href, requestUrl);
+      } catch {
+        return null;
+      }
+      if (webDavComparable(url) === current) return null;
+      const isDirectory = response.getElementsByTagNameNS("*", "collection").length > 0;
+      const displayName = response.getElementsByTagNameNS("*", "displayname")[0]?.textContent?.trim();
+      const name = (displayName || webDavNameFromUrl(url)).replace(/\/+$/, "");
+      const extension = isDirectory ? "" : (name.split(".").pop() ?? "").toLowerCase();
+      const sizeText = response.getElementsByTagNameNS("*", "getcontentlength")[0]?.textContent;
+      const modifiedText = response.getElementsByTagNameNS("*", "getlastmodified")[0]?.textContent;
+      const modifiedAtMs = modifiedText ? Date.parse(modifiedText) : NaN;
+      return {
+        name: name || webDavNameFromUrl(url),
+        url: url.toString(),
+        path: webDavRelativeFromUrl(root, url, isDirectory),
+        isDirectory,
+        extension,
+        sizeBytes: Number(sizeText) || 0,
+        modifiedAtMs: Number.isFinite(modifiedAtMs) ? modifiedAtMs : null,
+        contentType: response.getElementsByTagNameNS("*", "getcontenttype")[0]?.textContent ?? null,
+        playable: !isDirectory && WEB_DAV_VIDEO_EXTENSIONS.has(extension),
+      };
+    })
+    .filter((entry): entry is WebDavEntry => entry != null)
+    .sort((left, right) => {
+      if (left.isDirectory !== right.isDirectory) return left.isDirectory ? -1 : 1;
+      return left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" });
+    });
+
+  return {
+    rootUrl: root.toString(),
+    path: webDavRelativePath(webDavRelativeFromUrl(root, requestUrl, true)),
+    directoryUrl: requestUrl.toString(),
+    items,
+  };
+}
+
+async function webListDavFolder(payload: any): Promise<WebDavListing> {
+  const root = webDavRootUrl(payload?.baseUrl);
+  const path = webDavRelativePath(payload?.path);
+  const requestUrl = webDavJoin(root, path);
+  const timeoutMs = webRequestTimeoutMs();
+  const authorization = webDavAuthorization(
+    stringFrom(payload?.username),
+    stringFrom(payload?.password),
+  );
+  const headers: Record<string, string> = {
+    Accept: "application/xml,text/xml,*/*",
+    "Content-Type": "application/xml; charset=utf-8",
+    Depth: "1",
+  };
+  if (authorization) headers.Authorization = authorization;
+  const response = await fetchViaWebPreviewProxy(
+    requestUrl,
+    {
+      method: "PROPFIND",
+      headers,
+      body:
+        '<?xml version="1.0" encoding="utf-8" ?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname /><d:resourcetype /><d:getcontentlength /><d:getlastmodified /><d:getcontenttype /></d:prop></d:propfind>',
+    },
+    timeoutMs,
+  );
+  if (!response.ok) throw new Error(`WebDAV PROPFIND failed: HTTP ${response.status}`);
+  return webDavListingFromXml(await response.text(), root, requestUrl);
 }
 
 function detectKindFromSystemInfo(info: any): ServerKind {
@@ -1370,6 +1556,19 @@ function invokeWebFallback<T>(
         truncated: false,
         items: [],
       } as T);
+    case "list_webdav_folder":
+      return webListDavFolder(args?.payload) as Promise<T>;
+    case "play_webdav_file": {
+      const payload = args?.payload as any;
+      webPlaybackSourceState = null;
+      webPlaybackSnapshot = {
+        ...webDefaultSnapshot(),
+        url: stringFrom(payload?.url),
+        paused: true,
+        positionMs: Math.max(0, Math.floor(numberFrom(payload?.startMs) ?? 0)),
+      };
+      return Promise.resolve(undefined as T);
+    }
     case "import_danmaku_xml":
       return Promise.resolve({
         provider: "xml",

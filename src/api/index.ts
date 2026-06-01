@@ -141,6 +141,25 @@ export interface LocalFolderListing {
   items: LocalFolderVideo[];
 }
 
+export interface WebDavEntry {
+  name: string;
+  url: string;
+  path: string;
+  isDirectory: boolean;
+  extension: string;
+  sizeBytes: number;
+  modifiedAtMs?: number | null;
+  contentType?: string | null;
+  playable: boolean;
+}
+
+export interface WebDavListing {
+  rootUrl: string;
+  path: string;
+  directoryUrl: string;
+  items: WebDavEntry[];
+}
+
 export interface ScreenshotResult {
   filePath: string;
 }
@@ -354,6 +373,21 @@ export const api = {
     invoke<void>("play_file", { payload }),
   listLocalFolder: (payload: { directory: string; recursive?: boolean }) =>
     invoke<LocalFolderListing>("list_local_folder", { payload }),
+  listWebDavFolder: (payload: {
+    baseUrl: string;
+    path?: string | null;
+    username?: string | null;
+    password?: string | null;
+    timeoutMs?: number | null;
+  }) => invoke<WebDavListing>("list_webdav_folder", { payload }),
+  playWebDavFile: (payload: {
+    url: string;
+    title?: string | null;
+    username?: string | null;
+    password?: string | null;
+    userAgent?: string | null;
+    startMs?: number | null;
+  }) => invoke<void>("play_webdav_file", { payload }),
 
   // Notifications
   listNotifications: () => invoke<AppNotification[]>("list_notifications"),

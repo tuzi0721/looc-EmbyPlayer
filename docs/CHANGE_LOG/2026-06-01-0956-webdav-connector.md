@@ -1,0 +1,21 @@
+# WebDAV 基础连接器
+
+- **动机**：文件源路线里 WebDAV 仍停留在“待接入”，用户无法从远程 WebDAV 目录浏览视频并交给内嵌播放器；这一段先做真实 PROPFIND 浏览和直链播放，不做假开关。
+- **改动**：
+  - `electron/backend/webdav.mjs` — 新增 WebDAV 客户端，支持 Basic Auth、PROPFIND Depth 1、XML multistatus 解析、目录/视频识别和播放 header 生成。
+  - `electron/main.mjs` / `src/api/index.ts` — 新增 `list_webdav_folder` 与 `play_webdav_file` 命令；Electron 播放 WebDAV 文件时把直链和认证 header 交给内嵌 mpv。
+  - `src/views/WebDavView.vue` / `src/stores/webdav.ts` / `src/router/index.ts` / `src/components/common/AppSidebar.vue` — 新增 `/webdav` 页面、连接保存、侧边栏入口、目录浏览和视频点击播放。
+  - `src/stores/player.ts` / `src/views/PlayerView.vue` — 播放器识别 WebDAV 直链播放状态，标题、副标题、SMTC 和 Web Preview 直链 fallback 不再误标成本地文件。
+  - `src/views/SettingsView.vue` / `docs/CURRENT_STATE.md` — 将 WebDAV 从“待接入”更新为基础可用，并记录当前能力边界。
+  - `scripts/smoke-webdav-connector.mjs` — 新增本地 mock WebDAV smoke，校验 Basic Auth、目录排序、视频扩展名识别和文件属性解析。
+- **验证**：
+  - `node --check electron\backend\webdav.mjs`
+  - `node --check electron\main.mjs`
+  - `node --check scripts\smoke-webdav-connector.mjs`
+  - `node scripts\smoke-webdav-connector.mjs`
+  - `npm.cmd run check:electron-commands`
+  - `npm.cmd run build`
+  - `git diff --check`
+  - 敏感关键字扫描
+- **结果**：通过；WebDAV 连接器具备基础配置、真实目录读取和 Electron 内嵌 mpv 直链播放能力。未写入测试账号、密码、token 或完整真实线路地址。
+- **风险**：当前为 Depth 1 浏览和常见视频扩展名识别；递归索引、收藏 WebDAV 文件、远程封面/NFO/字幕侧挂、Range 代理与 SMB/Alist/Plex 仍需后续阶段推进。

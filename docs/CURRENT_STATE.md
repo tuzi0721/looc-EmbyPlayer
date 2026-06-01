@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（播放器长按倍速）
+> **更新时间**：2026-06-01（WebDAV 基础连接器）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-0935-player-long-press-speed.md`](./CHANGE_LOG/2026-06-01-0935-player-long-press-speed.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-0956-webdav-connector.md`](./CHANGE_LOG/2026-06-01-0956-webdav-connector.md)
 
 ---
 
@@ -74,6 +74,8 @@
 **2026-06-01**：本地文件夹递归浏览新增按子目录分组显示；开启“按文件夹分组”后，列表按视频相对路径的父目录生成分组标题，播放队列仍跟随当前搜索和排序结果。
 
 **2026-06-01**：本地文件夹列表新增侧挂资源提示；Electron/Tauri 返回同名字幕数量和同名 XML 弹幕路径，文件行显示“字幕 N”与“XML 弹幕”，搜索可匹配字幕/弹幕关键词。
+
+**2026-06-01**：新增 `/webdav` WebDAV 基础连接器；侧边栏可进入 WebDAV 页面，连接表单支持 URL、用户名、密码和可选凭据保存，Electron 后端使用真实 PROPFIND 读取目录并把可播放视频直链交给内嵌 mpv，Web Preview 通过本地代理提供目录浏览验证路径。设置页“文件服务 / 连接器”同步将 WebDAV 标记为可用。
 
 **2026-06-01**：详情页新增“媒体信息”摘要区；Emby/Jellyfin 详情接口会请求 `MediaSources`，页面展示媒体源、容器、视频编码/分辨率/码率、音频、字幕数量、总码率、大小和播放能力，且不展示完整服务器路径或远端 URL。
 
@@ -581,9 +583,11 @@ npm.cmd run electron:build
 
 本轮播放器长按倍速已闭环：`PlayerView` 在画面空白区域长按时临时切到 2.0x，松开后恢复原倍速，控件/进度条/菜单区域不会触发；Electron 内嵌 smoke 已扩展为模拟长按，验证 `speed` 从 1.0 到 2.0 再恢复到 1.0，且 `2.0x` 徽标随按住/松开显示与消失。验证已覆盖 `npm.cmd run build`、`node --check scripts\smoke-electron-embedded-local.mjs`、`node scripts\smoke-electron-embedded-local.mjs`、`git diff --check` 与敏感关键字扫描；未写入测试账号、密码、token 或完整线路地址。
 
+本轮 WebDAV 基础连接器已闭环：`/webdav` 新增连接配置和目录浏览页，侧边栏新增 WebDAV 入口；Electron 后端新增 `WebDavClient`，通过真实 PROPFIND 解析目录并识别常见视频扩展名，点击视频会携带 Basic Auth header 交给内嵌 mpv 播放；Web Preview 通过本地代理验证目录读取，设置页“文件服务 / 连接器”已将 WebDAV 标记为可用。验证已覆盖 `node --check electron\backend\webdav.mjs`、`node --check electron\main.mjs`、`node --check scripts\smoke-webdav-connector.mjs`、`node scripts\smoke-webdav-connector.mjs`、`npm.cmd run check:electron-commands`、`npm.cmd run build`、`git diff --check` 与敏感关键字扫描；未写入测试账号、密码、token 或完整真实线路地址。
+
 ---
 
 ## 10. Phase 2 待办
 
 - 播放窗口内嵌已通过本地屏幕像素 smoke；后续仍建议用真实媒体人工走一遍控制栏显示/隐藏、全屏和窗口 resize 体验。
-- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层/递归视频浏览、本地文件夹列表搜索/排序/分组与播放队列、同名封面、同名 NFO 元数据、同名字幕自动关联及列表提示、同名 XML 弹幕自动关联及列表提示、最近本地文件入口、最近本地文件夹入口、收藏本地文件和收藏本地文件夹；在线封面/元数据刮削、WebDAV、SMB、Alist/OpenList 和 Plex 仍待后续分阶段接入。
+- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层/递归视频浏览、本地文件夹列表搜索/排序/分组与播放队列、同名封面、同名 NFO 元数据、同名字幕自动关联及列表提示、同名 XML 弹幕自动关联及列表提示、最近本地文件入口、最近本地文件夹入口、收藏本地文件、收藏本地文件夹和 WebDAV 基础目录浏览/直链播放；在线封面/元数据刮削、SMB、Alist/OpenList 和 Plex 仍待后续分阶段接入。

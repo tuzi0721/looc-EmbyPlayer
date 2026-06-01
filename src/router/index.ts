@@ -55,6 +55,12 @@ const routes: RouteRecordRaw[] = [
     meta: { transition: "slide-up" },
   },
   {
+    path: "/webdav",
+    name: "webdav",
+    component: () => import("@/views/WebDavView.vue"),
+    meta: { transition: "slide-up" },
+  },
+  {
     path: "/item/:id",
     name: "item-detail",
     component: () => import("@/views/DetailView.vue"),
