@@ -714,9 +714,9 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
   {
     key: "alist-openlist",
     label: "Alist / OpenList",
-    detail: "未接入站点配置、路径浏览与签名链接刷新",
+    detail: "可配置站点、读取路径并把签名直链交给内嵌 mpv 播放",
     icon: "lucide:list-tree",
-    status: "planned",
+    status: "available",
   },
   {
     key: "plex",

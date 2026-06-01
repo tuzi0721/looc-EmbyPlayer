@@ -1,0 +1,943 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { Icon } from "@iconify/vue";
+
+import { api, type AlistEntry, type AlistListing } from "@/api";
+import { useAlistStore } from "@/stores/alist";
+import { usePlayerStore, type DirectQueueEntry } from "@/stores/player";
+import { writeTextToClipboard } from "@/utils/clipboard";
+
+type SortMode = "name" | "modified" | "size" | "type";
+
+const route = useRoute();
+const router = useRouter();
+const alist = useAlistStore();
+const player = usePlayerStore();
+
+const selectedConnectionId = ref<string | null>(null);
+const nameDraft = ref("");
+const baseUrlDraft = ref("");
+const tokenDraft = ref("");
+const pathPasswordDraft = ref("");
+const rememberToken = ref(false);
+const listing = ref<AlistListing | null>(null);
+const loading = ref(false);
+const playingPath = ref<string | null>(null);
+const errorText = ref<string | null>(null);
+const searchText = ref("");
+const sortMode = ref<SortMode>("name");
+const pathCopyStatus = ref<string | null>(null);
+let pathCopyStatusTimer: number | null = null;
+
+const currentPath = computed(() => {
+  const value = route.query.path;
+  return typeof value === "string" ? value : "";
+});
+const folderTitle = computed(() => {
+  if (!currentPath.value) return "Alist / OpenList";
+  return currentPath.value.replace(/\/+$/, "").split("/").filter(Boolean).pop() ?? "Alist";
+});
+const breadcrumbItems = computed(() => {
+  const segments = currentPath.value.replace(/\/+$/, "").split("/").filter(Boolean);
+  let path = "";
+  return [
+    { label: "Alist", path: "" },
+    ...segments.map((segment) => {
+      path = `${path}${segment}/`;
+      return { label: segment, path };
+    }),
+  ];
+});
+const normalizedSearchText = computed(() => searchText.value.trim().toLocaleLowerCase());
+const visibleItems = computed(() => {
+  const items = listing.value?.items ?? [];
+  const query = normalizedSearchText.value;
+  const filtered = query
+    ? items.filter((entry) =>
+        [entry.name, entry.path, entry.extension, entry.contentType ?? ""]
+          .join(" ")
+          .toLocaleLowerCase()
+          .includes(query),
+      )
+    : items;
+  return [...filtered].sort(compareEntries);
+});
+const directoryItems = computed(() => visibleItems.value.filter((entry) => entry.isDirectory));
+const playableItems = computed(() =>
+  visibleItems.value.filter((entry) => !entry.isDirectory && entry.playable),
+);
+const otherItems = computed(() =>
+  visibleItems.value.filter((entry) => !entry.isDirectory && !entry.playable),
+);
+const canLoad = computed(() => baseUrlDraft.value.trim().length > 0);
+const countLabel = computed(() => {
+  const total = listing.value?.items.length ?? 0;
+  if (normalizedSearchText.value) return `${visibleItems.value.length} / ${total} 项`;
+  return `${total} 项`;
+});
+const selectedConnection = computed(() =>
+  selectedConnectionId.value
+    ? alist.connections.find((entry) => entry.id === selectedConnectionId.value) ?? null
+    : null,
+);
+const copyableDirectoryUrl = computed(() => listing.value?.directoryUrl ?? "");
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "-";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
+}
+
+function formatDate(ms?: number | null): string {
+  if (!ms) return "";
+  try {
+    return new Intl.DateTimeFormat("zh-CN", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(ms));
+  } catch {
+    return "";
+  }
+}
+
+function compareText(left: string, right: string): number {
+  return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+}
+
+function entryKindRank(entry: AlistEntry): number {
+  if (entry.isDirectory) return 0;
+  if (entry.playable) return 1;
+  return 2;
+}
+
+function compareEntries(left: AlistEntry, right: AlistEntry): number {
+  const kind = entryKindRank(left) - entryKindRank(right);
+  if (kind !== 0) return kind;
+  if (sortMode.value === "modified") {
+    return (right.modifiedAtMs ?? 0) - (left.modifiedAtMs ?? 0) || compareText(left.name, right.name);
+  }
+  if (sortMode.value === "size") {
+    return right.sizeBytes - left.sizeBytes || compareText(left.name, right.name);
+  }
+  if (sortMode.value === "type") {
+    return compareText(left.extension || left.contentType || "", right.extension || right.contentType || "")
+      || compareText(left.name, right.name);
+  }
+  return compareText(left.name, right.name);
+}
+
+function parentPath(path: string): string {
+  const parts = path.replace(/\/+$/, "").split("/").filter(Boolean);
+  parts.pop();
+  return parts.length > 0 ? `${parts.join("/")}/` : "";
+}
+
+function fillConnection(id: string | null) {
+  const connection = id ? alist.connections.find((entry) => entry.id === id) : null;
+  selectedConnectionId.value = connection?.id ?? null;
+  nameDraft.value = connection?.name ?? "";
+  baseUrlDraft.value = connection?.baseUrl ?? "";
+  tokenDraft.value = connection?.token ?? "";
+  pathPasswordDraft.value = connection?.pathPassword ?? "";
+  rememberToken.value = Boolean(connection?.token || connection?.pathPassword);
+}
+
+function selectConnection(id: string) {
+  fillConnection(id);
+  searchText.value = "";
+  router.replace({ name: "alist", query: { connection: id, path: "" } }).catch(() => {});
+}
+
+function newConnection() {
+  selectedConnectionId.value = null;
+  nameDraft.value = "";
+  baseUrlDraft.value = "";
+  tokenDraft.value = "";
+  pathPasswordDraft.value = "";
+  rememberToken.value = false;
+  listing.value = null;
+  errorText.value = null;
+  searchText.value = "";
+  router.replace({ name: "alist" }).catch(() => {});
+}
+
+function clearPathCopyStatus() {
+  pathCopyStatus.value = null;
+  if (pathCopyStatusTimer) {
+    window.clearTimeout(pathCopyStatusTimer);
+    pathCopyStatusTimer = null;
+  }
+}
+
+function showPathCopyStatus(message: string) {
+  pathCopyStatus.value = message;
+  if (pathCopyStatusTimer) {
+    window.clearTimeout(pathCopyStatusTimer);
+  }
+  pathCopyStatusTimer = window.setTimeout(() => {
+    pathCopyStatus.value = null;
+    pathCopyStatusTimer = null;
+  }, 2200);
+}
+
+async function connectAndLoad(path = currentPath.value, refresh = false) {
+  if (!canLoad.value || loading.value) return;
+  loading.value = true;
+  errorText.value = null;
+  try {
+    const connection = alist.upsert({
+      id: selectedConnectionId.value,
+      name: nameDraft.value,
+      baseUrl: baseUrlDraft.value,
+      token: tokenDraft.value,
+      pathPassword: pathPasswordDraft.value,
+      rememberToken: rememberToken.value,
+    });
+    selectedConnectionId.value = connection.id;
+    listing.value = await api.listAlistFolder({
+      baseUrl: connection.baseUrl,
+      path,
+      token: tokenDraft.value || null,
+      pathPassword: pathPasswordDraft.value || null,
+      refresh,
+    });
+    alist.touch(connection.id);
+    router
+      .replace({ name: "alist", query: { connection: connection.id, path: listing.value.path } })
+      .catch(() => {});
+  } catch (error) {
+    listing.value = null;
+    errorText.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    loading.value = false;
+  }
+}
+
+function openDirectory(entry: AlistEntry) {
+  router
+    .push({ name: "alist", query: { connection: selectedConnectionId.value ?? "", path: entry.path } })
+    .catch(() => {});
+}
+
+function goUp() {
+  router
+    .push({
+      name: "alist",
+      query: { connection: selectedConnectionId.value ?? "", path: parentPath(currentPath.value) },
+    })
+    .catch(() => {});
+}
+
+function goRoot() {
+  router
+    .push({ name: "alist", query: { connection: selectedConnectionId.value ?? "", path: "" } })
+    .catch(() => {});
+}
+
+function openBreadcrumb(path: string) {
+  router
+    .push({ name: "alist", query: { connection: selectedConnectionId.value ?? "", path } })
+    .catch(() => {});
+}
+
+async function copyCurrentDirectoryUrl() {
+  const directoryUrl = copyableDirectoryUrl.value;
+  if (!directoryUrl) return;
+  try {
+    await writeTextToClipboard(directoryUrl);
+    showPathCopyStatus("路径已复制");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    showPathCopyStatus(`复制失败：${message}`);
+  }
+}
+
+function queueEntryFromItem(item: AlistEntry): DirectQueueEntry {
+  return {
+    sourceKind: "alist",
+    url: item.url,
+    title: item.name,
+    sourceLabel: "Alist",
+    token: tokenDraft.value || null,
+  };
+}
+
+async function playEntry(entry: AlistEntry) {
+  if (!entry.playable || playingPath.value) return;
+  playingPath.value = entry.path;
+  errorText.value = null;
+  try {
+    const resolved = await api.resolveAlistFile({
+      baseUrl: baseUrlDraft.value,
+      path: entry.path,
+      token: tokenDraft.value || null,
+      pathPassword: pathPasswordDraft.value || null,
+    });
+    const queue = playableItems.value.map(queueEntryFromItem);
+    const startIndex = Math.max(0, queue.findIndex((item) => item.title === entry.name));
+    if (queue[startIndex]) queue[startIndex] = { ...queue[startIndex], url: resolved.url };
+    player.setDirectQueue(queue, startIndex);
+    await player.playAlistFile({
+      sourceKind: "alist",
+      url: resolved.url,
+      title: entry.name,
+      sourceLabel: "Alist",
+      token: tokenDraft.value || null,
+    });
+    router
+      .push({
+        name: "player",
+        params: { id: "alist-file" },
+        query: {
+          connection: selectedConnectionId.value ?? "",
+          alistPath: currentPath.value,
+        },
+      })
+      .catch(() => {});
+  } catch (error) {
+    errorText.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    playingPath.value = null;
+  }
+}
+
+function forgetConnection(id: string) {
+  alist.remove(id);
+  if (selectedConnectionId.value === id) newConnection();
+}
+
+watch(
+  () => route.query.connection,
+  (value) => {
+    const id = typeof value === "string" ? value : null;
+    if (id && id !== selectedConnectionId.value) fillConnection(id);
+  },
+  { immediate: true },
+);
+
+watch(currentPath, (path, previous) => {
+  if (path === previous) return;
+  searchText.value = "";
+  clearPathCopyStatus();
+  if (canLoad.value) void connectAndLoad(path);
+});
+
+onBeforeUnmount(() => clearPathCopyStatus());
+
+onMounted(() => {
+  const hasConnectionQuery = typeof route.query.connection === "string" && route.query.connection.length > 0;
+  if (!selectedConnectionId.value && alist.recentConnections.length > 0) {
+    fillConnection(alist.recentConnections[0]!.id);
+  }
+  if (hasConnectionQuery && canLoad.value) {
+    void connectAndLoad(currentPath.value);
+  }
+});
+</script>
+
+<template>
+  <section class="alist">
+    <header class="alist__head">
+      <div class="alist__title">
+        <h1>{{ folderTitle }}</h1>
+        <p v-if="listing?.directoryUrl" :title="listing.directoryUrl">{{ listing.directoryUrl }}</p>
+        <nav v-if="currentPath" class="alist-breadcrumb" aria-label="Alist 路径">
+          <template v-for="(crumb, index) in breadcrumbItems" :key="crumb.path || 'root'">
+            <button
+              type="button"
+              :disabled="index === breadcrumbItems.length - 1"
+              @click="openBreadcrumb(crumb.path)"
+            >
+              {{ crumb.label }}
+            </button>
+            <Icon v-if="index < breadcrumbItems.length - 1" icon="lucide:chevron-right" width="13" />
+          </template>
+        </nav>
+      </div>
+      <div class="alist__actions">
+        <button v-if="currentPath" class="icon-btn" type="button" title="上一级" @click="goUp">
+          <Icon icon="lucide:corner-up-left" width="16" />
+        </button>
+        <button v-if="currentPath" class="icon-btn" type="button" title="回到根目录" @click="goRoot">
+          <Icon icon="lucide:home" width="16" />
+        </button>
+        <button
+          v-if="copyableDirectoryUrl"
+          class="icon-btn"
+          type="button"
+          :title="pathCopyStatus ?? '复制当前路径'"
+          :aria-label="pathCopyStatus ?? '复制当前路径'"
+          @click="copyCurrentDirectoryUrl"
+        >
+          <Icon icon="lucide:copy" width="16" />
+        </button>
+        <button class="icon-btn" type="button" :disabled="loading || !canLoad" title="刷新" @click="connectAndLoad(currentPath, true)">
+          <Icon icon="lucide:refresh-cw" width="16" :class="{ spin: loading }" />
+        </button>
+      </div>
+    </header>
+
+    <div class="alist__body">
+      <aside class="alist-config glass">
+        <div class="config-head">
+          <strong>Alist / OpenList</strong>
+          <button class="link-btn" type="button" @click="newConnection">新建</button>
+        </div>
+
+        <div v-if="alist.recentConnections.length > 0" class="connection-list">
+          <button
+            v-for="connection in alist.recentConnections"
+            :key="connection.id"
+            class="connection-pill"
+            :class="{ active: connection.id === selectedConnectionId }"
+            type="button"
+            :title="connection.baseUrl"
+            @click="selectConnection(connection.id)"
+          >
+            <Icon icon="lucide:list-tree" width="14" />
+            <span>{{ connection.name }}</span>
+          </button>
+        </div>
+
+        <label class="field">
+          <span>名称</span>
+          <input v-model="nameDraft" class="plain-input" placeholder="Alist" />
+        </label>
+        <label class="field">
+          <span>URL</span>
+          <input v-model="baseUrlDraft" class="plain-input" placeholder="https://example.com/" />
+        </label>
+        <label class="field">
+          <span>API Token</span>
+          <input v-model="tokenDraft" class="plain-input" type="password" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>路径密码</span>
+          <input v-model="pathPasswordDraft" class="plain-input" type="password" autocomplete="off" />
+        </label>
+        <label class="check-row">
+          <input v-model="rememberToken" type="checkbox" />
+          <span>保存凭据</span>
+        </label>
+        <div class="config-actions">
+          <button class="tool-btn" type="button" :disabled="loading || !canLoad" @click="connectAndLoad('')">
+            <Icon icon="lucide:plug-zap" width="16" />
+            <span>{{ loading ? "连接中" : "连接" }}</span>
+          </button>
+          <button
+            v-if="selectedConnectionId"
+            class="tool-btn tool-btn--danger"
+            type="button"
+            title="删除连接"
+            @click="forgetConnection(selectedConnectionId)"
+          >
+            <Icon icon="lucide:trash-2" width="16" />
+          </button>
+        </div>
+      </aside>
+
+      <main class="alist-list">
+        <div v-if="errorText" class="empty glass empty--error">
+          <Icon icon="lucide:triangle-alert" width="32" />
+          <strong>{{ errorText }}</strong>
+        </div>
+
+        <div v-else-if="loading" class="empty glass">
+          <Icon icon="lucide:loader" width="32" class="spin" />
+          <strong>读取目录中</strong>
+        </div>
+
+        <div v-else-if="!listing" class="empty glass">
+          <Icon icon="lucide:list-tree" width="36" />
+          <strong>选择或填写 Alist / OpenList 连接</strong>
+        </div>
+
+        <div v-else-if="listing.items.length === 0" class="empty glass">
+          <Icon icon="lucide:file-question" width="32" />
+          <strong>目录为空</strong>
+        </div>
+
+        <template v-else>
+          <div class="alist-toolbar">
+            <label class="search-box">
+              <Icon icon="lucide:search" width="15" />
+              <input v-model="searchText" type="search" placeholder="搜索名称、路径或类型" />
+            </label>
+            <label class="sort-box" title="排序">
+              <Icon icon="lucide:arrow-up-down" width="15" />
+              <select v-model="sortMode">
+                <option value="name">名称</option>
+                <option value="modified">最近修改</option>
+                <option value="size">大小</option>
+                <option value="type">类型</option>
+              </select>
+            </label>
+            <button
+              v-if="searchText"
+              class="icon-btn"
+              type="button"
+              title="清空搜索"
+              @click="searchText = ''"
+            >
+              <Icon icon="lucide:x" width="15" />
+            </button>
+          </div>
+          <div class="alist-meta">
+            <span>{{ countLabel }}</span>
+            <span v-if="playableItems.length > 0">{{ playableItems.length }} 个可播放</span>
+            <span v-if="listing.provider">{{ listing.provider }}</span>
+          </div>
+
+          <div v-if="visibleItems.length === 0" class="empty glass">
+            <Icon icon="lucide:file-question" width="32" />
+            <strong>未匹配到条目</strong>
+          </div>
+
+          <ul v-else class="entry-list">
+            <li v-for="entry in directoryItems" :key="entry.path">
+              <button class="entry-row" type="button" :title="entry.path" @click="openDirectory(entry)">
+                <Icon icon="lucide:folder" width="18" />
+                <span>
+                  <strong>{{ entry.name }}</strong>
+                  <small>{{ formatDate(entry.modifiedAtMs) || "目录" }}</small>
+                </span>
+                <Icon icon="lucide:chevron-right" width="16" />
+              </button>
+            </li>
+            <li v-for="entry in playableItems" :key="entry.path">
+              <button
+                class="entry-row"
+                type="button"
+                :title="entry.path"
+                :disabled="playingPath === entry.path"
+                @click="playEntry(entry)"
+              >
+                <Icon icon="lucide:file-video" width="18" />
+                <span>
+                  <strong>{{ entry.name }}</strong>
+                  <small>
+                    {{ entry.extension.toUpperCase() }} · {{ formatBytes(entry.sizeBytes) }}
+                    <template v-if="formatDate(entry.modifiedAtMs)">
+                      · {{ formatDate(entry.modifiedAtMs) }}
+                    </template>
+                  </small>
+                </span>
+                <Icon :icon="playingPath === entry.path ? 'lucide:loader' : 'lucide:play'" width="16" :class="{ spin: playingPath === entry.path }" />
+              </button>
+            </li>
+            <li v-for="entry in otherItems" :key="entry.path">
+              <div class="entry-row entry-row--muted" :title="entry.path">
+                <Icon icon="lucide:file" width="18" />
+                <span>
+                  <strong>{{ entry.name }}</strong>
+                  <small>{{ entry.extension || entry.contentType || "文件" }} · {{ formatBytes(entry.sizeBytes) }}</small>
+                </span>
+              </div>
+            </li>
+          </ul>
+        </template>
+      </main>
+    </div>
+  </section>
+</template>
+
+<style scoped>
+.alist {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-1);
+}
+.alist__head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px var(--content-pad) 12px;
+  border-bottom: 1px solid var(--separator);
+}
+.alist__title {
+  min-width: 0;
+}
+.alist__title h1 {
+  margin: 0;
+  color: var(--fg-primary);
+  font-size: 22px;
+  font-weight: 700;
+}
+.alist__title p {
+  margin: 6px 0 0;
+  max-width: min(760px, 68vw);
+  color: var(--fg-tertiary);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.alist-breadcrumb {
+  margin-top: 8px;
+  max-width: min(760px, 68vw);
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-tertiary);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.alist-breadcrumb::-webkit-scrollbar {
+  display: none;
+}
+.alist-breadcrumb button {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--fg-secondary);
+  min-width: 0;
+  max-width: 180px;
+  padding: 3px 5px;
+  border-radius: 6px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: inherit;
+  font-size: 12px;
+}
+.alist-breadcrumb button:hover:not(:disabled) {
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.05);
+}
+.alist-breadcrumb button:disabled {
+  color: var(--fg-primary);
+  cursor: default;
+}
+.alist__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.alist__body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 14px;
+  padding: 14px var(--content-pad) 32px;
+  overflow: hidden;
+}
+.alist-config {
+  min-height: 0;
+  overflow-y: auto;
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.config-head,
+.config-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.config-head strong {
+  color: var(--fg-primary);
+  font-size: 15px;
+}
+.connection-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.connection-pill {
+  appearance: none;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-secondary);
+  border-radius: 8px;
+  min-height: 30px;
+  display: inline-grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  cursor: pointer;
+}
+.connection-pill.active,
+.connection-pill:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.connection-pill span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.field {
+  display: grid;
+  gap: 6px;
+}
+.field span,
+.check-row {
+  color: var(--fg-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+.plain-input {
+  min-width: 0;
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-primary);
+  padding: 0 10px;
+  outline: none;
+}
+.plain-input:focus {
+  border-color: var(--accent);
+}
+.check-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.check-row input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.alist-list {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+.alist-toolbar {
+  max-width: 900px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.search-box {
+  min-width: 0;
+  flex: 1;
+  height: 36px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-tertiary);
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+}
+.search-box input {
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg-primary);
+  font: inherit;
+}
+.search-box input::placeholder {
+  color: var(--fg-tertiary);
+}
+.sort-box {
+  width: 136px;
+  height: 36px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-tertiary);
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+}
+.sort-box select {
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.sort-box option {
+  background: #1f1f24;
+  color: white;
+}
+.alist-meta {
+  max-width: 900px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-height: 26px;
+  color: var(--fg-tertiary);
+  font-size: 12px;
+}
+.entry-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 900px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--separator);
+}
+.entry-row {
+  width: 100%;
+  min-height: 56px;
+  border: none;
+  border-bottom: 1px solid var(--separator);
+  appearance: none;
+  background: transparent;
+  color: var(--fg-secondary);
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px;
+  text-align: left;
+  cursor: pointer;
+}
+.entry-row:hover:not(:disabled) {
+  color: var(--accent);
+}
+.entry-row:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.entry-row--muted {
+  cursor: default;
+  opacity: 0.58;
+}
+.entry-row span {
+  min-width: 0;
+}
+.entry-row strong,
+.entry-row small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.entry-row strong {
+  color: var(--fg-primary);
+  font-size: 14px;
+}
+.entry-row small {
+  margin-top: 4px;
+  color: var(--fg-tertiary);
+  font-size: 12px;
+}
+.tool-btn,
+.icon-btn,
+.link-btn {
+  appearance: none;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--fg-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 34px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+.tool-btn {
+  flex: 1;
+  padding: 0 12px;
+}
+.tool-btn--danger,
+.icon-btn,
+.link-btn {
+  flex: 0 0 auto;
+  min-width: 34px;
+  padding: 0 10px;
+}
+.tool-btn:hover:not(:disabled),
+.icon-btn:hover:not(:disabled),
+.link-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.tool-btn--danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.tool-btn:disabled,
+.icon-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.empty {
+  min-height: 260px;
+  max-width: 900px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 14px;
+  color: var(--fg-tertiary);
+  border-radius: 8px;
+}
+.empty strong {
+  max-width: 520px;
+  color: var(--fg-secondary);
+  font-size: 13px;
+  text-align: center;
+}
+.empty--error {
+  color: var(--danger);
+}
+.spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (max-width: 920px) {
+  .alist__body {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+  }
+  .alist-config,
+  .alist-list {
+    overflow: visible;
+  }
+  .alist-toolbar {
+    flex-wrap: wrap;
+  }
+  .sort-box {
+    width: 100%;
+  }
+}
+</style>

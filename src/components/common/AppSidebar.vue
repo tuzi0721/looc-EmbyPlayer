@@ -9,6 +9,7 @@ import { useLocalFilesStore } from "@/stores/localFiles";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useServerStore } from "@/stores/server";
 import { useSettingsStore } from "@/stores/settings";
+import { useAlistStore } from "@/stores/alist";
 import { useWebDavStore } from "@/stores/webdav";
 import { openFileDialog } from "@/platform";
 import LineStatusDot from "@/components/common/LineStatusDot.vue";
@@ -24,6 +25,7 @@ const downloads = useDownloadsStore();
 const localFiles = useLocalFilesStore();
 const notifications = useNotificationsStore();
 const webdav = useWebDavStore();
+const alist = useAlistStore();
 
 const showAdd = ref(false);
 const showVisibility = ref(false);
@@ -71,6 +73,7 @@ const recentWebDavConnections = computed(() =>
     .filter((entry) => !favoriteWebDavConnectionIds.value.has(entry.id))
     .slice(0, 2),
 );
+const recentAlistConnections = computed(() => alist.recentConnections.slice(0, 2));
 
 function loggedInOn(serverId: string): boolean {
   return auth.accounts.some((a) => a.serverId === serverId);
@@ -127,6 +130,12 @@ function gotoWebDav() {
 }
 function openWebDavConnection(id: string) {
   router.push({ name: "webdav", query: { connection: id } }).catch(() => {});
+}
+function gotoAlist() {
+  router.push("/alist").catch(() => {});
+}
+function openAlistConnection(id: string) {
+  router.push({ name: "alist", query: { connection: id } }).catch(() => {});
 }
 function gotoLocalFolder(folderPath?: string) {
   router
@@ -392,6 +401,31 @@ async function openLocalFolder() {
         <Icon icon="lucide:cloud" width="14" />
         <span>WebDAV</span>
       </button>
+
+      <button
+        class="add-srv"
+        :class="{ active: route.name === 'alist' }"
+        @click="gotoAlist"
+      >
+        <Icon icon="lucide:list-tree" width="14" />
+        <span>Alist / OpenList</span>
+      </button>
+
+      <div v-if="recentAlistConnections.length > 0" class="local-recent">
+        <div class="local-recent__head">
+          <span>最近 Alist</span>
+        </div>
+        <button
+          v-for="entry in recentAlistConnections"
+          :key="entry.id"
+          class="local-recent__item"
+          :title="entry.baseUrl"
+          @click="openAlistConnection(entry.id)"
+        >
+          <Icon icon="lucide:list-tree" width="14" />
+          <span>{{ entry.name }}</span>
+        </button>
+      </div>
 
       <div v-if="favoriteWebDavConnections.length > 0" class="local-recent">
         <div class="local-recent__head">

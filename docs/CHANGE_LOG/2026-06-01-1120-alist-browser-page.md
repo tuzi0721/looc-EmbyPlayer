@@ -1,0 +1,21 @@
+# Alist / OpenList 页面接入
+
+- **动机**：上一阶段只完成 Alist / OpenList 连接器内核，用户还不能从应用里配置站点、浏览路径或播放文件；这一阶段把它做成实际可进入的文件源页面。
+- **改动**：
+  - `src/stores/alist.ts` — 新增 Alist / OpenList 连接记录 store，保存最近连接，可选保存 API Token 与路径密码。
+  - `src/views/AlistView.vue` — 新增 `/alist` 页面，支持站点配置、目录浏览、面包屑、上一级、回根目录、复制当前路径、搜索、排序和播放可识别视频。
+  - `src/components/common/AppSidebar.vue` — 侧边栏新增 Alist / OpenList 入口，并显示最近连接快捷入口。
+  - `src/router/index.ts` — 注册 `/alist` 路由。
+  - `src/stores/player.ts` 与 `src/views/PlayerView.vue` — direct queue 增加 Alist 来源识别，播放器上一条/下一条、选集点击和返回来源页面都能区分 WebDAV 与 Alist。
+  - `src/views/SettingsView.vue` — “文件服务 / 连接器”面板将 Alist / OpenList 标记为可用能力。
+  - `docs/CURRENT_STATE.md` — 记录 Alist / OpenList 页面与播放器链路已落地，并更新 Phase 2 文件源能力边界。
+- **验证**：
+  - `node --check electron\main.mjs`
+  - `node scripts\smoke-alist-connector.mjs`
+  - `npm.cmd run build`
+  - in-app Browser `/alist` 页面目检
+  - in-app Browser `/settings?c=file-services` 能力项目检
+  - `git diff --check`
+  - 敏感关键字扫描
+- **结果**：通过；页面入口、设置页能力项、构建、命令覆盖、Alist mock API smoke 与敏感扫描均已验证。
+- **风险**：浏览器自动填表仍受 in-app Browser 虚拟剪贴板限制，本阶段页面目检未用自动化提交 mock 表单；真实目录读取由本地 Alist API smoke 覆盖，后续可继续做收藏、同名字幕/弹幕和更强的真实站点回归。

@@ -346,7 +346,7 @@ const displayTitle = computed(
     player.directTitle ??
     player.localFileTitle ??
     localFileTitle.value ??
-    (props.id === "webdav-file" ? "WebDAV" : "本地文件"),
+    (props.id === "webdav-file" ? "WebDAV" : props.id === "alist-file" ? "Alist" : "本地文件"),
 );
 const displaySubtitle = computed(() => {
   if (isDirectUrlPlayback.value) return player.directSourceLabel ?? "网络文件";
@@ -1278,7 +1278,7 @@ async function playQueueIndex(index: number) {
     if (!entry) return;
     player.queueIndex = index;
     resetDanmakuState();
-    await player.playWebDavFile(entry);
+    await player.playDirectEntry(entry);
   } else if (useHtmlVideo) {
     const id = player.queue[index];
     if (!id) return;
@@ -1325,16 +1325,29 @@ function back() {
   }
   if (isDirectUrlPlayback.value) {
     const connection = route.query.connection;
-    const webdavPath = route.query.webdavPath;
-    router
-      .push({
-        name: "webdav",
-        query: {
-          ...(typeof connection === "string" && connection ? { connection } : {}),
-          ...(typeof webdavPath === "string" ? { path: webdavPath } : {}),
-        },
-      })
-      .catch(() => {});
+    if (props.id === "alist-file") {
+      const alistPath = route.query.alistPath;
+      router
+        .push({
+          name: "alist",
+          query: {
+            ...(typeof connection === "string" && connection ? { connection } : {}),
+            ...(typeof alistPath === "string" ? { path: alistPath } : {}),
+          },
+        })
+        .catch(() => {});
+    } else {
+      const webdavPath = route.query.webdavPath;
+      router
+        .push({
+          name: "webdav",
+          query: {
+            ...(typeof connection === "string" && connection ? { connection } : {}),
+            ...(typeof webdavPath === "string" ? { path: webdavPath } : {}),
+          },
+        })
+        .catch(() => {});
+    }
     return;
   }
   const from =
@@ -1833,9 +1846,9 @@ async function startCurrentPlayback() {
       startMs: start,
       title: fileNameFromPath(filePath),
     });
-  } else if (props.id === "webdav-file") {
+  } else if (props.id === "webdav-file" || props.id === "alist-file") {
     if (!player.directUrl || !player.directTitle) {
-      throw new Error("请从 WebDAV 页面打开一个视频文件");
+      throw new Error(props.id === "alist-file" ? "请从 Alist 页面打开一个视频文件" : "请从 WebDAV 页面打开一个视频文件");
     }
     if (useHtmlVideo && videoEl.value) {
       destroyHtmlPlayback();

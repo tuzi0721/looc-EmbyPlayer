@@ -61,6 +61,12 @@ const routes: RouteRecordRaw[] = [
     meta: { transition: "slide-up" },
   },
   {
+    path: "/alist",
+    name: "alist",
+    component: () => import("@/views/AlistView.vue"),
+    meta: { transition: "slide-up" },
+  },
+  {
     path: "/item/:id",
     name: "item-detail",
     component: () => import("@/views/DetailView.vue"),
