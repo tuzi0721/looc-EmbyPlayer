@@ -178,9 +178,12 @@ function fillConnection(id: string | null) {
 }
 
 function selectConnection(id: string) {
+  const connection = webdav.connections.find((entry) => entry.id === id);
   fillConnection(id);
   searchText.value = "";
-  router.replace({ name: "webdav", query: { connection: id, path: "" } }).catch(() => {});
+  router
+    .replace({ name: "webdav", query: { connection: id, path: connection?.lastPath ?? "" } })
+    .catch(() => {});
 }
 
 function toggleSelectedConnectionFavorite() {
@@ -231,6 +234,7 @@ async function connectAndLoad(path = currentPath.value) {
       baseUrl: baseUrlDraft.value,
       username: usernameDraft.value,
       password: passwordDraft.value,
+      lastPath: path,
       rememberPassword: rememberPassword.value,
     });
     selectedConnectionId.value = connection.id;
@@ -240,7 +244,7 @@ async function connectAndLoad(path = currentPath.value) {
       username: usernameDraft.value || null,
       password: passwordDraft.value || null,
     });
-    webdav.touch(connection.id);
+    webdav.touch(connection.id, listing.value.path);
     router
       .replace({ name: "webdav", query: { connection: connection.id, path: listing.value.path } })
       .catch(() => {});
@@ -359,7 +363,14 @@ onBeforeUnmount(() => clearPathCopyStatus());
 onMounted(() => {
   const hasConnectionQuery = typeof route.query.connection === "string" && route.query.connection.length > 0;
   if (!selectedConnectionId.value && webdav.recentConnections.length > 0) {
-    fillConnection(webdav.recentConnections[0]!.id);
+    const connection = webdav.recentConnections[0]!;
+    fillConnection(connection.id);
+    if (!hasConnectionQuery) {
+      const path = connection.lastPath ?? "";
+      router.replace({ name: "webdav", query: { connection: connection.id, path } }).catch(() => {});
+      if (canLoad.value) void connectAndLoad(path);
+      return;
+    }
   }
   if (hasConnectionQuery && canLoad.value) {
     void connectAndLoad(currentPath.value);

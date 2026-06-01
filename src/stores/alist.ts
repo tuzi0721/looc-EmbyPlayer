@@ -7,6 +7,7 @@ export interface AlistConnection {
   baseUrl: string;
   token?: string | null;
   pathPassword?: string | null;
+  lastPath?: string | null;
   savedAt: string;
   lastUsedAt?: string | null;
   favoritedAt?: string | null;
@@ -35,6 +36,11 @@ function validIso(value?: string | null): string | null {
   return value && !Number.isNaN(Date.parse(value)) ? value : null;
 }
 
+function normalizePath(value?: string | null): string | null {
+  if (typeof value !== "string") return null;
+  return value.trim().replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
 function normalizeConnection(value: unknown): AlistConnection | null {
   if (!value || typeof value !== "object") return null;
   const entry = value as Partial<AlistConnection>;
@@ -53,6 +59,7 @@ function normalizeConnection(value: unknown): AlistConnection | null {
       typeof entry.pathPassword === "string" && entry.pathPassword.length > 0
         ? entry.pathPassword
         : null,
+    lastPath: normalizePath(entry.lastPath),
     savedAt,
     lastUsedAt: validIso(entry.lastUsedAt),
     favoritedAt: validIso(entry.favoritedAt),
@@ -99,6 +106,7 @@ export const useAlistStore = defineStore("alist", () => {
     baseUrl: string;
     token?: string | null;
     pathPassword?: string | null;
+    lastPath?: string | null;
     rememberToken?: boolean;
   }) {
     const baseUrl = payload.baseUrl.trim();
@@ -112,6 +120,7 @@ export const useAlistStore = defineStore("alist", () => {
       baseUrl,
       token: payload.rememberToken ? payload.token ?? null : null,
       pathPassword: payload.rememberToken ? payload.pathPassword ?? null : null,
+      lastPath: normalizePath(payload.lastPath ?? previous?.lastPath ?? null),
       savedAt: previous?.savedAt ?? now,
       lastUsedAt: now,
       favoritedAt: previous?.favoritedAt ?? null,
@@ -124,10 +133,16 @@ export const useAlistStore = defineStore("alist", () => {
     return connection;
   }
 
-  function touch(id: string) {
+  function touch(id: string, lastPath?: string | null) {
     const now = new Date().toISOString();
     connections.value = connections.value.map((entry) =>
-      entry.id === id ? { ...entry, lastUsedAt: now } : entry,
+      entry.id === id
+        ? {
+            ...entry,
+            lastUsedAt: now,
+            lastPath: lastPath === undefined ? entry.lastPath ?? null : normalizePath(lastPath),
+          }
+        : entry,
     );
     save();
   }

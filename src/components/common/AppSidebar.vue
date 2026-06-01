@@ -137,13 +137,25 @@ function gotoWebDav() {
   router.push("/webdav").catch(() => {});
 }
 function openWebDavConnection(id: string) {
-  router.push({ name: "webdav", query: { connection: id } }).catch(() => {});
+  const connection = webdav.connections.find((entry) => entry.id === id);
+  router
+    .push({
+      name: "webdav",
+      query: { connection: id, path: connection?.lastPath ?? "" },
+    })
+    .catch(() => {});
 }
 function gotoAlist() {
   router.push("/alist").catch(() => {});
 }
 function openAlistConnection(id: string) {
-  router.push({ name: "alist", query: { connection: id } }).catch(() => {});
+  const connection = alist.connections.find((entry) => entry.id === id);
+  router
+    .push({
+      name: "alist",
+      query: { connection: id, path: connection?.lastPath ?? "" },
+    })
+    .catch(() => {});
 }
 function gotoLocalFolder(folderPath?: string) {
   router

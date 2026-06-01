@@ -7,6 +7,7 @@ export interface WebDavConnection {
   baseUrl: string;
   username?: string | null;
   password?: string | null;
+  lastPath?: string | null;
   savedAt: string;
   lastUsedAt?: string | null;
   favoritedAt?: string | null;
@@ -30,6 +31,11 @@ function displayNameFromUrl(baseUrl: string): string {
   } catch {
     return "WebDAV";
   }
+}
+
+function normalizePath(value?: string | null): string | null {
+  if (typeof value !== "string") return null;
+  return value.trim().replace(/\\/g, "/").replace(/^\/+/, "");
 }
 
 function normalizeConnection(value: unknown): WebDavConnection | null {
@@ -60,6 +66,7 @@ function normalizeConnection(value: unknown): WebDavConnection | null {
       typeof entry.username === "string" && entry.username.length > 0 ? entry.username : null,
     password:
       typeof entry.password === "string" && entry.password.length > 0 ? entry.password : null,
+    lastPath: normalizePath(entry.lastPath),
     savedAt,
     lastUsedAt,
     favoritedAt,
@@ -106,21 +113,24 @@ export const useWebDavStore = defineStore("webdav", () => {
     baseUrl: string;
     username?: string | null;
     password?: string | null;
+    lastPath?: string | null;
     rememberPassword?: boolean;
   }) {
     const baseUrl = payload.baseUrl.trim();
     if (!baseUrl) throw new Error("WebDAV URL 不能为空");
     const id = payload.id?.trim() || createId();
     const now = new Date().toISOString();
+    const previous = connections.value.find((entry) => entry.id === id);
     const connection: WebDavConnection = {
       id,
       name: payload.name?.trim() || displayNameFromUrl(baseUrl),
       baseUrl,
       username: payload.username?.trim() || null,
       password: payload.rememberPassword ? payload.password ?? null : null,
-      savedAt: connections.value.find((entry) => entry.id === id)?.savedAt ?? now,
+      lastPath: normalizePath(payload.lastPath ?? previous?.lastPath ?? null),
+      savedAt: previous?.savedAt ?? now,
       lastUsedAt: now,
-      favoritedAt: connections.value.find((entry) => entry.id === id)?.favoritedAt ?? null,
+      favoritedAt: previous?.favoritedAt ?? null,
     };
     connections.value = [
       connection,
@@ -130,10 +140,16 @@ export const useWebDavStore = defineStore("webdav", () => {
     return connection;
   }
 
-  function touch(id: string) {
+  function touch(id: string, lastPath?: string | null) {
     const now = new Date().toISOString();
     connections.value = connections.value.map((entry) =>
-      entry.id === id ? { ...entry, lastUsedAt: now } : entry,
+      entry.id === id
+        ? {
+            ...entry,
+            lastUsedAt: now,
+            lastPath: lastPath === undefined ? entry.lastPath ?? null : normalizePath(lastPath),
+          }
+        : entry,
     );
     save();
   }

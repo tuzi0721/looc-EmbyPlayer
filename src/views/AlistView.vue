@@ -178,9 +178,12 @@ function fillConnection(id: string | null) {
 }
 
 function selectConnection(id: string) {
+  const connection = alist.connections.find((entry) => entry.id === id);
   fillConnection(id);
   searchText.value = "";
-  router.replace({ name: "alist", query: { connection: id, path: "" } }).catch(() => {});
+  router
+    .replace({ name: "alist", query: { connection: id, path: connection?.lastPath ?? "" } })
+    .catch(() => {});
 }
 
 function toggleSelectedConnectionFavorite() {
@@ -231,6 +234,7 @@ async function connectAndLoad(path = currentPath.value, refresh = false) {
       baseUrl: baseUrlDraft.value,
       token: tokenDraft.value,
       pathPassword: pathPasswordDraft.value,
+      lastPath: path,
       rememberToken: rememberToken.value,
     });
     selectedConnectionId.value = connection.id;
@@ -241,7 +245,7 @@ async function connectAndLoad(path = currentPath.value, refresh = false) {
       pathPassword: pathPasswordDraft.value || null,
       refresh,
     });
-    alist.touch(connection.id);
+    alist.touch(connection.id, listing.value.path);
     router
       .replace({ name: "alist", query: { connection: connection.id, path: listing.value.path } })
       .catch(() => {});
@@ -361,7 +365,14 @@ onBeforeUnmount(() => clearPathCopyStatus());
 onMounted(() => {
   const hasConnectionQuery = typeof route.query.connection === "string" && route.query.connection.length > 0;
   if (!selectedConnectionId.value && alist.recentConnections.length > 0) {
-    fillConnection(alist.recentConnections[0]!.id);
+    const connection = alist.recentConnections[0]!;
+    fillConnection(connection.id);
+    if (!hasConnectionQuery) {
+      const path = connection.lastPath ?? "";
+      router.replace({ name: "alist", query: { connection: connection.id, path } }).catch(() => {});
+      if (canLoad.value) void connectAndLoad(path);
+      return;
+    }
   }
   if (hasConnectionQuery && canLoad.value) {
     void connectAndLoad(currentPath.value);
