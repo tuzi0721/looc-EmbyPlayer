@@ -525,7 +525,7 @@ const enhancementSummary = computed(() =>
   isWindowsPlatform.value ? "HDR 系统入口" : "等待硬件路径",
 );
 const aiSubtitleSummary = computed(() => "待接入");
-const fileServicesSummary = computed(() => "本地 / WebDAV 可用");
+const fileServicesSummary = computed(() => "本地 / WebDAV / Alist 可用");
 
 const enhancementCapabilities = computed<EnhancementCapability[]>(() => {
   const mpvPath =
@@ -714,7 +714,7 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
   {
     key: "alist-openlist",
     label: "Alist / OpenList",
-    detail: "可配置站点、读取路径并把签名直链交给内嵌 mpv 播放",
+    detail: "可配置/收藏站点，恢复上次目录，刷新签名直链并携带同名字幕/XML 弹幕播放",
     icon: "lucide:list-tree",
     status: "available",
   },

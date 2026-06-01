@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（文件连接器路径标签）
+> **更新时间**：2026-06-01（文件服务面板摘要）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1217-file-connector-path-labels.md`](./CHANGE_LOG/2026-06-01-1217-file-connector-path-labels.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1225-file-services-settings-summary.md`](./CHANGE_LOG/2026-06-01-1225-file-services-settings-summary.md)
 
 ---
 
@@ -620,6 +620,8 @@ npm.cmd run electron:build
 本轮文件连接器上次目录已闭环：WebDAV 与 Alist/OpenList 连接记录会在本地保存最近成功浏览的目录路径，页面内选择连接、默认打开最近连接，以及侧边栏收藏/最近入口都会优先回到上次目录；旧连接记录没有该字段时继续回根目录。该状态只保存在当前客户端 localStorage，不写入文档中的真实远端路径。
 
 本轮文件连接器路径标签已闭环：WebDAV 与 Alist/OpenList 的侧边栏收藏/最近入口、页面左侧连接胶囊和空状态快捷入口会在有上次目录时显示 `/path` 第二行，并在 tooltip 中合并连接 URL 与路径；用户点击前可以知道会回到哪个目录。
+
+本轮文件服务面板摘要已闭环：设置页“文件服务 / 连接器”摘要从“本地 / WebDAV 可用”更新为“本地 / WebDAV / Alist 可用”，Alist/OpenList 能力说明同步包含收藏站点、恢复上次目录、刷新签名直链和同名字幕/XML 弹幕播放，避免能力面板落后于实际连接器进度。
 
 ---
 
