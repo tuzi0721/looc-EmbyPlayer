@@ -42,6 +42,11 @@ type StudioEntry = {
   id?: string | null;
   name: string;
 };
+type GenreEntry = {
+  key: string;
+  id?: string | null;
+  name: string;
+};
 
 type ExternalLink = {
   key: string;
@@ -518,18 +523,36 @@ const typeBadge = computed(() => {
   };
 });
 
-const genreLabels = computed(() => {
+const genreEntries = computed<GenreEntry[]>(() => {
   const i = item.value;
   if (!i) return [];
-  const names = [
-    ...(i.Genres ?? []),
-    ...((i.GenreItems ?? []).map((g) => g.Name).filter(Boolean)),
-  ];
-  return Array.from(new Set(names.map((name) => name.trim()).filter(Boolean))).slice(0, 6);
-});
+  const seen = new Set<string>();
+  const seenNames = new Set<string>();
+  const entries: GenreEntry[] = [];
 
-const heroTags = computed(() => {
-  return Array.from(new Set(genreLabels.value)).slice(0, 6);
+  for (const genre of i.GenreItems ?? []) {
+    const name = genre.Name?.trim();
+    if (!name) continue;
+    const nameKey = name.toLowerCase();
+    const id = genre.Id?.trim() || null;
+    const key = id ? `id:${id}` : `name:${name.toLowerCase()}`;
+    if (seen.has(key) || seenNames.has(nameKey)) continue;
+    seen.add(key);
+    seenNames.add(nameKey);
+    entries.push({ key, id, name });
+  }
+
+  for (const rawName of i.Genres ?? []) {
+    const name = rawName.trim();
+    const key = `name:${name.toLowerCase()}`;
+    const nameKey = name.toLowerCase();
+    if (!name || seen.has(key) || seenNames.has(nameKey)) continue;
+    seen.add(key);
+    seenNames.add(nameKey);
+    entries.push({ key, id: null, name });
+  }
+
+  return entries.slice(0, 6);
 });
 
 function normalizeStudio(studio: NameIdPair): StudioEntry | null {
@@ -854,6 +877,15 @@ function openPerson(person: MediaPerson) {
   }).catch(() => {});
 }
 
+function openGenre(genre: GenreEntry) {
+  const routeId = genre.id ?? `name:${genre.name}`;
+  router.push({
+    name: "genre-detail",
+    params: { id: routeId },
+    query: { name: genre.name },
+  }).catch(() => {});
+}
+
 function openRelatedItem(target: MediaItem) {
   router.push({
     name: "item-detail",
@@ -1161,8 +1193,15 @@ async function togglePlayed() {
             <h1 class="hero__title">{{ item.SeriesName ?? item.Name }}</h1>
             <p v-if="episodeSubtitle" class="hero__ep">{{ episodeSubtitle }}</p>
 
-            <div v-if="heroTags.length" class="hero__tags">
-              <span v-for="tag in heroTags" :key="tag">{{ tag }}</span>
+            <div v-if="genreEntries.length" class="hero__tags">
+              <button
+                v-for="genre in genreEntries"
+                :key="genre.key"
+                type="button"
+                @click="openGenre(genre)"
+              >
+                {{ genre.name }}
+              </button>
             </div>
 
             <div v-if="metaParts.length" class="hero__meta">
@@ -1688,7 +1727,8 @@ async function togglePlayed() {
   gap: 8px;
   margin-top: 12px;
 }
-.hero__tags span {
+.hero__tags button {
+  appearance: none;
   padding: 5px 10px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.1);
@@ -1696,6 +1736,12 @@ async function togglePlayed() {
   color: var(--fg-secondary);
   font-size: 12px;
   line-height: 1;
+  cursor: pointer;
+}
+.hero__tags button:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+  color: var(--fg-primary);
+  background: rgba(255, 255, 255, 0.15);
 }
 .hero__meta {
   display: flex;
