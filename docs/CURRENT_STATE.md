@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-01（Electron unpacked 包刷新）
+> 更新时间：2026-06-01（用户问题清单 smoke 复核）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-01-2134-electron-unpacked-refresh.md`](./CHANGE_LOG/2026-06-01-2134-electron-unpacked-refresh.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-01-2137-user-issue-smoke-rerun.md`](./CHANGE_LOG/2026-06-01-2137-user-issue-smoke-rerun.md)
 
 ---
 
@@ -111,9 +111,8 @@ node scripts\smoke-electron-home-hero.mjs
 
 当前最新阶段已验证：
 
-- `npm.cmd run electron:build`
-- `npm.cmd run build`
-- `check:electron-package`
+- `node scripts\smoke-electron-home-hero.mjs`
+- `node scripts\smoke-electron-embedded-local.mjs`
 
 ---
 
