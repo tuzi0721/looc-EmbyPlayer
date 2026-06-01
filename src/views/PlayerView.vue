@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { CSSProperties } from "vue";
-import { useRoute, useRouter, type LocationQueryRaw } from "vue-router";
+import { useRoute, useRouter, type LocationQueryRaw, type RouteLocationRaw } from "vue-router";
 import { Icon } from "@iconify/vue";
 import Hls from "hls.js";
 
@@ -850,7 +850,7 @@ async function maybeAutoSkipIntroOutro() {
     duration > introMs + 60_000
   ) {
     introSkipAppliedItemId = itemId;
-    await player.seek(introMs);
+    await seekToMs(introMs);
     return;
   }
 
@@ -1222,12 +1222,7 @@ async function onScrubCommit(e: Event) {
   isScrubbing.value = false;
   if (!durationMs.value) return;
   const target = Math.floor((durationMs.value * value) / 100);
-  if (useHtmlVideo && videoEl.value) {
-    videoEl.value.currentTime = target / 1000;
-    syncHtmlVideoState();
-  } else {
-    await player.seek(target);
-  }
+  await seekToMs(target);
   bumpControls();
 }
 
@@ -1288,13 +1283,7 @@ async function playQueueEntry(index: number) {
 }
 
 async function jumpToChapter(chapter: { timeMs: number }) {
-  const target = Math.max(0, Math.floor(chapter.timeMs));
-  if (useHtmlVideo && videoEl.value) {
-    videoEl.value.currentTime = target / 1000;
-    syncHtmlVideoState();
-  } else {
-    await player.seek(target);
-  }
+  await seekToMs(chapter.timeMs);
   chapterMenuOpen.value = false;
   bumpControls();
 }
@@ -1346,59 +1335,84 @@ async function playNextTrack() {
   bumpControls();
 }
 
-function back() {
-  void player.stop();
-  const folder = route.query.folder;
+function firstQueryString(value: unknown) {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : null;
+  return null;
+}
+
+function playerReturnRoute(): RouteLocationRaw {
+  const folder = firstQueryString(route.query.folder);
   if (isLocalFilePlayback.value) {
-    if (typeof folder === "string" && folder.trim().length > 0) {
-      router.push({ name: "local-folder", query: { folder } }).catch(() => {});
-    } else {
-      router.push("/home").catch(() => {});
-    }
-    return;
+    return folder && folder.trim().length > 0
+      ? { name: "local-folder", query: { folder } }
+      : { name: "home" };
   }
+
   if (isDirectUrlPlayback.value) {
-    const connection = route.query.connection;
+    const connection = firstQueryString(route.query.connection);
     if (props.id === "alist-file") {
-      const alistPath = route.query.alistPath;
-      router
-        .push({
-          name: "alist",
-          query: {
-            ...(typeof connection === "string" && connection ? { connection } : {}),
-            ...(typeof alistPath === "string" ? { path: alistPath } : {}),
-          },
-        })
-        .catch(() => {});
-    } else {
-      const webdavPath = route.query.webdavPath;
-      router
-        .push({
-          name: "webdav",
-          query: {
-            ...(typeof connection === "string" && connection ? { connection } : {}),
-            ...(typeof webdavPath === "string" ? { path: webdavPath } : {}),
-          },
-        })
-        .catch(() => {});
+      const alistPath = firstQueryString(route.query.alistPath);
+      return {
+        name: "alist",
+        query: {
+          ...(connection ? { connection } : {}),
+          ...(alistPath != null ? { path: alistPath } : {}),
+        },
+      };
     }
+
+    const webdavPath = firstQueryString(route.query.webdavPath);
+    return {
+      name: "webdav",
+      query: {
+        ...(connection ? { connection } : {}),
+        ...(webdavPath != null ? { path: webdavPath } : {}),
+      },
+    };
+  }
+
+  const from = firstQueryString(route.query.from) || item.value?.SeriesId || props.id;
+  return { name: "item-detail", params: { id: from } };
+}
+
+async function back() {
+  closePlayerPanels();
+  showControls.value = true;
+  await exitAnyFullscreen().catch(() => {});
+  void player.stop();
+  await router.push(playerReturnRoute()).catch(() => {});
+}
+
+function clampSeekMs(value: number) {
+  const target = Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
+  const duration = durationMs.value;
+  return duration > 0 ? Math.min(target, duration) : target;
+}
+
+async function seekToMs(value: number) {
+  const target = clampSeekMs(value);
+  if (useHtmlVideo && videoEl.value) {
+    const video = videoEl.value;
+    const seconds = target / 1000;
+    if (typeof video.fastSeek === "function") {
+      try {
+        video.fastSeek(seconds);
+      } catch {
+        video.currentTime = seconds;
+      }
+    } else {
+      video.currentTime = seconds;
+    }
+    htmlPositionMs.value = target;
+    syncHtmlVideoState();
     return;
   }
-  const from =
-    (route.query.from as string | undefined) ||
-    item.value?.SeriesId ||
-    props.id;
-  router.push(`/item/${from}`).catch(() => {});
+  await player.seek(target);
 }
 
 async function nudgeSeek(deltaSec: number) {
-  const target = Math.max(0, positionMs.value + deltaSec * 1000);
-  if (useHtmlVideo && videoEl.value) {
-    videoEl.value.currentTime = target / 1000;
-    syncHtmlVideoState();
-  } else {
-    await player.seek(Math.floor(target));
-  }
+  await seekToMs(positionMs.value + deltaSec * 1000);
   bumpControls();
 }
 

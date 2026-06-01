@@ -259,9 +259,15 @@ function playerUiMetricsExpression() {
       };
       const visible = (rect) => Boolean(rect && rect.width > 1 && rect.height > 1);
       const doc = document;
+      const nativeFullscreen =
+        Math.abs(window.screenX) <= 2 &&
+        Math.abs(window.screenY) <= 2 &&
+        Math.abs(window.outerWidth - window.screen.width) <= 2 &&
+        Math.abs(window.outerHeight - window.screen.height) <= 2;
       const top = rectOf(".player__top");
       const bottom = rectOf(".player__bottom");
       const playButton = rectOf('[data-control="play-toggle"]');
+      const seekBackButton = rectOf('[data-control="seek-back"]');
       const fullscreenButton = rectOf('[data-control="fullscreen"]');
       return {
         bounds: {
@@ -276,15 +282,17 @@ function playerUiMetricsExpression() {
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
         },
-        fullscreenActive: Boolean(doc.fullscreenElement || doc.webkitFullscreenElement),
+        fullscreenActive: Boolean(doc.fullscreenElement || doc.webkitFullscreenElement || nativeFullscreen),
         top,
         bottom,
         stage: rectOf(".player__stage"),
         playButton,
+        seekBackButton,
         fullscreenButton,
         topVisible: visible(top),
         bottomVisible: visible(bottom),
         playButtonVisible: visible(playButton),
+        seekBackButtonVisible: visible(seekBackButton),
         fullscreenButtonVisible: visible(fullscreenButton),
         hasHorizontalOverflow:
           document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
@@ -538,6 +546,39 @@ try {
     restored: longPressRestored,
   };
 
+  let seekBackResult = null;
+  let seekBackError = null;
+  try {
+    await cdpEval(ws, `
+      (async () => {
+        await window.hillsLite.invoke("seek", { payload: { positionMs: 10000 } });
+        return true;
+      })()
+    `);
+    await wait(650);
+    const before = await cdpEval(ws, `
+      (async () => {
+        const state = await window.hillsLite.invoke("get_state");
+        return { positionMs: state.positionMs, paused: state.paused };
+      })()
+    `);
+    const controlsForSeek = await cdpEval(ws, playerUiMetricsExpression());
+    if (!controlsForSeek.seekBackButton?.center) {
+      throw new Error("seek back button not visible");
+    }
+    await cdpClick(ws, controlsForSeek.seekBackButton.center);
+    await wait(900);
+    const after = await cdpEval(ws, `
+      (async () => {
+        const state = await window.hillsLite.invoke("get_state");
+        return { positionMs: state.positionMs, paused: state.paused };
+      })()
+    `);
+    seekBackResult = { before, after, button: controlsForSeek.seekBackButton };
+  } catch (error) {
+    seekBackError = error?.message ?? String(error);
+  }
+
   const controlsInitial = await cdpEval(ws, playerUiMetricsExpression());
   let fullscreenAfterEnter = null;
   let fullscreenAfterExit = null;
@@ -553,8 +594,9 @@ try {
       await cdpEval(ws, `
         (async () => {
           const doc = document;
-          if (doc.exitFullscreen) await doc.exitFullscreen();
-          else if (doc.webkitExitFullscreen) doc.webkitExitFullscreen();
+          if (doc.fullscreenElement && doc.exitFullscreen) await doc.exitFullscreen();
+          else if (doc.webkitFullscreenElement && doc.webkitExitFullscreen) doc.webkitExitFullscreen();
+          else if (window.hillsLite) await window.hillsLite.invoke("set_fullscreen", { enabled: false });
           return true;
         })()
       `);
@@ -609,9 +651,11 @@ try {
     longPressSpeed.active.speed >= 1.95 &&
     Math.abs(longPressSpeed.restored.speed - startResult.state.speed) < 0.05 &&
     !longPressSpeed.restored.badgeVisible &&
+    seekBackResult?.after?.positionMs < seekBackResult?.before?.positionMs - 5000 &&
     controlsInitial.topVisible &&
     controlsInitial.bottomVisible &&
     controlsInitial.playButtonVisible &&
+    controlsInitial.seekBackButtonVisible &&
     controlsInitial.fullscreenButtonVisible &&
     !controlsInitial.hasHorizontalOverflow &&
     fullscreenAfterEnter?.fullscreenActive === true &&
@@ -632,6 +676,10 @@ try {
     state: startResult.state,
     stage: startResult.stage,
     longPressSpeed,
+    seekBack: {
+      result: seekBackResult,
+      error: seekBackError,
+    },
     controlsInitial,
     fullscreen: {
       afterEnter: fullscreenAfterEnter,
