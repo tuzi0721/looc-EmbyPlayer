@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（视觉与播放回归通过）
+> 更新时间：2026-06-02（真实服务器脱敏复测）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-0740-visual-regression-pass.md`](./CHANGE_LOG/2026-06-02-0740-visual-regression-pass.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-0744-real-server-sanitized-rerun.md`](./CHANGE_LOG/2026-06-02-0744-real-server-sanitized-rerun.md)
 
 ---
 
@@ -13,6 +13,7 @@
 - 详情页 `/item/:id` 现在使用 fullscreen app shell，隐藏主侧栏和顶栏并铺满窗口，退出依靠详情页自身返回按钮；这是为了匹配用户参考图中“剧集页打满”的视觉目标。
 - 首页/详情 smoke 现在把详情页壳层也纳入断言：详情页仍显示主侧栏/顶栏，或 hero 未从窗口原点铺满，都会失败。
 - 2026-06-02 07:40 回归已通过：`node --check scripts\smoke-electron-home-hero.mjs`、`npm.cmd run build`、`node scripts\smoke-electron-home-hero.mjs`、`node scripts\smoke-electron-embedded-local.mjs` 和保留截图版播放 smoke 均通过；已人工视检首页、紧凑首页、详情页和播放页截图。
+- 2026-06-02 07:44 真实服务器脱敏复测：普通沙箱网络下两条线路均 `fetch failed`；提权网络下 line1 公开信息/认证/媒体库视图均 HTTP 200，识别为 Emby，媒体库视图数量 5；line2 公开信息 HTTP 403 HTML，未进入登录。
 - Electron 播放页为避免 Windows `--wid` 原生嵌入窗口黑屏，当前默认走 HTML video 的应用内直连播放路径；本机解码/禁止转码契约仍由 PlaybackSource 链路保证，Tauri 仍保留原生 mpv 嵌入判断。新版播放 smoke 要求可见截图像素通过，不能再用 mpv 内部截图替代用户实际可见画面。
 - 首页巨幕已从 viewport 高度驱动改为宽度驱动的固定横幅比例，目标是在小窗口下让继续观看与媒体库进入首屏视野，而不是用巨幕挤掉下方内容。
 - 详情页首屏已改为全高沉浸背景：左下保留播放/收藏/下载/标题/元信息，右下展示版本、音频、字幕和本机解码能力信息。
