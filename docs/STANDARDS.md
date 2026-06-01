@@ -1,128 +1,119 @@
-# Hills Lite — 工程与协作规范
+# Hills Lite 工程与协作规范
 
-本文件是 [`PROJECT_MEMORY.md`](./PROJECT_MEMORY.md) 的细则扩展。冲突时以 **寸止确认的用户意图** 为准。
-
----
-
-## 1. 会话启动检查清单（AI）
-
-1. MCP `ji` → `action=回忆`, `project_path=a:\vsc\emby-player`（或实际 git 根）
-2. 阅读 `docs/PROJECT_MEMORY.md`
-3. 阅读 `docs/CURRENT_STATE.md`
-4. 阅读 `docs/CHANGE_LOG/` 下**最新一条**日志
-5. 若任务涉及差距表（G1–G9），阅读 `docs/ROADMAP/gap-alignment.md`
+本文件记录当前项目执行规范。若与用户最新消息冲突，以用户最新消息为准。
 
 ---
 
-## 2. 变更流程（每次改代码）
+## 1. 会话启动
 
+1. 先看 `git status --short --branch`，不要覆盖用户未提交改动。
+2. 阅读 `docs/CURRENT_STATE.md`。
+3. 阅读 `docs/PROJECT_MEMORY.md`。
+4. 阅读 `docs/CHANGE_LOG/` 中时间最新的一条。
+5. 涉及 UI 或播放时，优先查真实代码和现有 smoke，不依赖旧归档文档下判断。
+
+---
+
+## 2. 变更流程
+
+每个小阶段都要闭环：
+
+1. 做最小可验证改动。
+2. 新增 `docs/CHANGE_LOG/<YYYY-MM-DD-HHmm>-<slug>.md`。
+3. 更新 `docs/CURRENT_STATE.md`。
+4. 运行与改动匹配的验证。
+5. `git diff --check`。
+6. 提交。
+7. 推送到 `origin main`。
+8. 用 `git ls-remote origin refs/heads/main` 确认远端。
+9. 立即进入下一轮，除非用户要求暂停。
+
+---
+
+## 3. 构建与验证
+
+Windows 环境优先使用 `npm.cmd`。
+
+常用命令：
+
+```powershell
+npm.cmd run check:local-decode
+npm.cmd run check:no-planned-ui
+npm.cmd run build
+npm.cmd run electron:build
+cargo check --manifest-path src-tauri/Cargo.toml --all-targets
+git diff --check
 ```
-意图确认（寸止，若有多方案）
-    ↓
-改代码（最小 diff）
-    ↓
-写 CHANGE_LOG/<YYYY-MM-DD-HHmm>-<title>.md
-    ↓
-更新 CURRENT_STATE.md 相关段落
-    ↓
-寸止汇报 + 请求反馈（完成前必须）
+
+Electron 桌面 smoke：
+
+```powershell
+node --check scripts\smoke-electron-embedded-local.mjs
+node scripts\smoke-electron-embedded-local.mjs
+node --check scripts\smoke-electron-home-hero.mjs
+node scripts\smoke-electron-home-hero.mjs
 ```
 
-### 2.1 CHANGE_LOG 模板
-
-```markdown
-# <标题>
-
-- **时间**：YYYY-MM-DD HH:mm (UTC+8)
-- **动机**：…
-- **修改文件**：
-  - `path` — …
-- **风险**：…
-- **回滚**：…
-- **验证步骤**：…
-- **结果**：…（构建/运行结论）
-```
+`npm.cmd run build` 已前置执行本机解码门禁和 UI 占位入口门禁。
 
 ---
 
-## 3. 构建规范
+## 4. UI 规范
 
-| 项 | 规范值 | 配置文件 |
-|---|---|---|
-| 开发 | `npm run tauri:dev` | package.json |
-| 发布构建 | `npm run tauri:build` | |
-| 目标产物 | **仅** `emby-player.exe` | 目标：`tauri.conf.json` → `bundle.active: false` 或 `targets: []` |
-| Release profile | `panic = "abort"`, LTO, strip | `Cargo.toml` [profile.release] |
-
-> **当前状态**：`tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri/target/release/emby-player.exe` 为主。
-
----
-
-## 4. 命名与品牌
-
-| 场景 | 规范（当前） | 备注 |
-|---|---|---|
-| 窗口标题 / productName | Hills Lite | 与 `src-tauri/tauri.conf.json` 对齐 |
-| Sidebar 品牌 | Hills Lite | `src/components/common/AppSidebar.vue` |
-| npm 包名 | 可保持 `emby-player`（历史命名） | 避免无关范围大规模 rename |
-| Rust crate | `emby-player` / `emby_player_lib` | 与 Cargo 包名保持一致 |
-| 用户可见文案 | 统一 Hills Lite | 历史审计中的旧文案仅作快照记录 |
-
-**Rename 原则**：一次 PR/任务只做品牌字符串替换 + tauri.conf + index.html，避免与功能改动混杂。
+- 首页第一屏必须展示真实媒体库内容，不做营销页。
+- 巨幕内容来源应包含真实 Backdrop、Primary 海报和简介；不能只放装饰背景。
+- 主导航只放高频入口；下载、通知、遥控等工具集中到设置页。
+- 添加服务器主流程包含用户名、密码、线路地址和端口；服务端名称和类型自动探测。
+- User-Agent 和 headers 只放在线路高级设置中。
+- 设置页不要展示不能立即触发或不能配置的产品入口。
+- 弹窗使用 `Teleport to="body"`，并保证窄窗口底部按钮可见。
+- 播放页全屏时视频舞台铺满 viewport，控制栏作为覆盖层。
 
 ---
 
-## 5. UI 规范
+## 5. 播放规范
 
-- Sidebar 宽度 CSS 变量：`--sidebar-w: 240px`（`src/styles/theme.css`）
-- 弹窗：必须 `<Teleport to="body">`
-- 添加服务器：无 UA 输入；后端 `userAgent: null`
-- 路由默认：`/` → `/home`
-- 全屏页（播放器）：`meta.fullscreen: true`，隐藏 Sidebar
-
----
-
-## 6. 后端规范
-
-- 错误类型：统一 `AppError` / `AppResult`
-- 持久化：仅通过 `ConfigStore`，键名常量定义在 `config/store.rs`
-- 后台任务：`AppState::spawn_background_workers` 统一启动
-- 日志：`tracing` + 可选 `RUST_LOG=emby_player=debug,info`
-- 崩溃：`%LOCALAPPDATA%/EmbyPlayer/crash.log`（`lib.rs` panic hook）
+- mpv 固定为应用随包播放核心。
+- 禁止恢复系统 PATH mpv、用户 mpv 路径选择、构建期下载 mpv 或旧 vendor fallback。
+- Electron 打包必须带 `resources\mpv` 与 `electron_mpv_host.exe`。
+- 播放窗口必须内嵌在应用内，外部播放器只能作为显式用户动作。
+- 退出应用或关闭播放窗口后，不应留下本项目 mpv / helper 进程。
 
 ---
 
-## 7. MPV 规范
+## 6. 本机解码规范
 
-| 模式 | Feature | 说明 |
-|---|---|---|
-| IPC（默认） | `mpv-ipc` |  spawn 外部 mpv 进程 |
-| Embedded | `mpv-embedded` | libmpv2，Windows 子窗口 |
+播放协商必须坚持：
 
-**当前实现**：IPC 使用 `--input-ipc-server=<pipe/socket>`（Windows 命名管道：`\\.\pipe\hills-lite-mpv-{uuid}`）；`ensure_started` 会在 mpv 进程死亡后自动重启连接。
+- Direct Play / Direct Stream only。
+- `EnableTranscoding=false`。
+- 视频/音频 stream copy 开关保持启用。
+- 空 `TranscodingProfiles`。
+- 静态流 URL。
+- 媒体源必须明确支持本机直连或本机直流。
 
-**内置资源**：mpv 固定为应用随包播放核心；构建和打包只复制仓库内的 `src-tauri/resources/mpv`。禁止恢复本机 mpv 检测、下载引导、路径选择、`MpvBanner` 或 `detect_mpv` 类用户提示。mpv 更新只随应用版本迭代一起进入随包资源。
-
----
-
-## 8. 测试与运行
-
-- AI **允许**编译、运行、测试（用户已放开规则）
-- 自动化测试脚本：**仅用户明确要求时**添加
-- 网络类问题：先 `curl <server>/System/Info/Public` 区分环境 vs 代码
+服务端只给转码源时应该失败提示，而不是请求服务端转码。
 
 ---
 
-## 9. Git / PR
+## 7. Git 与安全
 
-- 不主动 commit，除非用户要求
-- 不 force push main
-- PR 用 `gh`，遵循用户 create-pull-requests 规则
+- 不使用 `git reset --hard` 或 `git checkout --` 回滚用户改动。
+- 不 force push `main`。
+- 只 stage 本阶段相关文件。
+- 不把账号、密码、token、完整真实线路 URL 或完整播放 URL 写入文档、日志或测试脚本。
+- 真实服务器测试结果要脱敏记录。
 
 ---
 
-## 10. 禁止事项
+## 8. 文档规则
 
-- 跳过 CHANGE_LOG 直接改代码（除纯文档 bootstrap）
-- 未寸止确认就切换品牌/构建策略/MPV 架构
-- 编造 CURRENT_STATE 内容（必须可追溯到文件/配置）
+`CURRENT_STATE.md` 只写当前事实，不再堆历史流水。历史过程写在 `CHANGE_LOG/`。
+
+阶段日志至少写清：
+
+- 背景
+- 变更
+- 验证
+- 风险
+- 回滚方式（适用时）

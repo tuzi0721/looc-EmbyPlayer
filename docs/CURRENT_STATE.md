@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-01（当前状态快照瘦身）
+> 更新时间：2026-06-01（项目记忆与规范同步）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-01-2033-current-state-snapshot-prune.md`](./CHANGE_LOG/2026-06-01-2033-current-state-snapshot-prune.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-01-2037-project-guidance-sync.md`](./CHANGE_LOG/2026-06-01-2037-project-guidance-sync.md)
 
 ---
 
@@ -22,6 +22,8 @@
 | 内置 mpv | `release-electron\win-unpacked\resources\mpv\mpv.exe`；Tauri 为 `src-tauri\target\release\resources\mpv\mpv.exe` |
 
 历史流水和每轮验证保留在 [`CHANGE_LOG`](./CHANGE_LOG/)；本文件只记录当前可执行状态，避免旧阶段描述误导后续判断。
+
+当前项目指导文档也已同步：`PROJECT_MEMORY.md` 与 `STANDARDS.md` 不再作为旧路线清单，而是指向当前 Electron 主线、随包 mpv、本机解码硬约束、阶段日志/提交/推送节奏和安全边界。
 
 ---
 

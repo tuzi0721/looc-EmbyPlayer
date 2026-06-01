@@ -1,171 +1,129 @@
-# Hills Lite — 项目记忆主索引
+# Hills Lite 项目记忆主索引
 
-> **新会话必读**：AI 在动手改代码前，必须先读本文件 + [`CURRENT_STATE.md`](./CURRENT_STATE.md) + 最近一条 [`CHANGE_LOG/`](./CHANGE_LOG/) 日志。  
-> 本文件 = 长期意图、规范、决策；`CURRENT_STATE.md` = 磁盘上代码/配置的真实快照。
+> 当前用途：给后续维护者和 AI 一个短、准、当前的项目入口。
+>
+> 新会话先读：[`CURRENT_STATE.md`](./CURRENT_STATE.md) → 本文件 → [`STANDARDS.md`](./STANDARDS.md) → `CHANGE_LOG/` 里时间最新的日志。
 
 ---
 
-## 1. 产品定位
+## 1. 产品目标
 
-| 项 | 内容 |
+Hills Lite 是 Emby / Jellyfin 优先的桌面媒体客户端，当前主运行壳为 Electron + Vue 3 + TypeScript，Tauri 路径保留但不是发布主线。产品体验要像真实桌面播放器，而不是 Web 预览壳或功能清单页。
+
+核心方向：
+
+- 首页直接呈现媒体库内容，巨幕使用真实 Backdrop、Primary 海报、简介和播放状态。
+- 播放器内嵌在应用窗口内，使用应用随包 mpv 作为默认播放核心。
+- 添加服务器流程要包含账号、密码、线路地址和任意端口，并自动识别 Emby / Jellyfin。
+- 主界面只放高频导航；下载、通知、遥控等工具入口集中在设置页。
+- 设置页只展示当前能触发或能配置的能力，不能放不可使用的产品入口。
+- 文件源以本地文件、本地文件夹、WebDAV、Alist / OpenList 为当前可用面。
+
+---
+
+## 2. 硬约束
+
+- 每个小阶段完成后必须写 `docs/CHANGE_LOG/<YYYY-MM-DD-HHmm>-<slug>.md`，同步更新 `docs/CURRENT_STATE.md`。
+- 当前用户要求阶段完成后提交、推送并确认远端 `main` 指针，然后继续下一轮。
+- 不把测试账号、密码、token、完整真实线路 URL 或完整播放 URL 写进仓库文档。
+- 不伪造成功：浏览器路由不可用、真实服务器为空、接口返回 403、视觉没有目检，都要如实记录。
+- 播放必须坚持本机解码策略；宁可失败提示，也不让 Emby/Jellyfin 服务端承担视频/音频解码。
+- mpv 只使用应用随包资源；不要恢复 PATH/system mpv、下载引导、vendor fallback 或用户 mpv 路径选择。
+- 不恢复不能使用的 UI 入口。`npm.cmd run build` 已执行 `check:no-planned-ui`，阻止占位文案回到用户界面。
+
+---
+
+## 3. 当前架构
+
+| 层 | 当前事实 |
 |---|---|
-| **对外品牌（目标）** | **Hills Lite**（紫色 Violet 主题） |
-| **仓库 / 包名** | `emby-player`（历史命名，尚未全面改名） |
-| **类型** | Emby / Jellyfin 桌面客户端 |
-| **播放内核** | MPV（默认 IPC；可选 embedded feature） |
-| **UI** | iOS 毛玻璃风；左侧常驻 Sidebar + 主内容区 |
+| 桌面壳 | Electron 主线；Tauri 保留可运行路径 |
+| 前端 | Vue 3 + TypeScript + Pinia + Vue Router |
+| 播放 | 随包 mpv IPC / 内嵌宿主；HTML video 仅用于 Web Preview 等有限路径 |
+| 后端 | Electron main services + Tauri Rust commands 双路径并存 |
+| 设置/账号 | Electron JSON store；Tauri ConfigStore；Web Preview 使用浏览器状态 |
+| 打包 | Electron unpacked / portable；Tauri release exe 仍可构建 |
 
-### 1.1 UI 主框架（不可违背）
+重要路径：
 
-- 启动后**直接进入首页** `/home`，不做额外引导页。
-- **左侧 Sidebar**（自上而下）：
-  - 品牌名
-  - 主导航：首页 / 收藏 / 历史 / 聚合视界 / 下载 / 通知 / 遥控
-  - **服务器**列表 + 齿轮「隐藏服务器」
-  - 「＋ 添加服务器」
-  - 底部 关于 Hills Lite / 添加服务器 / 设置
-- **设置页**：左分类 + 右面板二级布局。
-- **添加服务器**：不含自定义 UA 字段；弹窗须 `Teleport to="body"` 防裁切。
-- **窗口**：Windows 上 `transparent: false`，不用 acrylic（防拖拽卡顿）。
-
-### 1.2 功能清单（已实现 / 规划中）
-
-| 模块 | 状态 | 备注 |
-|---|---|---|
-| 登录 / 多线路 / 竞赛 / 测活 / 保号 | ✅ 已实现 | |
-| MPV 播放 + 字幕 + 弹幕 | ✅ 已实现 | IPC 使用命名管道/套接字；mpv 固定随包 |
-| 下载 / 伪装下载 / 边看边下 | ✅ 已实现 | |
-| 通知中心 + 托盘 | ✅ 已实现 | |
-| 远程控制 / EmbySocket | ✅ 已实现 | |
-| 虚拟列表 / 海报懒加载 | ✅ 已实现 | |
-| 快捷键 + Windows SMTC | ✅ 已实现 | |
-| 收藏页 / 历史 / 聚合视界 / 工具入口 | ✅ 已实现 | 侧边栏可直接进入 |
-| MPV 内置打包 | ✅ 已实现 | `src-tauri/resources/mpv` 为唯一内置来源；Electron 打包后有完整性检查 |
-| 品牌统一 Hills Lite | ✅ 当前用户可见壳层已统一 | 包名 / crate 名保留历史命名 |
+- Electron unpacked：`release-electron\win-unpacked\Hills Lite.exe`
+- Electron portable：`release-electron\Hills Lite 0.1.0.exe`
+- Tauri release：`src-tauri\target\release\emby-player.exe`
+- 随包 mpv 源：`src-tauri\resources\mpv`
+- Electron 随包 mpv：`release-electron\win-unpacked\resources\mpv`
 
 ---
 
-## 2. 技术栈与环境（以仓库 manifest 为准）
+## 4. 本机解码策略
 
-> 以下版本来自 `package.json` / `Cargo.toml`，**不代表**本机已安装版本。本机 Node/Rust 版本若与下表冲突，以本机 `node -v` / `rustc -V` 为准，不确定时 **寸止询问用户**。
+所有播放源协商都必须保持 Direct Play / Direct Stream only：
 
-| 层 | 技术 | 仓库声明版本 |
-|---|---|---|
-| 桌面壳 | Tauri | 2.x（`@tauri-apps/cli ^2.1.0`，Rust `tauri = "2"`） |
-| 前端 | Vue | ^3.5.13 |
-| 前端 | Vite | ^5.4.11 |
-| 前端 | TypeScript | ^5.6.3 |
-| 前端 | Pinia / Vue Router | ^2.2.6 / ^4.4.5 |
-| 后端 | Rust edition | 2021，`rust-version = 1.77` |
-| 异步 | tokio | 1.41 |
-| HTTP | reqwest | 0.12 |
-| WS | tokio-tungstenite | 0.24 |
-| MPV | 外部进程 IPC | 默认 feature `mpv-ipc` |
-| MPV | libmpv 嵌入 | 可选 feature `mpv-embedded` + libmpv2 4 |
+- `EnableDirectPlay=true`
+- `EnableDirectStream=true`
+- `EnableTranscoding=false`
+- `EnableVideoStreamCopy=true`
+- `EnableAudioStreamCopy=true`
+- Tauri 对应字段同样必须为 direct / stream copy 模式
+- `TranscodingProfiles` 必须为空
+- 播放 URL 必须走静态流 `Static=true`
+- 只接受明确支持本机直连或本机直流的媒体源
+- 进度上报只允许 `DirectPlay` / `DirectStream`
 
-### 2.1 构建与产物策略（规范）
+门禁：`npm.cmd run check:local-decode`。
 
-| 规则 | 目标 | 当前代码 |
-|---|---|---|
-| 本地 Tauri release | **只产出 exe**，不打 msi/nsis | ✅ `tauri.conf.json` 为 `bundle.active: false`, `targets: []` |
-| 构建命令 | `npm run tauri:build` | |
-| 产物路径 | `src-tauri/target/release/emby-player.exe` | |
-| Electron unpacked | `npm.cmd run electron:build` | ✅ `release-electron/win-unpacked/Hills Lite.exe`，随包 `resources/mpv` |
-| AI 可编译/运行/测试 | ✅ 允许 | |
-| 总结性 Markdown | ✅ 允许（本 docs 体系） | |
-| 测试脚本 | 仅用户明确要求时编写 | |
+---
 
-### 2.2 持久化与诊断
+## 5. 验证命令
 
-| 路径 | 用途 |
+优先使用 Windows 上稳定的 `npm.cmd`：
+
+```powershell
+npm.cmd run check:local-decode
+npm.cmd run check:no-planned-ui
+npm.cmd run build
+npm.cmd run electron:build
+cargo check --manifest-path src-tauri/Cargo.toml --all-targets
+git diff --check
+```
+
+桌面 smoke：
+
+```powershell
+node scripts\smoke-electron-embedded-local.mjs
+node scripts\smoke-electron-home-hero.mjs
+```
+
+网络 / GitHub 命令可能需要授权运行。推送后用 `git ls-remote origin refs/heads/main` 确认远端。
+
+---
+
+## 6. 文档地图
+
+| 文档 | 当前用途 |
 |---|---|
-| `%APPDATA%/app.embyplayer/config.json` | tauri-plugin-store 主配置 |
-| `%LOCALAPPDATA%/EmbyPlayer/crash.log` | Rust panic / tauri::run 失败日志 |
+| `docs/CURRENT_STATE.md` | 当前事实快照 |
+| `docs/STANDARDS.md` | 当前工程和协作规范 |
+| `docs/CHANGE_LOG/` | 每个阶段的完整历史 |
+| `docs/UI_REFERENCE_HILLS_LITE.md` | UI 规格参考 |
+| `docs/ROADMAP/*.md` | 产品和迁移路线参考 |
+| `docs/AUDIT_FULL_2026-05-25.md` | 早期审计归档，不代表当前事实 |
+| `docs/NOTIFICATION_CENTER_PLAN.md` | 通知中心归档设计，代码注释仍引用 |
+| `docs/REMOTE_PERF_HOTKEYS_PLAN.md` | 遥控/性能/快捷键归档设计，代码注释仍引用 |
+| `docs/PLAN_GOALS_EXPORT_2026-05-31.md` | 2026-05-31 目标导出归档 |
+
+判断当前状态时，以 `CURRENT_STATE.md` 和最新提交为准；归档文档只用于追溯来路。
 
 ---
 
-## 3. AI 协作规范
+## 7. 当前清理边界
 
-### 3.1 寸止（MCP `zhi`）
+`git status --short --ignored` 只应出现这些忽略目录：
 
-- 需求不明确、多方案、策略变更、任务完成前 → **必须**用寸止询问，禁止自作主张或直接结束。
-- 技术路线/环境版本超出认知 → **必须**寸止询问。
+- `.electron-user-data/`
+- `.vscode/`
+- `dist/`
+- `node_modules/`
+- `release-electron/`
+- `src-tauri/target/`
 
-### 3.2 记忆（MCP `ji`）
-
-- 会话开始：`action=回忆`, `project_path=<git 根>`
-- 用户说「请记住：」→ 总结后 `action=记忆`, `category=rule|preference|pattern|context`
-
-### 3.3 代码搜索
-
-- 优先 MCP `sou`；不可用则用 workspace Grep/Glob。
-
-### 3.4 变更日志（强制）
-
-每次代码改动后 **必须** 新增：
-
-```
-docs/CHANGE_LOG/<YYYY-MM-DD-HHmm>-<short-title>.md
-```
-
-内容须含：动机、修改文件及要点、风险、回滚、验证步骤、结果。
-
-并同步更新 [`CURRENT_STATE.md`](./CURRENT_STATE.md)。
-
----
-
-## 4. 记忆 vs 代码 — 差距表（2026-05-25 审计）
-
-| # | 记忆 / 规范目标 | 代码现状 | 优先级 |
-|---|---|---|---|
-| G1 | 品牌 **Hills Lite** | ✅ 用户可见壳层已统一；包名/crate 名保留历史命名 | P2 |
-| G2 | 主导航含收藏/历史/聚合/工具入口 | ✅ router 与 Sidebar 已接入 | P2 |
-| G3 | MPV IPC 命名管道 `--input-ipc-server` | ✅ Tauri IPC 与 Electron mpv 后端均使用随包 mpv 模型 | P1 |
-| G4 | 内置 `resources/mpv/mpv.exe` + build.rs 复制 | ✅ `src-tauri/resources/mpv` 为唯一来源；不再本机检测或构建期下载 | P1 |
-| G5 | 本地构建只产 exe | ✅ `bundle.active: false`, `targets: []` | P2 |
-| G6 | `docs/CHANGE_LOG/` 持续维护 | ✅ 已持续维护 | P0 |
-| G7 | `PROJECT_MEMORY.md` 主索引 | **本次新建** | P0 ✅ |
-| G8 | Player `back()` fire-and-forget stop | ✅ 已完成，卸载清理也已并行化 | P3 |
-| G9 | 打开闪退 | 已加 `crash.log`；根因待日志 | P0 |
-| G10 | MpvBanner + detectMpv | ✅ 已按内置 mpv 模型移除，不再恢复本机检测提示 | P2 |
-| G11 | 收藏功能 | 无 set_favorite；Detail 无 ♥；Favorites 只读 | P2 |
-| G12 | hardwareDecoding 等 | 设置仅存，未传给 mpv | P3 |
-| G13 | 全量审计后再改代码 | ✅ [`AUDIT_FULL_2026-05-25.md`](./AUDIT_FULL_2026-05-25.md) | — |
-
-> 本表源自 2026-05-25 审计，已在 2026-05-30 按当前代码校正；真实状态仍以 `CURRENT_STATE.md` 与最新 `CHANGE_LOG/` 为准。
-
----
-
-## 5. 文档地图
-
-```
-docs/
-├── PROJECT_MEMORY.md          ← 本文件（主索引，新会话先读）
-├── CURRENT_STATE.md           ← 代码/配置真实快照
-├── STANDARDS.md               ← 协作与工程规范细则
-├── CHANGE_LOG/                ← 每次改动的详细日志
-├── ROADMAP/                   ← 专项任务与待办
-│   └── gap-alignment.md       ← 差距表 G1–G13 的修复计划
-├── AUDIT_FULL_2026-05-25.md   ← 全量代码审计（改代码前必读）
-├── NOTIFICATION_CENTER_PLAN.md  ← 通知中心设计（已完成，归档参考）
-└── REMOTE_PERF_HOTKEYS_PLAN.md  ← 遥控/性能/快捷键设计（已完成，归档参考）
-```
-
----
-
-## 6. 决策历史（摘要）
-
-| 日期 | 决策 |
-|---|---|
-| 2026-05 | 选型 Tauri 2 + Vue 3 + MPV IPC |
-| 2026-05 | Sidebar 重构：首页默认、服务器隐藏、设置分栏 |
-| 2026-05 | Windows 关透明 + 去 acrylic 修拖拽 |
-| 2026-05 | 添加 crash.log 诊断启动闪退 |
-| 2026-05-25 | 建立 docs 体系；审计发现 CURRENT_STATE 与代码严重偏离 |
-
----
-
-## 7. 相关链接
-
-- 差距修复计划：[`ROADMAP/gap-alignment.md`](./ROADMAP/gap-alignment.md)
-- 最新改动：[`CHANGE_LOG/`](./CHANGE_LOG/) 目录下时间最新文件
+不要删除 `.electron-user-data/`，里面可能含当前测试服务器配置或登录态。删除构建产物前先确认本阶段是否需要保留 exe 位置给用户。
