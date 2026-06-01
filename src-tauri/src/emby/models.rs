@@ -327,6 +327,16 @@ pub struct PlaybackInfoRequest {
     pub max_streaming_bitrate: Option<i64>,
     #[serde(default)]
     pub start_time_ticks: Option<i64>,
+    #[serde(default)]
+    pub enable_direct_play: bool,
+    #[serde(default)]
+    pub enable_direct_stream: bool,
+    #[serde(default)]
+    pub enable_transcoding: bool,
+    #[serde(default)]
+    pub enable_video_stream_copy: bool,
+    #[serde(default)]
+    pub enable_audio_stream_copy: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -359,6 +369,12 @@ pub struct MediaSource {
     pub path: Option<String>,
     #[serde(default, deserialize_with = "null_to_default")]
     pub media_streams: Vec<MediaStream>,
+}
+
+impl MediaSource {
+    pub fn supports_local_decode(&self) -> bool {
+        self.supports_direct_play != Some(false) || self.supports_direct_stream != Some(false)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

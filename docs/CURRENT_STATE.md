@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（侧边栏主界面瘦身）
+> **更新时间**：2026-06-01（禁止服务端转码）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1419-sidebar-surface-cleanup.md`](./CHANGE_LOG/2026-06-01-1419-sidebar-surface-cleanup.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1433-local-decode-no-transcode.md`](./CHANGE_LOG/2026-06-01-1433-local-decode-no-transcode.md)
 
 ---
 
@@ -566,6 +566,8 @@ npm.cmd run electron:build
 本轮 Electron 退出清理已闭环：主窗口关闭不再默认隐藏到托盘，而是进入统一清理流程，退出时会清理 mpv、`electron_mpv_host.exe`、遮黑窗口、全局快捷键、桌面媒体状态和防休眠状态；mpv 与宿主进程增加 Windows `taskkill /T /F` 兜底。Electron 默认菜单栏已隐藏并移除默认应用菜单；播放器全屏按钮在桌面运行时优先调用原生窗口全屏，Web Preview 保持浏览器 Fullscreen 回退。验证已覆盖 `node --check electron\main.mjs`、`node --check electron\backend\mpv.mjs`、`node --check electron\backend\desktop.mjs`、`npm.cmd run check:electron-commands`、`npm.cmd run build`、`npm.cmd run electron:build`、`git diff --check`；构建前已清除当时残留进程，构建后复查未发现 Hills Lite / mpv / 内嵌宿主残留。
 
 本轮侧边栏主界面瘦身已闭环：侧边栏底部只保留“设置”入口，移除添加服务器、本地单文件、本地文件夹、WebDAV、Alist/OpenList 以及最近/收藏快捷分组，避免主界面堆叠维护类入口；这些功能统一迁移到设置页“服务器”和“文件服务 / 连接器”面板，其中文件服务面板提供本地文件、本地文件夹、WebDAV、Alist/OpenList 入口。验证已覆盖 `npm.cmd run build`、`npm.cmd run check:electron-commands`、`git diff --check`。
+
+本轮禁止服务端转码已闭环：Electron 与 Web Preview 的 PlaybackInfo 请求显式启用 Direct Play / Direct Stream、禁用 Transcoding，并移除 HLS 转码 profile；播放源选择不再优先 `TranscodingUrl`，只接受 Direct Play / Direct Stream 媒体源，最终播放 URL 固定走 `Videos/{id}/stream?Static=true`，HTML fallback 也不再生成 `master.m3u8` 转码地址。Tauri 播放、外部播放、远程会话播放和下载路径同样只选择支持本机解码的媒体源，服务端只返回转码源时会直接失败而不是偷偷压 NAS/VPS CPU。播放进度上报默认 `DirectStream`，避免把会话标记为转码。验证已覆盖 `node --check electron\backend\emby.mjs`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`npm.cmd run build`、`npm.cmd run check:electron-commands`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run electron:build`、`git diff --check`、转码关键字残留扫描与构建后残留进程检查。
 
 本轮设置页线路 URL 脱敏预览已闭环：服务器列表普通查看态不再直接显示完整远端线路 URL，而是展示保留协议、端口和部分主机名的脱敏预览；`localhost` / IP 线路保持原样便于本地调试，完整 URL 仍只能在“编辑”表单中查看和修改。验证已覆盖 `npm.cmd run build`、in-app Browser 1420 设置页目检、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`。
 

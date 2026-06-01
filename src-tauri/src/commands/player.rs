@@ -197,16 +197,28 @@ pub async fn play(state: State<'_, Arc<AppState>>, payload: PlayPayload) -> AppR
         .playback_info_for_line(&server, &account, &payload.item_id, start_ticks, line_id)
         .await?;
     let source = match payload.media_source_id.as_deref() {
-        Some(id) => pb
-            .media_sources
-            .iter()
-            .find(|source| source.id == id)
-            .ok_or_else(|| AppError::InvalidState(format!("media source not found: {id}")))?
-            .clone(),
+        Some(id) => {
+            let source = pb
+                .media_sources
+                .iter()
+                .find(|source| source.id == id)
+                .ok_or_else(|| AppError::InvalidState(format!("media source not found: {id}")))?;
+            if !source.supports_local_decode() {
+                return Err(AppError::InvalidState(
+                    "server transcoding is disabled: selected media source does not support Direct Play or Direct Stream".into(),
+                ));
+            }
+            source.clone()
+        }
         None => pb
             .media_sources
-            .first()
-            .ok_or_else(|| AppError::InvalidState("no media source".into()))?
+            .iter()
+            .find(|source| source.supports_local_decode())
+            .ok_or_else(|| {
+                AppError::InvalidState(
+                    "server transcoding is disabled: no Direct Play or Direct Stream media source was returned".into(),
+                )
+            })?
             .clone(),
     };
 
@@ -873,16 +885,28 @@ pub async fn play_external(
         .playback_info_for_line(&server, &account, &payload.item_id, start_ticks, line_id)
         .await?;
     let source = match payload.media_source_id.as_deref() {
-        Some(id) => pb
-            .media_sources
-            .iter()
-            .find(|source| source.id == id)
-            .ok_or_else(|| AppError::InvalidState(format!("media source not found: {id}")))?
-            .clone(),
+        Some(id) => {
+            let source = pb
+                .media_sources
+                .iter()
+                .find(|source| source.id == id)
+                .ok_or_else(|| AppError::InvalidState(format!("media source not found: {id}")))?;
+            if !source.supports_local_decode() {
+                return Err(AppError::InvalidState(
+                    "server transcoding is disabled: selected media source does not support Direct Play or Direct Stream".into(),
+                ));
+            }
+            source.clone()
+        }
         None => pb
             .media_sources
-            .first()
-            .ok_or_else(|| AppError::InvalidState("no media source".into()))?
+            .iter()
+            .find(|source| source.supports_local_decode())
+            .ok_or_else(|| {
+                AppError::InvalidState(
+                    "server transcoding is disabled: no Direct Play or Direct Stream media source was returned".into(),
+                )
+            })?
             .clone(),
     };
     let url = state.emby.build_stream_url_for_line(

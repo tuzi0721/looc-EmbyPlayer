@@ -397,8 +397,13 @@ impl EmbyClient {
         let url = endpoints::join(&line.base_url, &endpoints::playback_info(item_id))?;
         let body = PlaybackInfoRequest {
             user_id: account.user_id.clone(),
-            max_streaming_bitrate: Some(40_000_000),
+            max_streaming_bitrate: Some(140_000_000),
             start_time_ticks: start_ticks,
+            enable_direct_play: true,
+            enable_direct_stream: true,
+            enable_transcoding: false,
+            enable_video_stream_copy: true,
+            enable_audio_stream_copy: true,
         };
         let resp = self
             .authed_request(Method::POST, url, server, account, &line)?
@@ -607,16 +612,12 @@ impl EmbyClient {
         item: &MediaItem,
         source: &MediaSource,
         play_session_id: &str,
-        prefer_direct: bool,
+        _prefer_direct: bool,
         line_id: Option<&str>,
     ) -> AppResult<Url> {
         let line = self.pick_line(server, line_id)?;
         let settings = self.config.settings();
-        let path = if prefer_direct {
-            format!("Videos/{}/stream", item.id)
-        } else {
-            format!("Videos/{}/master.m3u8", item.id)
-        };
+        let path = format!("Videos/{}/stream", item.id);
         let mut url = endpoints::join(&line.base_url, &path)?;
         {
             let mut q = url.query_pairs_mut();
@@ -625,7 +626,7 @@ impl EmbyClient {
             if settings.append_auth_query {
                 q.append_pair("api_key", &account.access_token);
             }
-            q.append_pair("Static", if prefer_direct { "true" } else { "false" });
+            q.append_pair("Static", "true");
         }
         Ok(url)
     }

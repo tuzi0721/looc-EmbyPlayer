@@ -1,0 +1,21 @@
+# 禁止服务端转码
+
+- **动机**：用户明确要求解码必须由本机完成，不能让 Emby/Jellyfin 服务端转码；私人 NAS、路由器和常见 VPS 无法承受高 CPU 转码，资源服也会封禁诱发转码的客户端。
+- **变更**：
+  - Electron PlaybackInfo 请求显式启用 Direct Play / Direct Stream，并禁用 Transcoding。
+  - Electron 不再选择 `TranscodingUrl`，不再构造 `master.m3u8` 转码地址，最终播放固定走 `Videos/{id}/stream?Static=true`。
+  - Web Preview fallback 同步改为直流静态流，不再生成 HLS 转码请求。
+  - Tauri 播放、外部播放、远程会话播放和下载路径只选择支持 Direct Play / Direct Stream 的媒体源。
+  - 服务端只返回转码源时直接报错，避免静默压服务端 CPU。
+  - 播放进度上报默认 `DirectStream`，避免会话被标记为转码。
+- **验证**：
+  - 通过：`node --check electron\backend\emby.mjs`
+  - 通过：`cargo fmt --manifest-path src-tauri\Cargo.toml --check`
+  - 通过：`npm.cmd run build`
+  - 通过：`npm.cmd run check:electron-commands`
+  - 通过：`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`
+  - 通过：`npm.cmd run electron:build`
+  - 通过：`git diff --check`
+  - 通过：转码关键字残留扫描未发现 `TranscodingUrl` / `master.m3u8` / `Transcode` 播放路径残留。
+  - 通过：构建后未发现 `Hills Lite`、`emby-player`、`mpv` 或 `electron_mpv_host` 残留进程。
+- **结果**：通过；播放器现在以本机解码为硬约束，宁可失败提示，也不向服务端请求转码。

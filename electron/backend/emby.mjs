@@ -343,6 +343,86 @@ function pickSubtitleFormat(codec) {
   }
 }
 
+const DIRECT_VIDEO_CONTAINERS = [
+  "mp4",
+  "m4v",
+  "mov",
+  "mkv",
+  "webm",
+  "avi",
+  "wmv",
+  "flv",
+  "ts",
+  "m2ts",
+  "mpeg",
+  "mpg",
+  "3gp",
+  "ogv",
+  "rmvb",
+];
+const DIRECT_AUDIO_CONTAINERS = ["mp3", "aac", "flac", "ogg", "opus", "wav", "m4a", "ape", "alac"];
+
+function directPlaybackOptions() {
+  return {
+    EnableDirectPlay: true,
+    EnableDirectStream: true,
+    EnableTranscoding: false,
+    EnableVideoStreamCopy: true,
+    EnableAudioStreamCopy: true,
+  };
+}
+
+function directOnlyDeviceProfile(name = "Hills Lite Direct") {
+  return {
+    Name: name,
+    MaxStreamingBitrate: 140000000,
+    DirectPlayProfiles: [
+      { Type: "Video", Container: DIRECT_VIDEO_CONTAINERS.join(",") },
+      { Type: "Audio", Container: DIRECT_AUDIO_CONTAINERS.join(",") },
+    ],
+    TranscodingProfiles: [],
+    SubtitleProfiles: [
+      { Format: "vtt", Method: "External" },
+      { Format: "srt", Method: "External" },
+      { Format: "ass", Method: "External" },
+      { Format: "ssa", Method: "External" },
+    ],
+  };
+}
+
+function isLocalDecodeSource(mediaSource) {
+  const supportsDirectPlay = boolFrom(mediaSource?.SupportsDirectPlay);
+  const supportsDirectStream = boolFrom(mediaSource?.SupportsDirectStream);
+  return supportsDirectPlay !== false || supportsDirectStream !== false;
+}
+
+function localDecodeMode(mediaSource) {
+  return boolFrom(mediaSource?.SupportsDirectPlay) === true ? "direct-play" : "direct-stream";
+}
+
+function pickLocalDecodeMediaSource(mediaSources, requestedMediaSourceId) {
+  if (requestedMediaSourceId) {
+    const selected = mediaSources.find((source) => stringFrom(source?.Id) === requestedMediaSourceId);
+    if (!selected) {
+      throw new Error(`get_playback_source: media source not found: ${requestedMediaSourceId}`);
+    }
+    if (!isLocalDecodeSource(selected)) {
+      throw new Error(
+        "Server transcoding is disabled: selected media source does not support Direct Play or Direct Stream.",
+      );
+    }
+    return selected;
+  }
+
+  const selected = mediaSources.find(isLocalDecodeSource);
+  if (!selected) {
+    throw new Error(
+      "Server transcoding is disabled: no Direct Play or Direct Stream media source was returned.",
+    );
+  }
+  return selected;
+}
+
 function defaultUserAgent(settings, server, line) {
   return line.userAgent ?? server.defaultUserAgent ?? settings.defaultUserAgent;
 }
@@ -775,6 +855,7 @@ export class EmbyClient {
       IsPlayback: "true",
       AutoOpenLiveStream: "true",
       MaxStreamingBitrate: "140000000",
+      ...directPlaybackOptions(),
     })) {
       url.searchParams.set(key, String(value));
     }
@@ -785,29 +866,8 @@ export class EmbyClient {
       StartTimeTicks: startTicks,
       IsPlayback: true,
       AutoOpenLiveStream: true,
-      DeviceProfile: {
-        Name: "Hills Lite HTML5",
-        MaxStreamingBitrate: 140000000,
-        DirectPlayProfiles: [
-          { Type: "Video", Container: "mp4,m4v,webm" },
-          { Type: "Audio", Container: "mp3,aac,flac,ogg,opus,wav" },
-        ],
-        TranscodingProfiles: [
-          {
-            Type: "Video",
-            Context: "Streaming",
-            Protocol: "hls",
-            Container: "ts",
-            VideoCodec: "h264",
-            AudioCodec: "aac,mp3",
-            MaxAudioChannels: "2",
-          },
-        ],
-        SubtitleProfiles: [
-          { Format: "vtt", Method: "External" },
-          { Format: "srt", Method: "External" },
-        ],
-      },
+      ...directPlaybackOptions(),
+      DeviceProfile: directOnlyDeviceProfile("Hills Lite Local Decode"),
     };
 
     const info = await requestJson(
@@ -822,52 +882,27 @@ export class EmbyClient {
     );
     const mediaSources = Array.isArray(info?.MediaSources) ? info.MediaSources : [];
     const requestedMediaSourceId = stringFrom(options?.mediaSourceId);
-    const mediaSource = requestedMediaSourceId
-      ? mediaSources.find((source) => stringFrom(source.Id) === requestedMediaSourceId)
-      : mediaSources.find((source) => stringFrom(source.TranscodingUrl)) ?? mediaSources[0];
-    if (!mediaSource) {
-      throw new Error(
-        requestedMediaSourceId
-          ? `get_playback_source: media source not found: ${requestedMediaSourceId}`
-          : "get_playback_source: no playable media source returned",
-      );
-    }
+    const mediaSource = pickLocalDecodeMediaSource(mediaSources, requestedMediaSourceId);
 
     const mediaSourceId = stringFrom(mediaSource.Id) ?? "";
     const playSessionId =
       stringFrom(info?.PlaySessionId) ?? stringFrom(mediaSource.PlaySessionId) ?? randomUUID();
-    let streamUrl;
-    const transcodingUrl = stringFrom(mediaSource.TranscodingUrl);
-    if (transcodingUrl) {
-      streamUrl = appendToken(
-        joinUrl(line.baseUrl, transcodingUrl),
-        account.accessToken,
-        appendAuthQuery,
-      );
-    } else {
-      streamUrl = joinUrl(line.baseUrl, `Videos/${itemId}/master.m3u8`);
-      streamUrl.searchParams.set("UserId", account.userId);
-      streamUrl.searchParams.set("MediaSourceId", mediaSourceId);
-      streamUrl.searchParams.set("PlaySessionId", playSessionId);
-      streamUrl.searchParams.set("StartTimeTicks", String(startTicks));
-      streamUrl.searchParams.set("VideoCodec", "h264");
-      streamUrl.searchParams.set("AudioCodec", "aac,mp3");
-      streamUrl.searchParams.set("AudioStreamIndex", String(numberFrom(mediaSource.DefaultAudioStreamIndex) ?? 1));
-      streamUrl.searchParams.set("TranscodingContainer", "ts");
-      streamUrl.searchParams.set("TranscodingProtocol", "hls");
-      streamUrl.searchParams.set("MaxStreamingBitrate", "140000000");
-      appendToken(streamUrl, account.accessToken, appendAuthQuery);
-    }
+    const streamUrl = joinUrl(line.baseUrl, `Videos/${itemId}/stream`);
+    streamUrl.searchParams.set("MediaSourceId", mediaSourceId);
+    streamUrl.searchParams.set("PlaySessionId", playSessionId);
+    streamUrl.searchParams.set("Static", "true");
+    appendToken(streamUrl, account.accessToken, appendAuthQuery);
 
     const tracks = Array.isArray(mediaSource.MediaStreams)
       ? mediaSource.MediaStreams.map(normalizeTrack)
       : [];
     const diagnostics = {
-      sourceKind: transcodingUrl ? "transcoding-url" : "hls-master",
-      streamKind: "browser-hls",
+      sourceKind: localDecodeMode(mediaSource),
+      streamKind: "direct-static",
       mediaSourceCount: mediaSources.length,
       selectedMediaSource: mediaSourceDiagnostics(mediaSource),
       authQuery: appendAuthQuery,
+      serverTranscodingAllowed: false,
       line: lineDiagnostics(line),
     };
 
@@ -907,8 +942,9 @@ export class EmbyClient {
         ...browserSource,
         diagnostics: {
           ...browserSource.diagnostics,
-          streamKind: "browser-hls",
+          streamKind: "direct-static",
           preferDirect: false,
+          serverTranscodingAllowed: false,
         },
       };
     }
@@ -934,6 +970,7 @@ export class EmbyClient {
         sourceKind: "direct-stream",
         streamKind: "mpv-direct-static",
         preferDirect: true,
+        serverTranscodingAllowed: false,
         directStream: {
           static: true,
           hasApiKey: streamUrl.searchParams.has("api_key"),
@@ -950,7 +987,7 @@ export class EmbyClient {
         PlaySessionId: progress.playSessionId,
         PositionTicks: numberFrom(progress.positionTicks) ?? 0,
         IsPaused: boolFrom(progress.isPaused) ?? false,
-        PlayMethod: stringFrom(progress.playMethod) ?? "Transcode",
+        PlayMethod: stringFrom(progress.playMethod) ?? "DirectStream",
         VolumeLevel: numberFrom(progress.volumeLevel) ?? 80,
       },
       context: "report_playback_progress",

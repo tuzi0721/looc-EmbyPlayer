@@ -203,8 +203,13 @@ impl SessionController {
             .await?;
         let source = pb
             .media_sources
-            .first()
-            .ok_or_else(|| AppError::InvalidState("no media source".into()))?
+            .iter()
+            .find(|source| source.supports_local_decode())
+            .ok_or_else(|| {
+                AppError::InvalidState(
+                    "server transcoding is disabled: no Direct Play or Direct Stream media source was returned".into(),
+                )
+            })?
             .clone();
         let url = self.emby.build_stream_url(
             server,

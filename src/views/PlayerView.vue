@@ -943,7 +943,7 @@ function reportHtmlProgress(stopped = false) {
     playSessionId: activeSessionId,
     positionTicks,
     isPaused: paused.value,
-    playMethod: "Transcode",
+    playMethod: "DirectStream",
     volumeLevel: htmlVolume.value,
   }).catch(() => {});
 }

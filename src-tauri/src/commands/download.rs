@@ -16,10 +16,9 @@ pub struct StartDownloadPayload {
     /// Pretend to be a normal playback session while downloading.
     #[serde(default)]
     pub stealth: bool,
-    /// Prefer direct stream (the original file). When false, we use the
-    /// transcoded master.m3u8 — note that .m3u8 to a single file isn't a
-    /// straight save; the player should set `stealth=true, preferDirect=true`
-    /// for offline-playable downloads.
+    /// Prefer direct stream (the original file). Server transcoding is never
+    /// requested; this flag is kept for compatibility with older renderer
+    /// payloads.
     #[serde(default = "default_true")]
     pub prefer_direct: bool,
 }
@@ -64,8 +63,13 @@ pub async fn start_download(
         .await?;
     let source = pb
         .media_sources
-        .first()
-        .ok_or_else(|| AppError::InvalidState("no media source".into()))?
+        .iter()
+        .find(|source| source.supports_local_decode())
+        .ok_or_else(|| {
+            AppError::InvalidState(
+                "server transcoding is disabled: no Direct Play or Direct Stream media source was returned".into(),
+            )
+        })?
         .clone();
 
     let url = state.emby.build_stream_url(
