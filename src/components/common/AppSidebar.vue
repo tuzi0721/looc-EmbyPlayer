@@ -73,7 +73,15 @@ const recentWebDavConnections = computed(() =>
     .filter((entry) => !favoriteWebDavConnectionIds.value.has(entry.id))
     .slice(0, 2),
 );
-const recentAlistConnections = computed(() => alist.recentConnections.slice(0, 2));
+const favoriteAlistConnections = computed(() => alist.favoriteConnections.slice(0, 2));
+const favoriteAlistConnectionIds = computed(
+  () => new Set(alist.favoriteConnections.map((entry) => entry.id)),
+);
+const recentAlistConnections = computed(() =>
+  alist.recentConnections
+    .filter((entry) => !favoriteAlistConnectionIds.value.has(entry.id))
+    .slice(0, 2),
+);
 
 function loggedInOn(serverId: string): boolean {
   return auth.accounts.some((a) => a.serverId === serverId);
@@ -410,6 +418,25 @@ async function openLocalFolder() {
         <Icon icon="lucide:list-tree" width="14" />
         <span>Alist / OpenList</span>
       </button>
+
+      <div v-if="favoriteAlistConnections.length > 0" class="local-recent">
+        <div class="local-recent__head">
+          <span>收藏 Alist</span>
+          <button class="iconbtn" aria-label="清空收藏 Alist" @click="alist.clearFavorites()">
+            <Icon icon="lucide:x" width="13" />
+          </button>
+        </div>
+        <button
+          v-for="entry in favoriteAlistConnections"
+          :key="entry.id"
+          class="local-recent__item"
+          :title="entry.baseUrl"
+          @click="openAlistConnection(entry.id)"
+        >
+          <Icon icon="lucide:star" width="14" />
+          <span>{{ entry.name }}</span>
+        </button>
+      </div>
 
       <div v-if="recentAlistConnections.length > 0" class="local-recent">
         <div class="local-recent__head">

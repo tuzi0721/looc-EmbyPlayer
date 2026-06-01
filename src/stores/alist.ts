@@ -9,6 +9,7 @@ export interface AlistConnection {
   pathPassword?: string | null;
   savedAt: string;
   lastUsedAt?: string | null;
+  favoritedAt?: string | null;
 }
 
 const STORAGE_KEY = "hills-lite:alist-connections:v1";
@@ -54,6 +55,7 @@ function normalizeConnection(value: unknown): AlistConnection | null {
         : null,
     savedAt,
     lastUsedAt: validIso(entry.lastUsedAt),
+    favoritedAt: validIso(entry.favoritedAt),
   };
 }
 
@@ -66,6 +68,11 @@ export const useAlistStore = defineStore("alist", () => {
         Date.parse(right.lastUsedAt ?? right.savedAt) -
         Date.parse(left.lastUsedAt ?? left.savedAt),
     ),
+  );
+  const favoriteConnections = computed(() =>
+    connections.value
+      .filter((entry) => entry.favoritedAt)
+      .sort((left, right) => Date.parse(right.favoritedAt ?? "") - Date.parse(left.favoritedAt ?? "")),
   );
 
   function save() {
@@ -107,6 +114,7 @@ export const useAlistStore = defineStore("alist", () => {
       pathPassword: payload.rememberToken ? payload.pathPassword ?? null : null,
       savedAt: previous?.savedAt ?? now,
       lastUsedAt: now,
+      favoritedAt: previous?.favoritedAt ?? null,
     };
     connections.value = [
       connection,
@@ -129,13 +137,36 @@ export const useAlistStore = defineStore("alist", () => {
     save();
   }
 
+  function isFavorite(id: string) {
+    return connections.value.some((entry) => entry.id === id && Boolean(entry.favoritedAt));
+  }
+
+  function toggleFavorite(id: string) {
+    const connection = connections.value.find((entry) => entry.id === id);
+    if (!connection) return;
+    const favoritedAt = connection.favoritedAt ? null : new Date().toISOString();
+    connections.value = connections.value.map((entry) =>
+      entry.id === id ? { ...entry, favoritedAt } : entry,
+    );
+    save();
+  }
+
+  function clearFavorites() {
+    connections.value = connections.value.map((entry) => ({ ...entry, favoritedAt: null }));
+    save();
+  }
+
   load();
 
   return {
     connections,
     recentConnections,
+    favoriteConnections,
     upsert,
     touch,
     remove,
+    isFavorite,
+    toggleFavorite,
+    clearFavorites,
   };
 });
