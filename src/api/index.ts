@@ -151,6 +151,14 @@ export interface WebDavEntry {
   modifiedAtMs?: number | null;
   contentType?: string | null;
   playable: boolean;
+  sidecarSubtitleCount?: number;
+  sidecarSubtitles?: WebDavSidecarSubtitle[];
+}
+
+export interface WebDavSidecarSubtitle {
+  name: string;
+  url: string;
+  extension: string;
 }
 
 export interface WebDavListing {
@@ -386,6 +394,7 @@ export const api = {
     username?: string | null;
     password?: string | null;
     userAgent?: string | null;
+    sidecarSubtitles?: WebDavSidecarSubtitle[];
     startMs?: number | null;
   }) => invoke<void>("play_webdav_file", { payload }),
 

@@ -41,7 +41,13 @@ const visibleItems = computed(() => {
   const query = normalizedSearchText.value;
   const filtered = query
     ? items.filter((entry) =>
-        [entry.name, entry.path, entry.extension, entry.contentType ?? ""]
+        [
+          entry.name,
+          entry.path,
+          entry.extension,
+          entry.contentType ?? "",
+          entry.sidecarSubtitleCount ? "字幕" : "",
+        ]
           .join(" ")
           .toLocaleLowerCase()
           .includes(query),
@@ -104,6 +110,12 @@ function formatDate(ms?: number | null): string {
   } catch {
     return "";
   }
+}
+
+function sidecarSummary(entry: WebDavEntry): string {
+  return entry.sidecarSubtitleCount && entry.sidecarSubtitleCount > 0
+    ? `字幕 ${entry.sidecarSubtitleCount}`
+    : "";
 }
 
 function compareText(left: string, right: string): number {
@@ -230,6 +242,7 @@ async function playEntry(entry: WebDavEntry) {
       sourceLabel: "WebDAV",
       username: usernameDraft.value || null,
       password: passwordDraft.value || null,
+      sidecarSubtitles: item.sidecarSubtitles ?? [],
     }));
     const startIndex = Math.max(0, queue.findIndex((item) => item.url === entry.url));
     player.setDirectQueue(queue, startIndex);
@@ -239,6 +252,7 @@ async function playEntry(entry: WebDavEntry) {
       sourceLabel: "WebDAV",
       username: usernameDraft.value || null,
       password: passwordDraft.value || null,
+      sidecarSubtitles: entry.sidecarSubtitles ?? [],
     });
     router
       .push({
@@ -490,6 +504,9 @@ onMounted(() => {
                 <Icon icon="lucide:file-video" width="18" />
                 <span>
                   <strong>{{ entry.name }}</strong>
+                  <small v-if="sidecarSummary(entry)" class="entry-row__sidecar">
+                    {{ sidecarSummary(entry) }}
+                  </small>
                   <small>
                     {{ entry.extension.toUpperCase() }} · {{ formatBytes(entry.sizeBytes) }}
                     <template v-if="formatDate(entry.modifiedAtMs)">
@@ -780,6 +797,9 @@ onMounted(() => {
   margin-top: 4px;
   color: var(--fg-tertiary);
   font-size: 12px;
+}
+.entry-row .entry-row__sidecar {
+  color: var(--accent);
 }
 .tool-btn,
 .icon-btn,

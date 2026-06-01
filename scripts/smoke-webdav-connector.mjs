@@ -40,6 +40,15 @@ function multistatus(baseUrl) {
     </d:prop></d:propstat>
   </d:response>
   <d:response>
+    <d:href>${baseUrl}Episode%201.zh.srt</d:href>
+    <d:propstat><d:prop>
+      <d:displayname>Episode 1.zh.srt</d:displayname>
+      <d:resourcetype />
+      <d:getcontentlength>1024</d:getcontentlength>
+      <d:getcontenttype>application/x-subrip</d:getcontenttype>
+    </d:prop></d:propstat>
+  </d:response>
+  <d:response>
     <d:href>/dav/readme.txt</d:href>
     <d:propstat><d:prop>
       <d:displayname>readme.txt</d:displayname>
@@ -88,7 +97,7 @@ try {
   });
 
   assert(listing.rootUrl === baseUrl, "root URL should be normalized");
-  assert(listing.items.length === 4, `expected 4 entries, got ${listing.items.length}`);
+  assert(listing.items.length === 5, `expected 5 entries, got ${listing.items.length}`);
   assert(listing.items[0].isDirectory && listing.items[0].name === "Movies", "directory should sort first");
 
   const video = listing.items.find((entry) => entry.name === "Episode 1.mkv");
@@ -96,6 +105,8 @@ try {
   assert(video.playable, "mkv entry should be playable");
   assert(video.sizeBytes === 734003200, "video size should parse");
   assert(video.path === "Episode 1.mkv", `unexpected video path: ${video.path}`);
+  assert(video.sidecarSubtitleCount === 1, "mkv entry should detect one sidecar subtitle");
+  assert(video.sidecarSubtitles?.[0]?.name === "Episode 1.zh.srt", "sidecar subtitle should be linked");
 
   const text = listing.items.find((entry) => entry.name === "readme.txt");
   assert(text && !text.playable, "non-video file should not be playable");

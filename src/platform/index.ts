@@ -121,6 +121,12 @@ const WEB_DAV_VIDEO_EXTENSIONS = new Set([
   "ogv",
   "rmvb",
 ]);
+const WEB_DAV_SUBTITLE_EXTENSIONS = new Map([
+  ["srt", 0],
+  ["ass", 1],
+  ["ssa", 2],
+  ["vtt", 3],
+]);
 let webSettings: AppSettings = { ...WEB_DEFAULT_SETTINGS };
 let webServers: Server[] = [];
 let webAccounts: Account[] = [];
@@ -774,6 +780,55 @@ function webDavNameFromUrl(url: URL) {
   }
 }
 
+function webDavStemFromName(name: string) {
+  const index = name.lastIndexOf(".");
+  return index >= 0 ? name.slice(0, index) : name;
+}
+
+function webDavSidecarSubtitleRank(videoStem: string, subtitleStem: string) {
+  const video = videoStem.toLocaleLowerCase();
+  const subtitle = subtitleStem.toLocaleLowerCase();
+  if (subtitle === video) return 0;
+  for (const separator of [".", " ", "_", "-"]) {
+    if (subtitle.startsWith(`${video}${separator}`)) return 1;
+  }
+  return null;
+}
+
+function webDavSidecarSubtitlesFor(videoEntry: WebDavEntry, entries: WebDavEntry[]) {
+  if (!videoEntry.playable) return [];
+  const videoStem = webDavStemFromName(videoEntry.name);
+  return entries
+    .filter((entry) => !entry.isDirectory && WEB_DAV_SUBTITLE_EXTENSIONS.has(entry.extension))
+    .map((entry) => {
+      const rank = webDavSidecarSubtitleRank(videoStem, webDavStemFromName(entry.name));
+      if (rank == null) return null;
+      return {
+        name: entry.name,
+        url: entry.url,
+        extension: entry.extension,
+        rank,
+        extRank: WEB_DAV_SUBTITLE_EXTENSIONS.get(entry.extension) ?? 99,
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry != null)
+    .sort((left, right) => left.rank - right.rank || left.extRank - right.extRank || left.name.localeCompare(right.name))
+    .slice(0, 8)
+    .map(({ name, url, extension }) => ({ name, url, extension }));
+}
+
+function webDavAnnotateSidecars(entries: WebDavEntry[]) {
+  return entries.map((entry) => {
+    if (!entry.playable) return entry;
+    const sidecarSubtitles = webDavSidecarSubtitlesFor(entry, entries);
+    return {
+      ...entry,
+      sidecarSubtitleCount: sidecarSubtitles.length,
+      sidecarSubtitles,
+    };
+  });
+}
+
 function webDavRelativeFromUrl(root: URL, item: URL, isDirectory: boolean) {
   const decode = (value: string) => {
     try {
@@ -805,7 +860,7 @@ function webDavListingFromXml(xml: string, root: URL, requestUrl: URL): WebDavLi
   if (parserError) throw new Error("WebDAV 返回的 XML 无法解析");
   const current = webDavComparable(requestUrl);
   const responses = Array.from(document.getElementsByTagNameNS("*", "response"));
-  const items: WebDavEntry[] = responses
+  const entries: WebDavEntry[] = responses
     .map((response): WebDavEntry | null => {
       const href = response.getElementsByTagNameNS("*", "href")[0]?.textContent?.trim();
       if (!href) return null;
@@ -835,7 +890,8 @@ function webDavListingFromXml(xml: string, root: URL, requestUrl: URL): WebDavLi
         playable: !isDirectory && WEB_DAV_VIDEO_EXTENSIONS.has(extension),
       };
     })
-    .filter((entry): entry is WebDavEntry => entry != null)
+    .filter((entry): entry is WebDavEntry => entry != null);
+  const items = webDavAnnotateSidecars(entries)
     .sort((left, right) => {
       if (left.isDirectory !== right.isDirectory) return left.isDirectory ? -1 : 1;
       return left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" });

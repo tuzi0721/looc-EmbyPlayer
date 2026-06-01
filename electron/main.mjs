@@ -1092,6 +1092,51 @@ async function playLocalFilePath(filePath, startMs = null) {
   });
 }
 
+function normalizeWebDavSidecarSubtitles(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => {
+      const source = typeof entry?.url === "string" ? entry.url.trim() : "";
+      if (!source) return null;
+      let parsed;
+      try {
+        parsed = new URL(source);
+      } catch {
+        return null;
+      }
+      if (!["http:", "https:"].includes(parsed.protocol)) return null;
+      const name = typeof entry?.name === "string" && entry.name.trim()
+        ? entry.name.trim()
+        : path.basename(parsed.pathname);
+      return {
+        source: parsed.toString(),
+        name,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+async function addWebDavSidecarSubtitles(subtitles) {
+  let loaded = 0;
+  const loadedFiles = [];
+  for (const [index, subtitle] of subtitles.entries()) {
+    try {
+      await mpv.command([
+        "sub-add",
+        subtitle.source,
+        index === 0 ? "select" : "auto",
+        subtitle.name,
+      ]);
+      loaded += 1;
+      loadedFiles.push(subtitle.name);
+    } catch (error) {
+      console.warn("failed to load WebDAV sidecar subtitle", subtitle.name, error);
+    }
+  }
+  return { loaded, loadedFiles };
+}
+
 async function playWebDavFile(payload = {}) {
   const url = typeof payload.url === "string" ? payload.url.trim() : "";
   if (!url) throw new Error("WebDAV file URL is required");
@@ -1119,11 +1164,18 @@ async function playWebDavFile(payload = {}) {
   await applySubtitleStyle(settings).catch((error) => {
     console.warn("failed to apply subtitle style", error);
   });
+  const subtitles = normalizeWebDavSidecarSubtitles(payload.sidecarSubtitles);
+  const subtitleResult = await addWebDavSidecarSubtitles(subtitles).catch((error) => {
+    console.warn("failed to load WebDAV sidecar subtitles", error);
+    return { loaded: 0, loadedFiles: [] };
+  });
   currentPlaySession = null;
   writePlaybackLog("webdav_file_loaded", {
     title,
     url: parsed.toString(),
     startMs: payload.startMs ?? null,
+    sidecarSubtitleCount: subtitleResult.loaded,
+    sidecarSubtitleFiles: subtitleResult.loadedFiles,
   });
 }
 

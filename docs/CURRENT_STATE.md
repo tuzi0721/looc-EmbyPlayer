@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（WebDAV 列表搜索排序）
+> **更新时间**：2026-06-01（WebDAV 同名字幕）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1029-webdav-list-filter-sort.md`](./CHANGE_LOG/2026-06-01-1029-webdav-list-filter-sort.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1037-webdav-sidecar-subtitles.md`](./CHANGE_LOG/2026-06-01-1037-webdav-sidecar-subtitles.md)
 
 ---
 
@@ -593,9 +593,11 @@ npm.cmd run electron:build
 
 本轮 WebDAV 列表搜索排序已闭环：`/webdav` 目录加载后新增搜索框和排序下拉，可按名称、路径、扩展名或内容类型筛选当前 PROPFIND 返回条目，并按名称、最近修改、大小或类型排序；播放器 direct queue 会跟随筛选/排序后的可见可播放列表，避免搜索后播放仍跳到未筛选目录顺序。
 
+本轮 WebDAV 同名字幕已闭环：WebDAV PROPFIND 目录解析会识别同层 `.srt/.ass/.ssa/.vtt` 字幕，按完全同名和语言/版本后缀匹配可播放视频；`/webdav` 列表显示字幕数量并支持搜索“字幕”，Electron 内嵌 mpv 播放 WebDAV 视频时会用同一连接认证头加载匹配到的远程字幕。Web Preview 当前只展示侧挂提示，实际字幕加载仍以桌面内嵌 mpv 为准。
+
 ---
 
 ## 10. Phase 2 待办
 
 - 播放窗口内嵌已通过本地屏幕像素 smoke；后续仍建议用真实媒体人工走一遍控制栏显示/隐藏、全屏和窗口 resize 体验。
-- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层/递归视频浏览、本地文件夹列表搜索/排序/分组与播放队列、同名封面、同名 NFO 元数据、同名字幕自动关联及列表提示、同名 XML 弹幕自动关联及列表提示、最近本地文件入口、最近本地文件夹入口、收藏本地文件、收藏本地文件夹、WebDAV 基础目录浏览/直链播放、WebDAV 播放队列、WebDAV 收藏/最近入口和 WebDAV 列表搜索/排序；在线封面/元数据刮削、SMB、Alist/OpenList 和 Plex 仍待后续分阶段接入。
+- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层/递归视频浏览、本地文件夹列表搜索/排序/分组与播放队列、同名封面、同名 NFO 元数据、同名字幕自动关联及列表提示、同名 XML 弹幕自动关联及列表提示、最近本地文件入口、最近本地文件夹入口、收藏本地文件、收藏本地文件夹、WebDAV 基础目录浏览/直链播放、WebDAV 播放队列、WebDAV 收藏/最近入口、WebDAV 列表搜索/排序和 WebDAV 同名字幕提示/加载；在线封面/元数据刮削、SMB、Alist/OpenList 和 Plex 仍待后续分阶段接入。

@@ -15,6 +15,12 @@ const videoExtensions = new Set([
   "ogv",
   "rmvb",
 ]);
+const subtitleExtensions = new Map([
+  ["srt", 0],
+  ["ass", 1],
+  ["ssa", 2],
+  ["vtt", 3],
+]);
 
 const propfindBody = `<?xml version="1.0" encoding="utf-8" ?>
 <d:propfind xmlns:d="DAV:">
@@ -131,6 +137,21 @@ function extensionFromName(name) {
   return index >= 0 ? name.slice(index + 1).toLowerCase() : "";
 }
 
+function stemFromName(name) {
+  const index = name.lastIndexOf(".");
+  return index >= 0 ? name.slice(0, index) : name;
+}
+
+function sidecarSubtitleRank(videoStem, subtitleStem) {
+  const video = videoStem.toLowerCase();
+  const subtitle = subtitleStem.toLowerCase();
+  if (subtitle === video) return 0;
+  for (const separator of [".", " ", "_", "-"]) {
+    if (subtitle.startsWith(`${video}${separator}`)) return 1;
+  }
+  return null;
+}
+
 function normalizeComparableUrl(value) {
   const url = new URL(value.toString());
   url.hash = "";
@@ -164,6 +185,38 @@ function modifiedTimeMs(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function sidecarSubtitlesFor(videoEntry, entries) {
+  if (!videoEntry.playable) return [];
+  const videoStem = stemFromName(videoEntry.name);
+  return entries
+    .filter((entry) => !entry.isDirectory && subtitleExtensions.has(entry.extension))
+    .map((entry) => {
+      const rank = sidecarSubtitleRank(videoStem, stemFromName(entry.name));
+      if (rank == null) return null;
+      return {
+        name: entry.name,
+        url: entry.url,
+        extension: entry.extension,
+        rank,
+        extRank: subtitleExtensions.get(entry.extension) ?? 99,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.rank - right.rank || left.extRank - right.extRank || left.name.localeCompare(right.name))
+    .slice(0, 8)
+    .map(({ name, url, extension }) => ({ name, url, extension }));
+}
+
+function annotateSidecars(entries) {
+  return entries.map((entry) => {
+    if (!entry.playable) return entry;
+    const sidecarSubtitles = sidecarSubtitlesFor(entry, entries);
+    return sidecarSubtitles.length > 0
+      ? { ...entry, sidecarSubtitleCount: sidecarSubtitles.length, sidecarSubtitles }
+      : { ...entry, sidecarSubtitleCount: 0, sidecarSubtitles: [] };
+  });
+}
+
 function basicAuthorization(username, password) {
   const user = stringFrom(username);
   const pass = stringFrom(password);
@@ -182,7 +235,7 @@ function playHeaders(payload = {}) {
 
 function parseMultistatus(xml, rootUrl, requestUrl) {
   const current = normalizeComparableUrl(requestUrl);
-  return extractBlocks(xml, "response")
+  const entries = extractBlocks(xml, "response")
     .map((block) => {
       const href = extractTagText(block, "href");
       if (!href) return null;
@@ -211,7 +264,8 @@ function parseMultistatus(xml, rootUrl, requestUrl) {
         playable: !isDirectory && videoExtensions.has(extension),
       };
     })
-    .filter(Boolean)
+    .filter(Boolean);
+  return annotateSidecars(entries)
     .sort((left, right) => {
       if (left.isDirectory !== right.isDirectory) return left.isDirectory ? -1 : 1;
       return left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" });
