@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（播放器全屏舞台铺满）
+> **更新时间**：2026-06-01（设置页服务器/线路 UI 收敛）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1812-player-fullscreen-stage.md`](./CHANGE_LOG/2026-06-01-1812-player-fullscreen-stage.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1821-settings-server-line-ui.md`](./CHANGE_LOG/2026-06-01-1821-settings-server-line-ui.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：设置页服务器/线路 UI 继续收敛：已保存服务器从嵌套玻璃卡片改为设置面板内的列表行分隔，服务器编辑区的多线路配置也改为轻量分隔线，高级设置不再额外绘制卡片边界，降低“矩形框套矩形框”的杂乱感。现有添加服务器与线路编辑逻辑保持不变：新增服务器仍追加记录，不覆盖原服务器；线路 URL 继续允许任意端口；User-Agent / Headers 仍只在线路高级设置中维护。播放链路继续遵守本机解码硬约束，验证已覆盖 `git diff --check`、`npm.cmd run build` 与 `npm.cmd run electron:build`，其中构建过程已自动执行 `check:local-decode`。
 
 **2026-06-01**：播放器全屏舞台铺满已修正：内嵌 mpv 的 rect 同步不再因顶部 / 底部控制栏显示而扣减高度，视频窗口始终跟随完整 `.player__stage`，控制栏只是覆盖层，不再把画面挤成“伪全屏”。播放器同步 document fullscreen 状态，全屏按钮进入全屏后切换为退出图标。内嵌 smoke 新增 `stageCoversViewport` 断言，本轮全屏后窗口 / viewport 为 2560×1440，`.player__stage` 同为 2560×1440；后退从 10633ms 退到 866ms，960×620 与 960×600 缩放无水平溢出，退出后 `electron_mpv_host.exe` 与随包 `mpv.exe` 均无残留。验证已覆盖 `node --check scripts\smoke-electron-embedded-local.mjs`、`npm.cmd run build`、`node scripts\smoke-electron-embedded-local.mjs` 与 `npm.cmd run electron:build`。
 

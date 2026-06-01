@@ -1013,7 +1013,7 @@ const danmakuSummary = computed(() => {
           <button class="link" @click="showAdd = true">添加</button>
         </div>
         <div v-if="serverStore.servers.length === 0" class="empty">还没有服务器</div>
-        <div v-for="s in serverStore.servers" :key="s.id" class="server glass-thin">
+        <div v-for="s in serverStore.servers" :key="s.id" class="server">
           <div class="server__top">
             <strong>{{ s.name }}</strong>
             <div class="server__actions">
@@ -1931,9 +1931,12 @@ const danmakuSummary = computed(() => {
   padding: 8px 0;
 }
 .server {
-  padding: 12px;
-  border-radius: 12px;
-  margin-bottom: 8px;
+  padding: 12px 0;
+  border-top: 1px solid var(--separator);
+}
+.panel__head + .server {
+  border-top: none;
+  padding-top: 0;
 }
 .server__top {
   display: flex;
@@ -2003,7 +2006,7 @@ const danmakuSummary = computed(() => {
 .server-edit {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
   border-top: 1px solid var(--separator);
   padding-top: 12px;
 }
@@ -2012,7 +2015,11 @@ const danmakuSummary = computed(() => {
   flex-direction: column;
   gap: 10px;
   border-top: 1px solid var(--separator);
-  padding-top: 12px;
+  padding: 12px 0 0;
+}
+.server-edit__line:first-child {
+  border-top: none;
+  padding-top: 0;
 }
 .server-edit__line-head {
   display: flex;
@@ -2025,8 +2032,7 @@ const danmakuSummary = computed(() => {
   color: var(--fg-secondary);
 }
 .server-edit__advanced {
-  border-top: 1px solid var(--separator);
-  padding-top: 10px;
+  padding-top: 0;
 }
 .server-edit__advanced summary {
   display: inline-flex;
