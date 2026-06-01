@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-01（真实服务器脱敏复核）
+> 更新时间：2026-06-01（工作区与假入口复扫）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-01-2222-real-server-sanitized-check.md`](./CHANGE_LOG/2026-06-01-2222-real-server-sanitized-check.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-01-2227-workspace-entry-rescan.md`](./CHANGE_LOG/2026-06-01-2227-workspace-entry-rescan.md)
 
 ---
 
@@ -117,7 +117,10 @@ node scripts\smoke-electron-home-hero.mjs
 
 当前最新阶段已验证：
 
-- `scripts\real-server-connectivity-check.mjs` 真实线路脱敏检查：线路 1 登录和媒体库读取通过；线路 2 公开信息接口返回 HTTP 403。
+- `npm.cmd run check:workspace`
+- `npm.cmd run check:no-planned-ui`
+- `npm.cmd run check:electron-commands`
+- 当前工作区无意外未跟踪文件；Electron 命令覆盖为 101/101，显式 no-op 命令为 0。
 
 ---
 
