@@ -144,19 +144,43 @@ let pendingPlay = null;
 let pendingPlayKey = null;
 let currentPlaySession = null;
 const registeredGlobalShortcuts = new Map();
-let runtimeCleanupStarted = false;
+let runtimeCleanupPromise = null;
+let runtimeCleanupFinished = false;
 
 function forceKillProcessTree(pid) {
-  if (!pid || process.platform !== "win32") return;
+  if (!pid || process.platform !== "win32") return Promise.resolve();
   try {
-    const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
-      windowsHide: true,
-      stdio: "ignore",
+    return new Promise((resolve) => {
+      const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+        windowsHide: true,
+        stdio: "ignore",
+      });
+      killer.once("error", () => resolve());
+      killer.once("exit", () => resolve());
     });
-    killer.on("error", () => {});
   } catch {
     // Best-effort fallback for stale helper processes.
+    return Promise.resolve();
   }
+}
+
+function waitForChildExit(child, timeoutMs) {
+  if (!child || child.exitCode != null || child.signalCode != null) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      child.off("exit", done);
+      child.off("error", done);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      child.off("exit", done);
+      child.off("error", done);
+      resolve(false);
+    }, timeoutMs);
+    child.once("exit", done);
+    child.once("error", done);
+  });
 }
 
 function platformType() {
@@ -988,7 +1012,7 @@ function startEmbedHostProcess(parent) {
   });
 }
 
-function destroyEmbedHostWindow() {
+async function destroyEmbedHostWindow() {
   detachEmbedHostParentListeners();
   const child = embedHostProcess;
   embedHostProcess = null;
@@ -997,10 +1021,15 @@ function destroyEmbedHostWindow() {
   if (child) {
     const pid = child.pid;
     if (child.stdin?.writable) child.stdin.write(`${JSON.stringify({ type: "destroy" })}\n`);
-    setTimeout(() => {
+    const exitedAfterDestroy = await waitForChildExit(child, 500);
+    if (!exitedAfterDestroy && child.exitCode == null) {
       if (!child.killed) child.kill();
-      if (child.exitCode == null) forceKillProcessTree(pid);
-    }, 500);
+      const exitedAfterKill = await waitForChildExit(child, 900);
+      if (!exitedAfterKill && child.exitCode == null) {
+        await forceKillProcessTree(pid);
+        await waitForChildExit(child, 900);
+      }
+    }
   }
 }
 
@@ -1036,7 +1065,7 @@ async function setEmbeddedMpvVisible(visible) {
 async function detachEmbeddedMpvHost() {
   await mpv.shutdown().catch(() => {});
   await mpv.clearEmbedWindowHandle();
-  destroyEmbedHostWindow();
+  await destroyEmbedHostWindow();
   return null;
 }
 
@@ -1108,27 +1137,37 @@ function refreshSecondaryDisplayBlackout() {
 }
 
 function cleanupRuntime(reason = "quit") {
-  if (runtimeCleanupStarted) return;
-  runtimeCleanupStarted = true;
-  writePlaybackLog("runtime_cleanup", { reason });
-  desktopIntegration?.markQuitting();
-  desktopIntegration?.clearNowPlaying();
-  desktopIntegration?.stopPowerSaveBlocker();
-  try {
-    setSecondaryDisplayBlackout(false);
-  } catch (error) {
-    console.warn("failed to close blackout windows", error);
-  }
-  try {
-    globalShortcut.unregisterAll();
-  } catch (error) {
-    console.warn("failed to unregister global shortcuts", error);
-  }
-  void mpv.shutdown().catch((error) => {
-    console.warn("failed to shutdown mpv", error);
+  if (runtimeCleanupPromise) return runtimeCleanupPromise;
+  runtimeCleanupPromise = (async () => {
+    writePlaybackLog("runtime_cleanup", { reason });
+    desktopIntegration?.markQuitting();
+    desktopIntegration?.clearNowPlaying();
+    desktopIntegration?.stopPowerSaveBlocker();
+    try {
+      setSecondaryDisplayBlackout(false);
+    } catch (error) {
+      console.warn("failed to close blackout windows", error);
+    }
+    try {
+      globalShortcut.unregisterAll();
+    } catch (error) {
+      console.warn("failed to unregister global shortcuts", error);
+    }
+    try {
+      await mpv.shutdown();
+    } catch (error) {
+      console.warn("failed to shutdown mpv", error);
+    }
+    try {
+      await destroyEmbedHostWindow();
+    } catch (error) {
+      console.warn("failed to destroy embedded mpv host", error);
+    }
+    currentPlaySession = null;
+  })().finally(() => {
+    runtimeCleanupFinished = true;
   });
-  destroyEmbedHostWindow();
-  currentPlaySession = null;
+  return runtimeCleanupPromise;
 }
 
 async function emitNotificationUnread() {
@@ -2668,6 +2707,10 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => {
-  cleanupRuntime("before-quit");
+app.on("before-quit", (event) => {
+  if (runtimeCleanupFinished) return;
+  event.preventDefault();
+  void cleanupRuntime("before-quit").finally(() => {
+    app.exit(0);
+  });
 });

@@ -17,16 +17,50 @@ function fileExists(filePath) {
 }
 
 function forceKillProcessTree(pid) {
-  if (!pid || process.platform !== "win32") return;
+  if (!pid || process.platform !== "win32") return Promise.resolve();
   try {
-    const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
-      windowsHide: true,
-      stdio: "ignore",
+    return new Promise((resolve) => {
+      const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+        windowsHide: true,
+        stdio: "ignore",
+      });
+      killer.once("error", () => resolve());
+      killer.once("exit", () => resolve());
     });
-    killer.on("error", () => {});
   } catch {
     // Best-effort fallback for stale mpv process trees.
+    return Promise.resolve();
   }
+}
+
+function waitForChildExit(child, timeoutMs) {
+  if (!child || child.exitCode != null || child.signalCode != null) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      child.off("exit", done);
+      child.off("error", done);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      child.off("exit", done);
+      child.off("error", done);
+      resolve(false);
+    }, timeoutMs);
+    child.once("exit", done);
+    child.once("error", done);
+  });
+}
+
+function writeAndFlush(socket, payload, timeoutMs = 150) {
+  if (!socket || socket.destroyed || !socket.writable) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, timeoutMs);
+    socket.write(payload, "utf8", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 }
 
 function pathCandidates() {
@@ -427,25 +461,34 @@ export class MpvController {
     };
   }
 
-  async shutdown() {
+  async shutdown({ quitTimeoutMs = 500, killTimeoutMs = 900 } = {}) {
     for (const item of this.pending.values()) {
       clearTimeout(item.timer);
       item.reject(new Error("mpv shutdown"));
     }
     this.pending.clear();
-    if (this.socket) {
-      this.socket.destroy();
-      this.socket = null;
+    const socket = this.socket;
+    const child = this.child;
+    this.socket = null;
+    this.child = null;
+
+    if (socket) {
+      const requestId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+      const payload = `${JSON.stringify({ command: ["quit"], request_id: requestId })}\n`;
+      await writeAndFlush(socket, payload).catch(() => {});
+      socket.destroy();
     }
-    if (this.child) {
-      const child = this.child;
-      this.child = null;
-      if (!child.killed && child.exitCode == null) {
-        const pid = child.pid;
-        child.kill();
-        setTimeout(() => {
-          if (child.exitCode == null) forceKillProcessTree(pid);
-        }, 700);
+
+    if (child && child.exitCode == null) {
+      const pid = child.pid;
+      const exitedAfterQuit = await waitForChildExit(child, quitTimeoutMs);
+      if (!exitedAfterQuit && child.exitCode == null) {
+        if (!child.killed) child.kill();
+        const exitedAfterKill = await waitForChildExit(child, killTimeoutMs);
+        if (!exitedAfterKill && child.exitCode == null) {
+          await forceKillProcessTree(pid);
+          await waitForChildExit(child, killTimeoutMs);
+        }
       }
     }
   }

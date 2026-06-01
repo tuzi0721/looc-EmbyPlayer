@@ -240,11 +240,14 @@ async fn spawn_mpv_ipc(
 
         args.push(format!("--input-ipc-server={pipe_path}"));
 
-        let mut child = Command::new(&exe)
+        let mut command = Command::new(&exe);
+        command
             .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
+            .kill_on_drop(true);
+        let mut child = command
             .spawn()
             .map_err(|e| AppError::Mpv(format!("spawn mpv ({exe_display}): {e}")))?;
 
@@ -264,11 +267,14 @@ async fn spawn_mpv_ipc(
             socket_path.to_string_lossy()
         ));
 
-        let mut child = Command::new(&exe)
+        let mut command = Command::new(&exe);
+        command
             .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
+            .kill_on_drop(true);
+        let mut child = command
             .spawn()
             .map_err(|e| AppError::Mpv(format!("spawn mpv ({exe_display}): {e}")))?;
 

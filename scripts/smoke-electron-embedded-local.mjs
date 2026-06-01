@@ -345,6 +345,104 @@ function foregroundHillsWindow(processId = null) {
   run("powershell", ["-NoProfile", "-Command", script]);
 }
 
+function normalizeJsonArray(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function processTree(rootPid) {
+  const pid = Number(rootPid) || 0;
+  if (!pid) return [];
+  const script = `
+    $root = ${pid}
+    $all = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine
+    $seen = @{}
+    $frontier = @($root)
+    $result = @()
+    while ($frontier.Count -gt 0) {
+      $next = @()
+      foreach ($parent in $frontier) {
+        foreach ($p in ($all | Where-Object { $_.ParentProcessId -eq $parent })) {
+          $key = [string]$p.ProcessId
+          if (-not $seen.ContainsKey($key)) {
+            $seen[$key] = $true
+            $result += $p
+            $next += $p.ProcessId
+          }
+        }
+      }
+      $frontier = $next
+    }
+    $result | ConvertTo-Json -Compress
+  `;
+  const result = run("powershell", ["-NoProfile", "-Command", script]);
+  const stdout = result.stdout.trim();
+  return stdout ? normalizeJsonArray(JSON.parse(stdout)) : [];
+}
+
+function processesByPid(pids) {
+  const ids = [...new Set(pids.map((pid) => Number(pid)).filter(Boolean))];
+  if (ids.length === 0) return [];
+  const script = `
+    $ids = @(${ids.join(",")})
+    Get-CimInstance Win32_Process |
+      Where-Object { $ids -contains $_.ProcessId } |
+      Select-Object ProcessId,ParentProcessId,Name,CommandLine |
+      ConvertTo-Json -Compress
+  `;
+  const result = run("powershell", ["-NoProfile", "-Command", script]);
+  const stdout = result.stdout.trim();
+  return stdout ? normalizeJsonArray(JSON.parse(stdout)) : [];
+}
+
+function waitForChildExit(childProcess, timeoutMs) {
+  if (!childProcess || childProcess.exitCode != null || childProcess.signalCode != null) {
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      childProcess.off("exit", done);
+      childProcess.off("error", done);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      childProcess.off("exit", done);
+      childProcess.off("error", done);
+      resolve(false);
+    }, timeoutMs);
+    childProcess.once("exit", done);
+    childProcess.once("error", done);
+  });
+}
+
+async function verifyRuntimeCleanup(childProcess, ws) {
+  const before = processTree(childProcess.pid).filter((processInfo) => {
+    const name = String(processInfo.Name ?? "").toLowerCase();
+    const commandLine = String(processInfo.CommandLine ?? "").toLowerCase();
+    return (
+      name.includes("mpv") ||
+      name.includes("electron_mpv_host") ||
+      commandLine.includes("hills-lite-mpv-")
+    );
+  });
+  await cdpEval(ws, `
+    (() => {
+      setTimeout(() => window.close(), 0);
+      return true;
+    })()
+  `);
+  const electronExited = await waitForChildExit(childProcess, 12_000);
+  await wait(1200);
+  const remaining = processesByPid(before.map((processInfo) => processInfo.ProcessId));
+  return {
+    before,
+    electronExited,
+    remaining,
+    ok: electronExited && remaining.length === 0,
+  };
+}
+
 function analyzePng(imagePath) {
   const script = `
     Add-Type -AssemblyName System.Drawing
@@ -690,16 +788,7 @@ try {
   const mpvPixelsOk =
     (mpvPixels?.brightRatio ?? 0) > 0.18 && (mpvPixels?.colorfulRatio ?? 0) > 0.08;
 
-  await cdpEval(ws, `
-    (async () => {
-      await window.hillsLite.invoke("stop").catch(() => {});
-      await window.hillsLite.invoke("embed_set_visible", { visible: false }).catch(() => {});
-      await window.hillsLite.invoke("embed_detach").catch(() => {});
-      return true;
-    })()
-  `).catch(() => {});
-
-  const ok =
+  const functionalOk =
     startResult.route === `/player/${itemId}` &&
     startResult.state.durationMs > 0 &&
     startResult.state.trackCount >= 1 &&
@@ -732,8 +821,19 @@ try {
     !compactResizeResult?.hasHorizontalOverflow &&
     (screenPixelsOk || mpvPixelsOk);
 
+  let runtimeCleanup = null;
+  let runtimeCleanupError = null;
+  try {
+    runtimeCleanup = await verifyRuntimeCleanup(child, ws);
+  } catch (error) {
+    runtimeCleanupError = error?.message ?? String(error);
+  }
+
+  const ok = functionalOk && runtimeCleanup?.ok === true;
+
   console.log(JSON.stringify({
     ok,
+    functionalOk,
     screenshotPath,
     route: startResult.route,
     bodyText: startResult.bodyText,
@@ -763,13 +863,17 @@ try {
       screenPixelsOk,
       mpvPixelsOk,
     },
+    runtimeCleanup,
+    runtimeCleanupError,
   }, null, 2));
 
   if (!ok) process.exitCode = 1;
 } finally {
   ws?.close();
-  child.kill();
-  setTimeout(() => child.kill("SIGKILL"), 1000);
+  if (child.exitCode == null && !child.killed) child.kill();
+  setTimeout(() => {
+    if (child.exitCode == null) child.kill("SIGKILL");
+  }, 1000);
   fakeServer.close();
   if (process.env.HILLS_SMOKE_KEEP_ARTIFACTS !== "1") {
     await wait(1200);

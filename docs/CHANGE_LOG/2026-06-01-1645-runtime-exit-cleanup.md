@@ -1,0 +1,24 @@
+# 退出清理与 mpv 进程残留加固
+
+- **时间**：2026-06-01 16:45 (UTC+8)
+- **动机**：用户反馈“退出应用后播放仍在进行，任务管理器也无法终止”，这是高优先级运行时风险；退出必须停止本机内嵌播放、释放窗口宿主，并避免随包 mpv 残留继续播放。
+- **修改文件**：
+  - `electron/backend/mpv.mjs`：`shutdown()` 改为可等待流程，先通过 IPC 发送 `quit`，再等待退出；超时后依次 `kill()` 与 Windows `taskkill /T /F` 兜底。
+  - `electron/main.mjs`：统一退出清理改为 Promise 化，`before-quit` 会阻止默认退出并等待 mpv、内嵌宿主、遮黑窗口、全局快捷键、媒体状态和防休眠状态清理完成后再 `app.exit(0)`。
+  - `src-tauri/src/mpv/ipc.rs`：Tauri IPC 启动 mpv 时在 `Command` 上启用 `kill_on_drop(true)`，避免异常 drop 时子进程脱管。
+  - `scripts/smoke-electron-embedded-local.mjs`：扩展真实内嵌播放 smoke，关闭窗口前记录 Electron 子进程树中的 `mpv.exe` 与 `electron_mpv_host.exe`，退出后确认这些 PID 不再存在。
+- **风险**：退出路径会多等待最多数秒以换取确定清理；若某些机器上 `taskkill` 被安全软件拦截，仍会记录 smoke/日志中的残留结果。
+- **回滚**：恢复上述文件中退出等待、`taskkill` 兜底和 smoke 进程树检查的改动即可。
+- **验证步骤**：
+  - `node --check electron\backend\mpv.mjs`
+  - `node --check electron\main.mjs`
+  - `node --check scripts\smoke-electron-embedded-local.mjs`
+  - `cargo fmt --manifest-path src-tauri\Cargo.toml --check`
+  - `cargo check --manifest-path src-tauri\Cargo.toml --all-targets`
+  - `npm.cmd run build`
+  - `npm.cmd run check:electron-commands`
+  - `node scripts\smoke-electron-embedded-local.mjs`
+  - `git diff --check`
+  - `npm.cmd run electron:build`
+  - 构建后复查本项目相关 `Hills Lite.exe` / `mpv.exe` / `electron_mpv_host.exe` 进程残留
+- **结果**：通过；smoke 在仍处于播放中的窗口关闭前检测到 `electron_mpv_host.exe` 与随包 `mpv.exe`，关闭后 `electronExited = true` 且 `remaining = []`，同时后退按钮、原生全屏、窗口缩放与彩色视频像素检测均通过。Electron unpacked 打包确认 6 个随包 mpv 文件、`electron_mpv_host.exe` 和 `app.asar` 完整，构建后未发现本项目相关播放进程残留。
