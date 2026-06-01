@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（详情页本机解码能力文案）
+> **更新时间**：2026-06-01（未引用图标资源清理）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1550-detail-local-decode-copy.md`](./CHANGE_LOG/2026-06-01-1550-detail-local-decode-copy.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1558-unused-icon-cleanup.md`](./CHANGE_LOG/2026-06-01-1558-unused-icon-cleanup.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：资源清理阶段删除未被 Electron builder 或 `tauri.conf.json` 引用的默认移动端/商店图标，只保留桌面构建实际引用的 `32x32.png`、`128x128.png`、`128x128@2x.png`、`icon.icns` 与 `icon.ico`。`blackout.html`、Tauri schema、随包 mpv 和实际功能模块未清理。
 
 **2026-06-01**：详情页“媒体信息”的播放能力文案同步本机解码硬约束：可用能力只显示“本机直连 / 本机直流”；如果媒体源只能依赖服务端转码，则显示“仅服务端转码（不可播放）”，不再把转码包装成可用播放能力。
 
