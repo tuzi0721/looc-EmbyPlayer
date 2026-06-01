@@ -75,7 +75,6 @@ type ServerLineDraft = {
 };
 
 type ServerDraft = {
-  defaultUserAgent: string;
   lines: ServerLineDraft[];
   error: string | null;
 };
@@ -411,7 +410,6 @@ function beginServerEdit(server: Server) {
   serverDrafts.value = {
     ...serverDrafts.value,
     [server.id]: {
-      defaultUserAgent: server.defaultUserAgent ?? "",
       lines: server.lines.map((line, index) => createServerLineDraft(line, index)),
       error: null,
     },
@@ -469,7 +467,7 @@ async function saveServerDraft(server: Server) {
       id: server.id,
       name: server.name,
       kind: server.kind,
-      defaultUserAgent: normalizeNullableText(draft.defaultUserAgent),
+      defaultUserAgent: null,
       lines,
     });
     cancelServerEdit(server.id);
@@ -1017,15 +1015,6 @@ const danmakuSummary = computed(() => {
             </li>
           </ul>
           <div v-else-if="serverDrafts[s.id]" class="server-edit">
-            <label class="field">
-              <span>默认 User-Agent</span>
-              <input
-                v-model="serverDrafts[s.id].defaultUserAgent"
-                class="plain-input"
-                placeholder="留空使用应用默认"
-              />
-            </label>
-
             <div
               v-for="(line, index) in serverDrafts[s.id].lines"
               :key="line.id ?? index"
@@ -1055,22 +1044,28 @@ const danmakuSummary = computed(() => {
                 <span>启用线路</span>
                 <input v-model="line.enabled" class="switch" type="checkbox" />
               </label>
-              <label class="field">
-                <span>User-Agent</span>
-                <input
-                  v-model="line.userAgent"
-                  class="plain-input"
-                  placeholder="留空使用默认 UA"
-                />
-              </label>
-              <label class="field">
-                <span>Headers</span>
-                <textarea
-                  v-model="line.headersText"
-                  class="plain-textarea"
-                  placeholder="X-Header: value"
-                ></textarea>
-              </label>
+              <details class="server-edit__advanced">
+                <summary>
+                  <Icon icon="lucide:sliders-horizontal" width="14" />
+                  高级
+                </summary>
+                <label class="field">
+                  <span>User-Agent</span>
+                  <input
+                    v-model="line.userAgent"
+                    class="plain-input"
+                    placeholder="留空使用应用默认"
+                  />
+                </label>
+                <label class="field">
+                  <span>Headers</span>
+                  <textarea
+                    v-model="line.headersText"
+                    class="plain-textarea"
+                    placeholder="X-Header: value"
+                  ></textarea>
+                </label>
+              </details>
             </div>
 
             <p v-if="serverDrafts[s.id].error" class="status-line error">
@@ -1984,6 +1979,22 @@ const danmakuSummary = computed(() => {
 .server-edit__line-head strong {
   font-size: 12px;
   color: var(--fg-secondary);
+}
+.server-edit__advanced {
+  border-top: 1px solid var(--separator);
+  padding-top: 10px;
+}
+.server-edit__advanced summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--fg-secondary);
+  font-size: 12px;
+}
+.server-edit__advanced[open] summary {
+  margin-bottom: 10px;
+  color: var(--accent);
 }
 .server-edit__grid {
   display: grid;

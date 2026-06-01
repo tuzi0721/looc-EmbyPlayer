@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（播放器全屏与小窗口自适应）
+> **更新时间**：2026-06-01（服务器线路高级编辑）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1534-player-fullscreen-responsive.md`](./CHANGE_LOG/2026-06-01-1534-player-fullscreen-responsive.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1544-server-line-edit-advanced-ua.md`](./CHANGE_LOG/2026-06-01-1544-server-line-edit-advanced-ua.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：设置页服务器编辑继续收敛到线路级配置：服务器级默认 User-Agent 不再显示，保存时清空为 `null`；每条线路保留名称、URL、启用开关，User-Agent 与 Headers 移入“高级”折叠区，避免和添加服务器流程重复。播放链路仍延续本机解码硬约束，不允许服务端转码。
 
 **2026-05-29**：设置页新增“媒体库 → 首页轮播图风格”，可在标准与巨幕之间切换；巨幕模式使用更高的 Hero 高度、更大的标题布局和 2200px 背景图请求。
 
