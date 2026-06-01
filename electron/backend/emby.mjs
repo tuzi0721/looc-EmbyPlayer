@@ -760,10 +760,21 @@ export class EmbyClient {
     const startTicks =
       startMs == null ? null : Math.max(0, Math.floor((numberFrom(startMs) ?? 0) * 10_000));
     const url = joinUrl(line.baseUrl, `Items/${itemId}/PlaybackInfo`);
+    for (const [key, value] of Object.entries({
+      UserId: account.userId,
+      StartTimeTicks: startTicks,
+      MaxStreamingBitrate: "140000000",
+      ...directPlaybackOptions(),
+    })) {
+      url.searchParams.set(key, String(value));
+    }
+
     const body = {
       UserId: account.userId,
       MaxStreamingBitrate: 140000000,
       StartTimeTicks: startTicks,
+      ...directPlaybackOptions(),
+      DeviceProfile: directOnlyDeviceProfile("Hills Lite Local Decode"),
     };
     return requestJson(
       url,

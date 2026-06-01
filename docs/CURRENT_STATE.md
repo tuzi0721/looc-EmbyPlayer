@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（Web Preview 在线字幕假成功清理）
+> **更新时间**：2026-06-01（PlaybackInfo 本机解码探测收紧）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1916-web-preview-subtitle-fake-success.md`](./CHANGE_LOG/2026-06-01-1916-web-preview-subtitle-fake-success.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1921-playbackinfo-local-decode.md`](./CHANGE_LOG/2026-06-01-1921-playbackinfo-local-decode.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：PlaybackInfo 辅助探测继续收紧本机解码约束：Electron 后端通用 `playbackInfo()` 现在与主播放源获取一样显式发送 `EnableDirectPlay=true`、`EnableDirectStream=true`、`EnableTranscoding=false`、视频/音频 stream copy 开关与 Direct only `DeviceProfile`，即使只是为字幕列表等辅助功能刷新媒体源，也不给 Emby/Jellyfin 服务端转码协商留下默认空间。`check:local-decode` 同步新增函数块级锚点检查，要求 Electron 的 `playbackInfo()`、`playbackSource()` 和 Web Preview 的 `webPlaybackSource()` 都保留 Direct only 参数、静态流 URL 与 `serverTranscodingAllowed: false` 诊断。验证已覆盖 `node --check electron\backend\emby.mjs`、`node --check scripts\check-local-decode-guard.mjs` 与 `npm.cmd run check:local-decode`。
 
 **2026-06-01**：Web Preview 在线字幕假成功已清理：`search_online_subtitles` 不再返回 `{ provider: "assrt", results: [] }` 伪装成“搜索成功但无结果”，而是明确提示 Web Preview 不支持在线字幕搜索，请使用桌面版；`resolve_online_subtitle` 同步改为中文明确错误，避免未接入路径误导用户以为 ASSRT 搜索/加载已经可用。Electron 与 Tauri 的真实 ASSRT 实现保持不变。验证已覆盖 `npm.cmd run build`、`git diff --check` 与源码落点检查。
 

@@ -127,6 +127,40 @@ const requiredAnchors = [
   },
 ];
 
+const requiredBlocks = [
+  {
+    file: "electron/backend/emby.mjs",
+    start: "async playbackInfo(",
+    end: "async listSubtitles(",
+    snippets: [
+      "...directPlaybackOptions()",
+      'DeviceProfile: directOnlyDeviceProfile("Hills Lite Local Decode")',
+    ],
+  },
+  {
+    file: "electron/backend/emby.mjs",
+    start: "async playbackSource(",
+    end: "async mpvPlaybackSource(",
+    snippets: [
+      "...directPlaybackOptions()",
+      'DeviceProfile: directOnlyDeviceProfile("Hills Lite Local Decode")',
+      'streamUrl.searchParams.set("Static", "true")',
+      "serverTranscodingAllowed: false",
+    ],
+  },
+  {
+    file: "src/platform/index.ts",
+    start: "async function webPlaybackSource(",
+    end: "function webSnapshotFromSource(",
+    snippets: [
+      "...directPlaybackOptions()",
+      'DeviceProfile: directOnlyDeviceProfile("Hills Lite Web Preview Local Decode")',
+      'streamUrl.searchParams.set("Static", "true")',
+      "serverTranscodingAllowed: false",
+    ],
+  },
+];
+
 function toRelative(file) {
   return path.relative(root, file).replaceAll(path.sep, "/");
 }
@@ -201,6 +235,34 @@ for (const anchor of requiredAnchors) {
         line: 1,
         column: 1,
         value: snippet,
+      });
+    }
+  }
+}
+
+for (const block of requiredBlocks) {
+  const text = await fs.readFile(path.join(root, block.file), "utf8");
+  const startIndex = text.indexOf(block.start);
+  const endIndex = startIndex >= 0 ? text.indexOf(block.end, startIndex + block.start.length) : -1;
+  const body = startIndex >= 0 && endIndex > startIndex ? text.slice(startIndex, endIndex) : "";
+  if (!body) {
+    failures.push({
+      file: block.file,
+      label: "missing local-decode guarded block",
+      line: 1,
+      column: 1,
+      value: `${block.start} -> ${block.end}`,
+    });
+    continue;
+  }
+  for (const snippet of block.snippets) {
+    if (!body.includes(snippet)) {
+      failures.push({
+        file: block.file,
+        label: "missing local-decode guard inside block",
+        line: lineColumn(text, startIndex).line,
+        column: 1,
+        value: `${block.start}: ${snippet}`,
       });
     }
   }
