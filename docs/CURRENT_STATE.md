@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（内嵌播放 smoke 加固）
+> **更新时间**：2026-06-01（远程文件源封面代理）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1247-embedded-playback-smoke.md`](./CHANGE_LOG/2026-06-01-1247-embedded-playback-smoke.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1253-remote-file-poster-proxy.md`](./CHANGE_LOG/2026-06-01-1253-remote-file-poster-proxy.md)
 
 ---
 
@@ -628,6 +628,8 @@ npm.cmd run electron:build
 本轮本地文件夹手动路径已闭环：`/local-folder` 空状态新增路径输入框，可直接粘贴盘符路径或当前系统已授权可访问的 UNC 共享路径并复用现有真实目录扫描链路；设置页新增“手动路径”可用能力，SMB 仍保持“待接入”，仅说明已授权 UNC 路径可先通过该入口访问。
 
 本轮内嵌播放 smoke 加固已闭环：`scripts/smoke-electron-embedded-local.mjs` 在本地假 Emby + 临时彩色视频链路中继续确认内嵌 mpv 非黑屏、长按倍速和 mpv 截图有效，并新增控制栏关键按钮可见、全屏进入/退出、窗口缩到 960×620 后无横向溢出与彩色视频像素检测，避免后续改动悄悄破坏内嵌窗口同步。
+
+本轮远程文件源封面代理已闭环：Electron 桌面端的 `list_webdav_folder` 与 `list_alist_folder` 会把同源远程封面注册为 `hills-image://file/...`，由主进程使用连接凭据拉取图片并复用缓存；有鉴权 header 时不同源外部 `thumb` 不会被代理，避免把 WebDAV 密码或 Alist Token 发给第三方域名。Web Preview 仍以原始 URL 展示，需鉴权 header 的远程封面加载以桌面端为准。
 
 ---
 

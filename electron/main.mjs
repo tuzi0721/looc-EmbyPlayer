@@ -23,6 +23,8 @@ const userDataDir = process.env.HILLS_ELECTRON_USER_DATA_DIR
   : path.join(writableRootDir, ".electron-user-data");
 const imageCacheDir = path.join(userDataDir, "image-cache");
 const imageCacheInflight = new Map();
+const remoteFileImageRegistry = new Map();
+const maxRemoteFileImages = 2048;
 const imageQueryKeys = new Set(["maxWidth", "maxHeight", "width", "height", "quality", "format", "tag"]);
 const noOpCommands = new Set([]);
 const localVideoExtensions = new Set([
@@ -426,6 +428,13 @@ function parseImageProtocolUrl(value) {
     const filePath = Buffer.from(encodedPath, "base64url").toString("utf8");
     return { kind: "local", filePath };
   }
+  if (url.hostname === "file") {
+    const id = url.pathname.split("/").filter(Boolean)[0];
+    if (!id) throw new Error("invalid remote file image route");
+    const spec = remoteFileImageRegistry.get(id);
+    if (!spec) throw new Error("remote file image expired");
+    return spec;
+  }
   if (url.hostname !== "media") {
     throw new Error("invalid image cache protocol");
   }
@@ -450,7 +459,84 @@ function localImageProtocolUrl(filePath) {
   return `hills-image://local/${Buffer.from(filePath, "utf8").toString("base64url")}`;
 }
 
+function trimRemoteFileImageRegistry() {
+  while (remoteFileImageRegistry.size > maxRemoteFileImages) {
+    const firstKey = remoteFileImageRegistry.keys().next().value;
+    if (!firstKey) return;
+    remoteFileImageRegistry.delete(firstKey);
+  }
+}
+
+function normalizeHeaderEntries(headers = []) {
+  if (Array.isArray(headers)) {
+    return headers
+      .map(([name, value]) => [String(name ?? "").trim(), String(value ?? "")])
+      .filter(([name, value]) => name && value);
+  }
+  if (headers && typeof headers === "object") {
+    return Object.entries(headers)
+      .map(([name, value]) => [String(name ?? "").trim(), String(value ?? "")])
+      .filter(([name, value]) => name && value);
+  }
+  return [];
+}
+
+function remoteFileImageProtocolUrl(fileUrl, headers = [], options = {}) {
+  let parsed;
+  try {
+    parsed = new URL(String(fileUrl ?? ""));
+  } catch {
+    return fileUrl;
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) return parsed.toString();
+  const headerEntries = normalizeHeaderEntries(headers);
+  if (headerEntries.length > 0 && !options.allowedOrigin) return parsed.toString();
+  if (options.allowedOrigin && parsed.origin !== options.allowedOrigin) return parsed.toString();
+
+  const id = randomUUID();
+  remoteFileImageRegistry.set(id, {
+    kind: "remote-file",
+    id,
+    url: parsed.toString(),
+    headers: headerEntries,
+    timeoutMs: Number(options.timeoutMs) || 15_000,
+  });
+  trimRemoteFileImageRegistry();
+  return `hills-image://file/${id}`;
+}
+
+function proxyRemoteFilePosters(listing, headers = [], options = {}) {
+  if (!listing || !Array.isArray(listing.items)) return listing;
+  let allowedOrigin = null;
+  try {
+    allowedOrigin = new URL(String(listing.rootUrl ?? "")).origin;
+  } catch {
+    allowedOrigin = null;
+  }
+  return {
+    ...listing,
+    items: listing.items.map((entry) => ({
+      ...entry,
+      posterUrl: entry.posterUrl
+        ? remoteFileImageProtocolUrl(entry.posterUrl, headers, {
+            allowedOrigin,
+            timeoutMs: options.timeoutMs,
+          })
+        : entry.posterUrl,
+    })),
+  };
+}
+
 function imageCacheKey(spec) {
+  if (spec.kind === "remote-file") {
+    return createHash("sha256")
+      .update(JSON.stringify({
+        kind: spec.kind,
+        url: spec.url,
+        headers: normalizeHeaderEntries(spec.headers).sort(([left], [right]) => left.localeCompare(right)),
+      }))
+      .digest("hex");
+  }
   return createHash("sha256")
     .update(JSON.stringify({
       serverId: spec.serverId,
@@ -514,6 +600,35 @@ async function fetchImageWithTimeout(url, init, timeoutMs) {
   }
 }
 
+async function fetchAndCacheRemoteFileImage(cacheKey, spec) {
+  const headers = {
+    Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+    "Accept-Encoding": "identity",
+  };
+  for (const [name, value] of normalizeHeaderEntries(spec.headers)) {
+    headers[name] = value;
+  }
+
+  const response = await fetchImageWithTimeout(
+    spec.url,
+    {
+      method: "GET",
+      headers,
+    },
+    Number(spec.timeoutMs) || 15_000,
+  );
+
+  if (!response.ok) {
+    throw new Error(`remote file image failed: HTTP ${response.status} from ${redactUrl(spec.url)}`);
+  }
+
+  const contentType = response.headers.get("content-type") || "application/octet-stream";
+  const data = Buffer.from(await response.arrayBuffer());
+  if (data.byteLength === 0) throw new Error("remote file image returned an empty body");
+  await writeImageCacheEntry(cacheKey, data, contentType);
+  return cachedImageResponse(data, contentType, "miss");
+}
+
 async function readImageCacheEntry(cacheKey) {
   const dataPath = path.join(imageCacheDir, `${cacheKey}.bin`);
   const metaPath = path.join(imageCacheDir, `${cacheKey}.json`);
@@ -556,6 +671,10 @@ async function resolveImageSource(spec) {
 }
 
 async function fetchAndCacheImage(cacheKey, spec) {
+  if (spec.kind === "remote-file") {
+    return fetchAndCacheRemoteFileImage(cacheKey, spec);
+  }
+
   const { server, line, account, settings } = await resolveImageSource(spec);
   const remoteUrl = buildRemoteImageUrl(line, spec);
   const response = await fetchImageWithTimeout(
@@ -2267,8 +2386,20 @@ async function handleInvoke(command, args = {}) {
     return null;
   }
   if (command === "list_local_folder") return listLocalFolder(args.payload ?? {});
-  if (command === "list_webdav_folder") return webdav.list(args.payload ?? {});
-  if (command === "list_alist_folder") return alist.list(args.payload ?? {});
+  if (command === "list_webdav_folder") {
+    const payload = args.payload ?? {};
+    const listing = await webdav.list(payload);
+    return proxyRemoteFilePosters(listing, webdav.headersFor(payload), {
+      timeoutMs: payload.timeoutMs,
+    });
+  }
+  if (command === "list_alist_folder") {
+    const payload = args.payload ?? {};
+    const listing = await alist.list(payload);
+    return proxyRemoteFilePosters(listing, alist.headersFor(payload), {
+      timeoutMs: payload.timeoutMs,
+    });
+  }
   if (command === "resolve_alist_file") return alist.resolveFile(args.payload ?? {});
   if (command === "play_webdav_file") {
     await playWebDavFile(args.payload ?? {});
