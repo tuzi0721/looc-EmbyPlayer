@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（收藏历史聚合 Electron 回归）
+> **更新时间**：2026-06-01（服务端解码 stream copy 门禁）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-2022-personal-pages-electron-smoke.md`](./CHANGE_LOG/2026-06-01-2022-personal-pages-electron-smoke.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-2029-server-decode-copy-guard.md`](./CHANGE_LOG/2026-06-01-2029-server-decode-copy-guard.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：本机解码硬约束继续升级：`check:local-decode` 现在不仅禁止 `TranscodingUrl`、`master.m3u8`、`EnableTranscoding=true`、`PlayMethod=Transcode` 与非空 `TranscodingProfiles`，还会禁止 Electron / Web Preview 把 `EnableVideoStreamCopy` 或 `EnableAudioStreamCopy` 改成 `false`，并禁止 Tauri 请求把 `enable_video_stream_copy` 或 `enable_audio_stream_copy` 改成 `false`。门禁同时新增函数块锚点，要求 Electron、Web Preview 与 Tauri 的 PlaybackInfo 请求都保留 Direct Play、Direct Stream、禁转码和视频/音频 stream copy 开关；产品策略保持宁可播放失败提示，也不让 NAS、路由器、VPS 或资源服服务端承担视频/音频解码。验证已覆盖 `node --check scripts\check-local-decode-guard.mjs`、`npm.cmd run check:local-decode`、`npm.cmd run build`、`git diff --check` 与残留播放进程检查。
 
 **2026-06-01**：收藏 / 历史 / 聚合视界完成 Electron 桌面回归：`scripts/smoke-electron-home-hero.mjs` 已扩展为在首页巨幕验证后继续进入 `/favorites`、`/history` 与 `/aggregate`；本地假 Emby 媒体项带收藏、已看、最后播放时间与播放百分比。当前 smoke 结果为收藏页 `posterCount=1`、历史页 `historyCardCount=2`、聚合页 `posterCount=4`，三页均渲染 `Giant Screen Smoke` 或对应继续观看条目且无错误态；首页巨幕断言继续通过。验证后已停止 dev server。
 

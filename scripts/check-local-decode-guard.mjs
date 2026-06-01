@@ -54,8 +54,24 @@ const forbidden = [
     pattern: /\bEnableTranscoding\b[^\n;]{0,80}["']true["']/i,
   },
   {
+    label: "video stream copy disabled",
+    pattern: /\bEnableVideoStreamCopy\b\s*[:=]\s*["']?false["']?/i,
+  },
+  {
+    label: "audio stream copy disabled",
+    pattern: /\bEnableAudioStreamCopy\b\s*[:=]\s*["']?false["']?/i,
+  },
+  {
     label: "Rust enable_transcoding enabled",
     pattern: /\benable_transcoding\b\s*:\s*true\b/i,
+  },
+  {
+    label: "Rust video stream copy disabled",
+    pattern: /\benable_video_stream_copy\b\s*:\s*false\b/i,
+  },
+  {
+    label: "Rust audio stream copy disabled",
+    pattern: /\benable_audio_stream_copy\b\s*:\s*false\b/i,
   },
   {
     label: "transcode play method",
@@ -72,6 +88,8 @@ const requiredAnchors = [
     file: "electron/backend/emby.mjs",
     snippets: [
       "EnableTranscoding: false",
+      "EnableVideoStreamCopy: true",
+      "EnableAudioStreamCopy: true",
       "TranscodingProfiles: []",
       "pickLocalDecodeMediaSource",
       "localDecodePlayMethod",
@@ -85,6 +103,8 @@ const requiredAnchors = [
     file: "src/platform/index.ts",
     snippets: [
       "EnableTranscoding: false",
+      "EnableVideoStreamCopy: true",
+      "EnableAudioStreamCopy: true",
       "TranscodingProfiles: []",
       "pickLocalDecodeMediaSource",
       "localDecodePlayMethod",
@@ -98,6 +118,8 @@ const requiredAnchors = [
     file: "src-tauri/src/emby/client.rs",
     snippets: [
       "enable_transcoding: false",
+      "enable_video_stream_copy: true",
+      "enable_audio_stream_copy: true",
       "PlaybackDeviceProfile::direct_only",
       'q.append_pair("Static", "true")',
     ],
@@ -106,6 +128,8 @@ const requiredAnchors = [
     file: "src-tauri/src/emby/models.rs",
     snippets: [
       "pub device_profile: Option<PlaybackDeviceProfile>",
+      "pub enable_video_stream_copy: bool",
+      "pub enable_audio_stream_copy: bool",
       "pub transcoding_profiles: Vec<Value>",
       "pub fn direct_only",
       "pub fn supports_local_decode",
@@ -130,6 +154,18 @@ const requiredAnchors = [
 const requiredBlocks = [
   {
     file: "electron/backend/emby.mjs",
+    start: "function directPlaybackOptions()",
+    end: "function directOnlyDeviceProfile",
+    snippets: [
+      "EnableDirectPlay: true",
+      "EnableDirectStream: true",
+      "EnableTranscoding: false",
+      "EnableVideoStreamCopy: true",
+      "EnableAudioStreamCopy: true",
+    ],
+  },
+  {
+    file: "electron/backend/emby.mjs",
     start: "async playbackInfo(",
     end: "async listSubtitles(",
     snippets: [
@@ -150,6 +186,18 @@ const requiredBlocks = [
   },
   {
     file: "src/platform/index.ts",
+    start: "function directPlaybackOptions()",
+    end: "function directOnlyDeviceProfile",
+    snippets: [
+      "EnableDirectPlay: true",
+      "EnableDirectStream: true",
+      "EnableTranscoding: false",
+      "EnableVideoStreamCopy: true",
+      "EnableAudioStreamCopy: true",
+    ],
+  },
+  {
+    file: "src/platform/index.ts",
     start: "async function webPlaybackSource(",
     end: "function webSnapshotFromSource(",
     snippets: [
@@ -157,6 +205,19 @@ const requiredBlocks = [
       'DeviceProfile: directOnlyDeviceProfile("Hills Lite Web Preview Local Decode")',
       'streamUrl.searchParams.set("Static", "true")',
       "serverTranscodingAllowed: false",
+    ],
+  },
+  {
+    file: "src-tauri/src/emby/client.rs",
+    start: "let body = PlaybackInfoRequest {",
+    end: "let resp = self",
+    snippets: [
+      "enable_direct_play: true",
+      "enable_direct_stream: true",
+      "enable_transcoding: false",
+      "enable_video_stream_copy: true",
+      "enable_audio_stream_copy: true",
+      "PlaybackDeviceProfile::direct_only",
     ],
   },
 ];
