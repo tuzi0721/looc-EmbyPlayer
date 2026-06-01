@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（远程封面代理 smoke）
+> **更新时间**：2026-06-01（播放源切换当前复核）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1257-remote-poster-proxy-smoke.md`](./CHANGE_LOG/2026-06-01-1257-remote-poster-proxy-smoke.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1326-playback-source-current-verification.md`](./CHANGE_LOG/2026-06-01-1326-playback-source-current-verification.md)
 
 ---
 
@@ -560,6 +560,8 @@ npm.cmd run electron:build
 本轮播放器播放按钮可识别性已闭环：真实测试账号临时会话在 1420 Web Preview 中确认服务器已连接、媒体库加载、电影列表与详情页可打开，进入播放器后拿到真实 1440×1080 HTML 视频对象；同时修复中央播放/暂停按钮没有可访问名称的问题，现在按钮会随状态暴露“播放”或“暂停”的 `title` / `aria-label`，便于用户悬停、辅助技术识别和自动化回归定位。验证已覆盖 `npm.cmd run build`、播放器页冷刷新按钮名称检查、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`；验证过程未写入账号、密码、token 或完整线路地址。
 
 本轮真实双线路默认播放回归已闭环：1420 Web Preview 使用真实测试账号当前会话，将当前真实服务器编辑为两条 443 线路，保存后“测活”返回两条真实秒级延迟；设置页“设为当前”切到第二线路后，新开播放器默认播放源菜单选中第二线路，并可在会话内切到主线路再切回第二线路，期间 HTML 视频对象保持 1440×1080 / readyState 4。该阶段仅更新验证日志和状态快照，未改运行时代码，未写入账号、密码、token 或完整线路地址。
+
+本轮播放源切换当前复核已闭环：当前工作树再次确认 Electron `get_playback_source` / `play`、Tauri `play` / `play_external`、播放器 store、播放源菜单和外部播放器入口均保留 `lineId` / `mediaSourceId` 透传；`node --check electron\backend\emby.mjs`、`node --check electron\main.mjs`、`npm.cmd run check:electron-commands`、`npm.cmd run build`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets` 与 `npm.cmd run electron:build` 均通过。in-app Browser 1420 真实会话确认服务器 `001` 已连接、主线路为当前线路且线路 2 可用，播放源菜单显示主线路、线路 2 与媒体源摘要；用户手势播放后 HTML 视频推进并保持 `readyState = 4` / 1440×1080，切到线路 2 后继续推进到约 45 秒且无播放错误。验证过程未写入账号、密码、token 或完整线路地址。
 
 本轮设置页线路 URL 脱敏预览已闭环：服务器列表普通查看态不再直接显示完整远端线路 URL，而是展示保留协议、端口和部分主机名的脱敏预览；`localhost` / IP 线路保持原样便于本地调试，完整 URL 仍只能在“编辑”表单中查看和修改。验证已覆盖 `npm.cmd run build`、in-app Browser 1420 设置页目检、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`。
 
