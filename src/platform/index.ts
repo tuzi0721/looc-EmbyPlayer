@@ -1960,12 +1960,7 @@ function invokeWebFallback<T>(
         new Error("Web Preview 不支持直接播放本地文件，请使用桌面版"),
       );
     case "list_local_folder":
-      return Promise.resolve({
-        directory: String((args?.payload as any)?.directory ?? ""),
-        recursive: Boolean((args?.payload as any)?.recursive),
-        truncated: false,
-        items: [],
-      } as T);
+      return unsupportedWebCommand(command) as Promise<T>;
     case "list_webdav_folder":
       return webListDavFolder(args?.payload) as Promise<T>;
     case "list_alist_folder":
@@ -1995,11 +1990,7 @@ function invokeWebFallback<T>(
       return Promise.resolve(undefined as T);
     }
     case "import_danmaku_xml":
-      return Promise.resolve({
-        provider: "xml",
-        episodeId: String((args?.payload as any)?.filePath ?? "web-preview"),
-        comments: [],
-      } as T);
+      return unsupportedWebCommand(command) as Promise<T>;
     case "export_config": {
       const backup = webConfigBackup();
       const filePath = downloadWebBackup(backup);
