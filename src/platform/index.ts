@@ -84,7 +84,7 @@ const WEB_DEFAULT_SETTINGS: AppSettings = {
   screenshotIncludeSubtitles: true,
   appendAuthQuery: false,
   downloadDirectory: null,
-  homeHeroStyle: "classic",
+  homeHeroStyle: "cinema",
   closeToTray: false,
   traktSyncEnabled: false,
   traktUsername: null,

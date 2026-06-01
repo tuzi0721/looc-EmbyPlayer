@@ -29,7 +29,7 @@ export const DEFAULT_SETTINGS = {
   screenshotIncludeSubtitles: true,
   appendAuthQuery: false,
   downloadDirectory: null,
-  homeHeroStyle: "classic",
+  homeHeroStyle: "cinema",
   closeToTray: false,
   traktSyncEnabled: false,
   traktUsername: null,

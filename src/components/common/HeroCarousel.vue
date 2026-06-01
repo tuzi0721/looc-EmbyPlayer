@@ -30,7 +30,7 @@ const items = computed(() => {
 });
 
 const current = computed(() => items.value[index.value] ?? null);
-const heroStyle = computed(() => settings.settings.homeHeroStyle ?? "classic");
+const heroStyle = computed(() => settings.settings.homeHeroStyle ?? "cinema");
 const heroImageWidth = computed(() => (heroStyle.value === "cinema" ? "2200" : "1280"));
 
 function itemImageUrl(item: MediaItem, imageType: "Backdrop" | "Primary", width: string): string | null {
@@ -125,15 +125,15 @@ onUnmounted(() => {
 <style scoped>
 .hero {
   position: relative;
-  height: min(48vh, 420px);
-  min-height: 260px;
+  height: clamp(420px, 58vh, 620px);
+  min-height: 360px;
   border-radius: 0;
   overflow: hidden;
   flex-shrink: 0;
 }
 .hero--cinema {
-  height: clamp(500px, 72vh, 760px);
-  min-height: 480px;
+  height: clamp(560px, calc(100dvh - 168px), 820px);
+  min-height: 520px;
 }
 .hero__bg {
   position: absolute;
@@ -180,15 +180,15 @@ onUnmounted(() => {
 .hero__content {
   position: absolute;
   left: 24px;
-  bottom: 36px;
-  max-width: min(520px, 55%);
+  bottom: 34px;
+  max-width: min(620px, 56%);
   z-index: 2;
   cursor: pointer;
 }
 .hero--cinema .hero__content {
   left: clamp(28px, 6vw, 72px);
-  bottom: clamp(70px, 12vh, 128px);
-  max-width: min(720px, 56%);
+  bottom: clamp(40px, 7vh, 78px);
+  max-width: min(780px, 58%);
 }
 .hero__poster {
   appearance: none;
@@ -196,8 +196,8 @@ onUnmounted(() => {
   background: rgba(0, 0, 0, 0.24);
   position: absolute;
   right: clamp(34px, 7vw, 100px);
-  bottom: clamp(42px, 8vh, 92px);
-  width: clamp(132px, 15vw, 230px);
+  bottom: clamp(34px, 6vh, 72px);
+  width: clamp(148px, 14vw, 230px);
   aspect-ratio: 2 / 3;
   border-radius: 8px;
   overflow: hidden;
@@ -205,6 +205,10 @@ onUnmounted(() => {
   z-index: 2;
   box-shadow: 0 28px 70px rgba(0, 0, 0, 0.38);
   cursor: pointer;
+}
+.hero--cinema .hero__poster {
+  right: clamp(40px, 8vw, 120px);
+  width: clamp(180px, 18vw, 290px);
 }
 .hero__poster img {
   display: block;
@@ -214,13 +218,14 @@ onUnmounted(() => {
 }
 .hero__title {
   margin: 0 0 8px;
-  font-size: 34px;
+  font-size: 38px;
   font-weight: 700;
   color: white;
   letter-spacing: 0;
+  line-height: 1.08;
 }
 .hero--cinema .hero__title {
-  font-size: 64px;
+  font-size: 68px;
   max-width: 12em;
 }
 .hero__meta {
@@ -230,9 +235,9 @@ onUnmounted(() => {
 }
 .hero__desc {
   margin: 0;
-  font-size: 13px;
-  line-height: 1.55;
-  color: rgba(255, 255, 255, 0.62);
+  font-size: 14px;
+  line-height: 1.58;
+  color: rgba(255, 255, 255, 0.68);
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
@@ -267,14 +272,18 @@ onUnmounted(() => {
   border-radius: 999px;
 }
 @media (max-width: 760px) {
-  .hero--cinema {
-    height: min(64vh, 560px);
+  .hero {
+    height: clamp(360px, 62vh, 560px);
     min-height: 340px;
+  }
+  .hero--cinema {
+    height: min(72dvh, 620px);
+    min-height: 420px;
   }
   .hero--cinema .hero__content {
     left: 18px;
     right: 18px;
-    bottom: 48px;
+    bottom: 44px;
     max-width: none;
   }
   .hero--cinema .hero__title {

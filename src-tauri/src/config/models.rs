@@ -292,7 +292,7 @@ pub enum HomeHeroStyle {
 
 impl Default for HomeHeroStyle {
     fn default() -> Self {
-        Self::Classic
+        Self::Cinema
     }
 }
 
