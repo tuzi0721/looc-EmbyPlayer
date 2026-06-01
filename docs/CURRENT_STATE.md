@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（设置页未接入入口清理）
+> **更新时间**：2026-06-01（本机解码拦截提示统一）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1947-settings-planned-entry-cleanup.md`](./CHANGE_LOG/2026-06-01-1947-settings-planned-entry-cleanup.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1953-local-decode-block-messages.md`](./CHANGE_LOG/2026-06-01-1953-local-decode-block-messages.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：本机解码拦截提示继续统一：Electron、Web Preview、Tauri 播放、外部播放、下载与远程播放入口在服务端未返回可本机直连 / 本机直流媒体源时，现在都返回中文明确拦截提示，说明 Hills Lite 不允许服务端解码/转码，并提示用户换用可本机解码的版本或线路。播放协商仍维持 Direct Play / Direct Stream only、`EnableTranscoding=false`、空 `TranscodingProfiles` 与静态流 URL；本轮验证已覆盖 JS 语法、Rust fmt / check、旧英文提示残留扫描、`check:local-decode`、`npm.cmd run build`、`git diff --check` 与 `npm.cmd run electron:build`。
 
 **2026-06-01**：设置页未接入入口继续清理：移除“同步”和“AI 字幕”两个未落地面板，删除对应查询入口、summary、能力列表与 `planned` 状态；画质增强面板只保留当前可触发的 Windows HDR 系统入口，不再展示 RTX VSR、RTX TrueHDR、AMD FSR、RIFE 与 GLSL Shaders 计划项；文件服务面板只保留真实可用的本地文件、本地文件夹、WebDAV 与 Alist / OpenList 路径，不再展示 SMB / Plex 计划项。验证已覆盖计划项残留扫描、`npm.cmd run build`、`git diff --check` 与 `npm.cmd run electron:build`，其中 Electron 打包过程已自动执行 `check:local-decode`，继续拦截服务端转码回归。
 

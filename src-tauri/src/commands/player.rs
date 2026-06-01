@@ -205,7 +205,7 @@ pub async fn play(state: State<'_, Arc<AppState>>, payload: PlayPayload) -> AppR
                 .ok_or_else(|| AppError::InvalidState(format!("media source not found: {id}")))?;
             if !source.supports_local_decode() {
                 return Err(AppError::InvalidState(
-                    "server transcoding is disabled: selected media source does not support Direct Play or Direct Stream".into(),
+                    "已阻止播放：所选媒体源不支持本机直连或本机直流。Hills Lite 不允许服务端解码/转码，请换一个可本机解码的版本或线路。".into(),
                 ));
             }
             source.clone()
@@ -216,7 +216,7 @@ pub async fn play(state: State<'_, Arc<AppState>>, payload: PlayPayload) -> AppR
             .find(|source| source.supports_local_decode())
             .ok_or_else(|| {
                 AppError::InvalidState(
-                    "server transcoding is disabled: no Direct Play or Direct Stream media source was returned".into(),
+                    "已阻止播放：服务端没有返回可本机直连或本机直流的媒体源。Hills Lite 不允许服务端解码/转码，以避免压垮 NAS、路由器或 VPS。".into(),
                 )
             })?
             .clone(),
@@ -894,7 +894,7 @@ pub async fn play_external(
                 .ok_or_else(|| AppError::InvalidState(format!("media source not found: {id}")))?;
             if !source.supports_local_decode() {
                 return Err(AppError::InvalidState(
-                    "server transcoding is disabled: selected media source does not support Direct Play or Direct Stream".into(),
+                    "已阻止播放：所选媒体源不支持本机直连或本机直流。Hills Lite 不允许服务端解码/转码，请换一个可本机解码的版本或线路。".into(),
                 ));
             }
             source.clone()
@@ -905,7 +905,7 @@ pub async fn play_external(
             .find(|source| source.supports_local_decode())
             .ok_or_else(|| {
                 AppError::InvalidState(
-                    "server transcoding is disabled: no Direct Play or Direct Stream media source was returned".into(),
+                    "已阻止播放：服务端没有返回可本机直连或本机直流的媒体源。Hills Lite 不允许服务端解码/转码，以避免压垮 NAS、路由器或 VPS。".into(),
                 )
             })?
             .clone(),

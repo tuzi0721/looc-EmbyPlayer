@@ -655,7 +655,7 @@ function pickLocalDecodeMediaSource(mediaSources: any[], requestedMediaSourceId?
     }
     if (!isLocalDecodeSource(selected)) {
       throw new Error(
-        "Server transcoding is disabled: selected media source does not support Direct Play or Direct Stream.",
+        "已阻止播放：所选媒体源不支持本机直连或本机直流。Hills Lite 不允许服务端解码/转码，请换一个可本机解码的版本或线路。",
       );
     }
     return selected;
@@ -664,7 +664,7 @@ function pickLocalDecodeMediaSource(mediaSources: any[], requestedMediaSourceId?
   const selected = mediaSources.find(isLocalDecodeSource);
   if (!selected) {
     throw new Error(
-      "Server transcoding is disabled: no Direct Play or Direct Stream media source was returned.",
+      "已阻止播放：服务端没有返回可本机直连或本机直流的媒体源。Hills Lite 不允许服务端解码/转码，以避免压垮 NAS、路由器或 VPS。",
     );
   }
   return selected;

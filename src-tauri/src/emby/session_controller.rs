@@ -207,7 +207,7 @@ impl SessionController {
             .find(|source| source.supports_local_decode())
             .ok_or_else(|| {
                 AppError::InvalidState(
-                    "server transcoding is disabled: no Direct Play or Direct Stream media source was returned".into(),
+                    "已阻止远程播放：服务端没有返回可本机直连或本机直流的媒体源。Hills Lite 不允许服务端解码/转码，以避免压垮 NAS、路由器或 VPS。".into(),
                 )
             })?
             .clone();
