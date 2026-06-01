@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（WebDAV XML 弹幕）
+> **更新时间**：2026-06-01（WebDAV 路径面包屑）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1044-webdav-sidecar-danmaku.md`](./CHANGE_LOG/2026-06-01-1044-webdav-sidecar-danmaku.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1048-webdav-breadcrumbs.md`](./CHANGE_LOG/2026-06-01-1048-webdav-breadcrumbs.md)
 
 ---
 
@@ -597,9 +597,11 @@ npm.cmd run electron:build
 
 本轮 WebDAV 同名 XML 弹幕已闭环：WebDAV 目录解析会把同层 `同名.xml`、`同名.danmaku.xml` 或 `同名.comments.xml` 关联到可播放视频；`/webdav` 列表显示“XML 弹幕”并支持搜索“弹幕 xml”，播放器进入 WebDAV direct 播放后会尝试用同一连接凭据读取远程 XML 并复用现有弹幕解析/合并逻辑。Web Preview 当前仍只返回空弹幕结果，桌面 Electron 为实际加载路径。
 
+本轮 WebDAV 路径面包屑已闭环：`/webdav` 在多级目录中会根据当前 `path` 生成可点击面包屑，支持从深层目录直接回到任意上级目录或根 WebDAV；切换路径继续复用已有路由与目录加载逻辑，不改变认证和播放路径。
+
 ---
 
 ## 10. Phase 2 待办
 
 - 播放窗口内嵌已通过本地屏幕像素 smoke；后续仍建议用真实媒体人工走一遍控制栏显示/隐藏、全屏和窗口 resize 体验。
-- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层/递归视频浏览、本地文件夹列表搜索/排序/分组与播放队列、同名封面、同名 NFO 元数据、同名字幕自动关联及列表提示、同名 XML 弹幕自动关联及列表提示、最近本地文件入口、最近本地文件夹入口、收藏本地文件、收藏本地文件夹、WebDAV 基础目录浏览/直链播放、WebDAV 播放队列、WebDAV 收藏/最近入口、WebDAV 列表搜索/排序、WebDAV 同名字幕提示/加载和 WebDAV 同名 XML 弹幕提示/加载；在线封面/元数据刮削、SMB、Alist/OpenList 和 Plex 仍待后续分阶段接入。
+- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层/递归视频浏览、本地文件夹列表搜索/排序/分组与播放队列、同名封面、同名 NFO 元数据、同名字幕自动关联及列表提示、同名 XML 弹幕自动关联及列表提示、最近本地文件入口、最近本地文件夹入口、收藏本地文件、收藏本地文件夹、WebDAV 基础目录浏览/直链播放、WebDAV 播放队列、WebDAV 收藏/最近入口、WebDAV 列表搜索/排序、WebDAV 同名字幕提示/加载、WebDAV 同名 XML 弹幕提示/加载和 WebDAV 路径面包屑；在线封面/元数据刮削、SMB、Alist/OpenList 和 Plex 仍待后续分阶段接入。

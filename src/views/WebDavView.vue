@@ -35,6 +35,17 @@ const folderTitle = computed(() => {
   if (!currentPath.value) return "WebDAV";
   return currentPath.value.replace(/\/+$/, "").split("/").filter(Boolean).pop() ?? "WebDAV";
 });
+const breadcrumbItems = computed(() => {
+  const segments = currentPath.value.replace(/\/+$/, "").split("/").filter(Boolean);
+  let path = "";
+  return [
+    { label: "WebDAV", path: "" },
+    ...segments.map((segment) => {
+      path = `${path}${segment}/`;
+      return { label: segment, path };
+    }),
+  ];
+});
 const normalizedSearchText = computed(() => searchText.value.trim().toLocaleLowerCase());
 const visibleItems = computed(() => {
   const items = listing.value?.items ?? [];
@@ -233,6 +244,12 @@ function goUp() {
     .catch(() => {});
 }
 
+function openBreadcrumb(path: string) {
+  router
+    .push({ name: "webdav", query: { connection: selectedConnectionId.value ?? "", path } })
+    .catch(() => {});
+}
+
 async function playEntry(entry: WebDavEntry) {
   if (!entry.playable || playingUrl.value) return;
   playingUrl.value = entry.url;
@@ -312,6 +329,18 @@ onMounted(() => {
       <div class="webdav__title">
         <h1>{{ folderTitle }}</h1>
         <p v-if="listing?.directoryUrl" :title="listing.directoryUrl">{{ listing.directoryUrl }}</p>
+        <nav v-if="currentPath" class="webdav-breadcrumb" aria-label="WebDAV 路径">
+          <template v-for="(crumb, index) in breadcrumbItems" :key="crumb.path || 'root'">
+            <button
+              type="button"
+              :disabled="index === breadcrumbItems.length - 1"
+              @click="openBreadcrumb(crumb.path)"
+            >
+              {{ crumb.label }}
+            </button>
+            <Icon v-if="index < breadcrumbItems.length - 1" icon="lucide:chevron-right" width="13" />
+          </template>
+        </nav>
       </div>
       <div class="webdav__actions">
         <button
@@ -572,6 +601,44 @@ onMounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.webdav-breadcrumb {
+  margin-top: 8px;
+  max-width: min(760px, 68vw);
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-tertiary);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.webdav-breadcrumb::-webkit-scrollbar {
+  display: none;
+}
+.webdav-breadcrumb button {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--fg-secondary);
+  min-width: 0;
+  max-width: 180px;
+  padding: 3px 5px;
+  border-radius: 6px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: inherit;
+  font-size: 12px;
+}
+.webdav-breadcrumb button:hover:not(:disabled) {
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.05);
+}
+.webdav-breadcrumb button:disabled {
+  color: var(--fg-primary);
+  cursor: default;
 }
 .webdav__actions {
   display: inline-flex;
