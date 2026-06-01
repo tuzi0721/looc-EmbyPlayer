@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（首页巨幕去海报与点击进入）
+> 更新时间：2026-06-02（侧边栏折叠按钮）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-0405-home-hero-click-layout.md`](./CHANGE_LOG/2026-06-02-0405-home-hero-click-layout.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-0410-sidebar-collapse.md`](./CHANGE_LOG/2026-06-02-0410-sidebar-collapse.md)
 
 ---
 
@@ -44,6 +44,7 @@
 ## 2. 当前产品面
 
 - 主导航保留首页、收藏、历史、聚合视界、服务器状态/切换与设置；下载、通知、遥控、服务器显示/隐藏等管理动作集中到设置页。
+- 左上角汉堡按钮可折叠/展开侧边栏，折叠后保留图标导航、服务器状态点和设置入口，状态保存在 `localStorage`。
 - 添加服务器表单直接提供用户名、密码、线路地址和任意端口输入；服务端名称与 Emby/Jellyfin 类型由公开信息接口自动识别。
 - 保存服务器会追加记录，不覆盖原服务器；已保存服务器的线路编辑同样使用地址 + 端口输入，线路名为高级可选项，线路级高级设置保留 User-Agent 与 headers。
 - 首页 smoke 已覆盖随机端口本地测试 Emby 的 `detect_server -> add_server -> login -> refreshHome` 链路，并断言新增服务器只追加 1 条。
@@ -125,7 +126,7 @@ node scripts\smoke-electron-home-hero.mjs
 - `node --check electron\main.mjs`
 - `node --check scripts\smoke-electron-home-hero.mjs`
 - `node scripts\smoke-electron-home-hero.mjs`
-- 当前工作区无意外未跟踪文件；Electron 命令覆盖为 104/104，显式 no-op 命令为 0。首页 smoke 已覆盖双服务器同名同 ID 收藏/历史/聚合/搜索记录不会被合并、收藏/历史/聚合卡片缺 Backdrop 时的图片回退解码，以及巨幕无右侧海报且点击进入详情。
+- 当前工作区无意外未跟踪文件；Electron 命令覆盖为 104/104，显式 no-op 命令为 0。首页 smoke 已覆盖双服务器同名同 ID 收藏/历史/聚合/搜索记录不会被合并、收藏/历史/聚合卡片缺 Backdrop 时的图片回退解码、巨幕无右侧海报且点击进入详情，以及侧边栏汉堡按钮折叠/展开。
 
 ---
 

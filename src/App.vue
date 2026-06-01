@@ -24,8 +24,31 @@ const player = usePlayerStore();
 const router = useRouter();
 const route = useRoute();
 const bootstrapped = ref(false);
+const sidebarCollapsed = ref(false);
 
 const isFullscreen = computed(() => Boolean(route.meta?.fullscreen));
+
+function readSidebarCollapsed() {
+  try {
+    return window.localStorage.getItem("hills:sidebar-collapsed") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function persistSidebarCollapsed(value: boolean) {
+  try {
+    window.localStorage.setItem("hills:sidebar-collapsed", value ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
+
+function toggleSidebarCollapsed() {
+  sidebarCollapsed.value = !sidebarCollapsed.value;
+}
+
+watch(sidebarCollapsed, persistSidebarCollapsed);
 
 watch(
   () => route.name,
@@ -37,6 +60,7 @@ watch(
 );
 
 onMounted(async () => {
+  sidebarCollapsed.value = readSidebarCollapsed();
   try {
     if ((await platformType()) === "windows") {
       document.documentElement.classList.add("platform-windows");
@@ -97,7 +121,12 @@ onMounted(async () => {
 <template>
   <div class="app-shell" :class="{ 'is-fullscreen': isFullscreen }">
     <div class="app-backdrop" />
-    <AppSidebar v-if="!isFullscreen" class="app-sidebar" />
+    <AppSidebar
+      v-if="!isFullscreen"
+      class="app-sidebar"
+      :collapsed="sidebarCollapsed"
+      @toggle-collapsed="toggleSidebarCollapsed"
+    />
     <div class="app-right" :class="{ 'is-fullscreen': isFullscreen }">
       <TopBar v-if="!isFullscreen" />
       <main class="app-main">

@@ -377,6 +377,30 @@ try {
   const screenshot = await cdpCall(ws, "Page.captureScreenshot", { format: "png" });
   await fsp.writeFile(screenshotPath, Buffer.from(screenshot.data, "base64"));
 
+  const sidebarCollapse = await cdpEval(ws, `
+    (async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const sidebar = document.querySelector(".sb");
+      const menu = document.querySelector(".brand-menu");
+      if (!sidebar || !menu) return null;
+      const before = sidebar.getBoundingClientRect();
+      menu.click();
+      await wait(260);
+      const collapsed = sidebar.getBoundingClientRect();
+      const collapsedClass = sidebar.classList.contains("is-collapsed");
+      menu.click();
+      await wait(260);
+      const expanded = sidebar.getBoundingClientRect();
+      return {
+        beforeWidth: before.width,
+        collapsedWidth: collapsed.width,
+        expandedWidth: expanded.width,
+        collapsedClass,
+        titleVisibleWhenCollapsed: Boolean(document.querySelector(".sb.is-collapsed .brand-btn__name")),
+      };
+    })()
+  `);
+
   const personalRoutes = await cdpEval(ws, `
     (async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -446,6 +470,14 @@ try {
     failures.push(`arbitrary port URL was not preserved: ${result.savedServer?.baseUrl}`);
   }
   if (!result.heroBg.includes("hills-image://media")) failures.push("hero backdrop does not use media image URL");
+  if (!sidebarCollapse) failures.push("sidebar collapse controls missing");
+  else {
+    if (sidebarCollapse.beforeWidth < 180) failures.push(`sidebar expanded width too small: ${sidebarCollapse.beforeWidth}`);
+    if (!sidebarCollapse.collapsedClass || sidebarCollapse.collapsedWidth > 90) {
+      failures.push(`sidebar did not collapse: ${JSON.stringify(sidebarCollapse)}`);
+    }
+    if (sidebarCollapse.expandedWidth < 180) failures.push(`sidebar did not expand: ${JSON.stringify(sidebarCollapse)}`);
+  }
   if (result.hero && result.hero.height < result.viewport.height * 0.72) failures.push("hero too short");
   if (result.hero && result.hero.height > result.viewport.height + 4) failures.push("hero taller than viewport");
   if (result.nextSectionTop == null || result.nextSectionTop > result.viewport.height + 2) {
@@ -491,11 +523,11 @@ try {
 
   if (failures.length > 0) {
     throw new Error(
-      `home hero smoke failed: ${failures.join("; ")}\n${JSON.stringify({ result, heroClick, personalRoutes, multiServerSearch }, null, 2)}`,
+      `home hero smoke failed: ${failures.join("; ")}\n${JSON.stringify({ result, sidebarCollapse, heroClick, personalRoutes, multiServerSearch }, null, 2)}`,
     );
   }
 
-  console.log(JSON.stringify({ ok: true, screenshotPath, ...result, heroClick, personalRoutes, multiServerSearch }, null, 2));
+  console.log(JSON.stringify({ ok: true, screenshotPath, ...result, sidebarCollapse, heroClick, personalRoutes, multiServerSearch }, null, 2));
 } finally {
   if (ws) ws.close();
   child.kill();

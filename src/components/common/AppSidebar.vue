@@ -15,12 +15,21 @@ const auth = useAuthStore();
 const serverStore = useServerStore();
 const settings = useSettingsStore();
 
+const props = defineProps<{
+  collapsed?: boolean;
+}>();
+
+const emit = defineEmits<{
+  "toggle-collapsed": [];
+}>();
+
 const hiddenIds = computed(() => settings.settings.hiddenServerIds ?? []);
 const visibleServers = computed(() =>
   serverStore.servers.filter((s) => !hiddenIds.value.includes(s.id)),
 );
 
 const activeServerId = computed(() => auth.activeAccount?.serverId ?? null);
+const isCollapsed = computed(() => props.collapsed === true);
 
 function loggedInOn(serverId: string): boolean {
   return auth.accounts.some((a) => a.serverId === serverId);
@@ -61,10 +70,18 @@ function gotoAggregate() {
 </script>
 
 <template>
-  <aside class="sb glass">
+  <aside class="sb glass" :class="{ 'is-collapsed': isCollapsed }">
     <header class="sb__brand">
-      <button class="brand-btn" @click="gotoHome">
+      <button
+        class="brand-menu"
+        type="button"
+        :aria-label="isCollapsed ? '展开边栏' : '折叠边栏'"
+        :title="isCollapsed ? '展开边栏' : '折叠边栏'"
+        @click="emit('toggle-collapsed')"
+      >
         <Icon icon="lucide:menu" width="18" class="brand-btn__menu" />
+      </button>
+      <button class="brand-home" type="button" @click="gotoHome">
         <span class="brand-btn__name">Hills Lite</span>
       </button>
     </header>
@@ -73,6 +90,7 @@ function gotoAggregate() {
       <button
         class="nav-btn"
         :class="{ active: route.name === 'home' }"
+        :title="isCollapsed ? '首页' : undefined"
         @click="gotoHome"
       >
         <Icon icon="lucide:home" width="16" />
@@ -81,6 +99,7 @@ function gotoAggregate() {
       <button
         class="nav-btn"
         :class="{ active: route.name === 'favorites' }"
+        :title="isCollapsed ? '收藏' : undefined"
         @click="gotoFavorites"
       >
         <Icon icon="lucide:heart" width="16" />
@@ -89,6 +108,7 @@ function gotoAggregate() {
       <button
         class="nav-btn"
         :class="{ active: route.name === 'history' }"
+        :title="isCollapsed ? '历史' : undefined"
         @click="gotoHistory"
       >
         <Icon icon="lucide:history" width="16" />
@@ -97,6 +117,7 @@ function gotoAggregate() {
       <button
         class="nav-btn"
         :class="{ active: route.name === 'aggregate' }"
+        :title="isCollapsed ? '聚合视界' : undefined"
         @click="gotoAggregate"
       >
         <Icon icon="lucide:infinity" width="16" />
@@ -116,7 +137,7 @@ function gotoAggregate() {
           class="srv-row"
           :class="{ 'is-active': s.id === activeServerId }"
         >
-          <button class="srv-row__btn" @click="pickServer(s.id)">
+          <button class="srv-row__btn" :title="isCollapsed ? s.name : undefined" @click="pickServer(s.id)">
             <div class="srv-row__avatar" :title="serverKindLabel(s.kind)">
               <Icon :icon="serverKindIcon(s.kind)" width="16" />
               <LineStatusDot
@@ -155,6 +176,7 @@ function gotoAggregate() {
       <button
         class="nav-btn settings-btn"
         :class="{ active: route.name === 'settings' }"
+        :title="isCollapsed ? '设置' : undefined"
         @click="gotoSettings()"
       >
         <Icon icon="lucide:settings" width="16" />
@@ -181,29 +203,51 @@ function gotoAggregate() {
   overflow: hidden;
   position: relative;
   z-index: 10;
+  transition: width 180ms var(--easing-glide), padding 180ms var(--easing-glide);
+}
+.sb.is-collapsed {
+  width: 64px;
+  padding: 8px 7px 12px;
 }
 
 .sb__brand {
   padding: 4px 4px 6px;
   border-bottom: 1px solid var(--separator);
   margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
-.brand-btn {
+.brand-menu,
+.brand-home {
   appearance: none;
   border: none;
   background: transparent;
   display: flex;
   align-items: center;
-  gap: 10px;
   cursor: pointer;
   color: inherit;
-  width: 100%;
   padding: 6px;
   border-radius: 10px;
   transition: background 180ms var(--easing-glide);
 }
-.brand-btn:hover {
+.brand-menu {
+  width: 32px;
+  height: 32px;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.brand-home {
+  min-width: 0;
+  flex: 1;
+  justify-content: flex-start;
+}
+.brand-menu:hover,
+.brand-home:hover {
   background: rgba(255, 255, 255, 0.04);
+}
+.sb.is-collapsed .brand-home {
+  display: none;
 }
 .brand-btn__icon {
   width: 30px;
@@ -260,6 +304,18 @@ function gotoAggregate() {
   background: var(--accent-soft);
   color: var(--accent);
 }
+.sb.is-collapsed .nav-btn {
+  justify-content: center;
+  gap: 0;
+  padding: 8px 0;
+  min-height: 36px;
+}
+.sb.is-collapsed .nav-btn span,
+.sb.is-collapsed .sec-head,
+.sb.is-collapsed .srv-row__text,
+.sb.is-collapsed .srv-empty {
+  display: none;
+}
 .nav-btn .chev {
   margin-left: auto;
 }
@@ -292,6 +348,10 @@ function gotoAggregate() {
   overflow-y: auto;
   max-height: 44vh;
 }
+.sb.is-collapsed .srv-list {
+  align-items: center;
+  max-height: 48vh;
+}
 .srv-empty {
   padding: 14px 8px;
   font-size: 11px;
@@ -321,6 +381,15 @@ function gotoAggregate() {
   color: inherit;
   text-align: left;
   transition: background 160ms var(--easing-glide);
+}
+.sb.is-collapsed .srv-row,
+.sb.is-collapsed .srv-row__btn {
+  width: 40px;
+}
+.sb.is-collapsed .srv-row__btn {
+  display: flex;
+  justify-content: center;
+  padding: 4px;
 }
 .srv-row__btn:hover {
   background: rgba(255, 255, 255, 0.04);
