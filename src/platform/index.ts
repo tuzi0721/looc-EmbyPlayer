@@ -1598,6 +1598,20 @@ async function webReportPlaybackStopped(payload: any) {
   }
 }
 
+function unsupportedWebCommand(command: string): Promise<never> {
+  return Promise.reject(new Error(`Web Preview 不支持桌面命令：${command}，请使用桌面版`));
+}
+
+function webOpenExternal(url: unknown): Promise<void> {
+  const text = stringFrom(url)?.trim();
+  if (!text) return Promise.reject(new Error("open_external requires a url"));
+  if (!/^(https?:|mailto:)/i.test(text)) {
+    return Promise.reject(new Error("Web Preview 只能打开 http(s) 或 mailto 外部链接"));
+  }
+  window.open(text, "_blank", "noopener,noreferrer");
+  return Promise.resolve();
+}
+
 function invokeWebFallback<T>(
   command: string,
   args?: Record<string, unknown>,
@@ -1800,7 +1814,7 @@ function invokeWebFallback<T>(
     case "list_global_shortcuts":
       return Promise.resolve([] as T);
     case "open_download_directory":
-      return Promise.resolve("" as T);
+      return unsupportedWebCommand(command) as Promise<T>;
     case "unread_count":
       return Promise.resolve(0 as T);
     case "list_views":
@@ -1998,16 +2012,17 @@ function invokeWebFallback<T>(
     }
     case "import_config":
       return importWebBackup(((args?.payload as any)?.mode ?? "merge") as "merge" | "replace") as Promise<T>;
-    case "open_external":
     case "open_path":
     case "show_mpv_stats_osd":
     case "set_always_on_top":
     case "set_secondary_subtitle_track":
-      return Promise.resolve(undefined as T);
+      return unsupportedWebCommand(command) as Promise<T>;
+    case "open_external":
+      return webOpenExternal(args?.url) as Promise<T>;
     case "set_secondary_display_blackout":
-      return Promise.resolve({ count: 0 } as T);
+      return unsupportedWebCommand(command) as Promise<T>;
     case "set_fullscreen":
-      return Promise.resolve(false as T);
+      return unsupportedWebCommand(command) as Promise<T>;
     default:
       return Promise.reject(new Error(`Web preview does not implement command: ${command}`));
   }
