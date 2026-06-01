@@ -1938,9 +1938,9 @@ function invokeWebFallback<T>(
     case "list_subtitles":
       return Promise.resolve(null as T);
     case "search_online_subtitles":
-      return Promise.resolve({ provider: "assrt", results: [] } as T);
+      return Promise.reject(new Error("Web Preview 不支持在线字幕搜索，请使用桌面版"));
     case "resolve_online_subtitle":
-      return Promise.reject(new Error("Web preview does not support online subtitle loading"));
+      return Promise.reject(new Error("Web Preview 不支持在线字幕加载，请使用桌面版"));
     case "play_file":
       return Promise.reject(
         new Error("Web Preview 不支持直接播放本地文件，请使用桌面版"),
