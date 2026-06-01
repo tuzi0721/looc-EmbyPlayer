@@ -166,6 +166,14 @@ export interface MediaItem {
   SeriesName?: string | null;
   SeriesId?: string | null;
   SeasonId?: string | null;
+  SeriesPrimaryImageTag?: string | null;
+  SeriesThumbImageTag?: string | null;
+  ParentBackdropItemId?: string | null;
+  ParentBackdropImageTags?: string[] | null;
+  ParentThumbItemId?: string | null;
+  ParentThumbImageTag?: string | null;
+  ParentPrimaryImageItemId?: string | null;
+  ParentPrimaryImageTag?: string | null;
   IndexNumber?: number | null;
   ParentIndexNumber?: number | null;
   ImageTags?: Record<string, string> | null;

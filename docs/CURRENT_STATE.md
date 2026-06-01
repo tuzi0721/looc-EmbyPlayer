@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（首页 compact 布局）
+> 更新时间：2026-06-02（收藏历史卡片父级图片回退）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-0444-home-compact-layout.md`](./CHANGE_LOG/2026-06-02-0444-home-compact-layout.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-0456-personal-card-parent-images.md`](./CHANGE_LOG/2026-06-02-0456-personal-card-parent-images.md)
 
 ---
 
@@ -53,6 +53,7 @@
 - 首页 compact 窗口下的 cinema 巨幕按 `100dvh` 收敛高度，低高度桌面窗口会收紧标题、简介和内容间距；Electron smoke 已覆盖 960×600 时巨幕仍在首屏内、下一段内容露出且无横向溢出。
 - 收藏、历史、聚合视界和搜索已支持跨已登录账号聚合；条目保留来源服务器/账号，同名或同 ID 的不同服务器记录不会互相覆盖，点进条目会切到对应账号再进入详情/播放链路。
 - 收藏、历史和聚合视界中的个人媒体卡统一为横向比例；卡片取图会从自身 Backdrop 回退到系列图或 Primary，Electron smoke 已覆盖缺 Backdrop 时仍能成功解码。
+- 个人媒体卡片取图已支持 Emby/Jellyfin 父级/系列图片字段和 `Thumb` 类型；单集自身没有 Primary/Backdrop 时，会从 `ParentThumbItemId` / `ParentThumbImageTag` 等父级信息继续回退。
 - 亮色主题在 Windows WebView2 无模糊降级下仍使用浅色侧栏/顶栏/薄玻璃层；通知抽屉也有亮色可读背景、悬停态和列表项。
 - 通知清空由后端持久化记录清除时间与来源键；同一下载/来源通知在清空、重启 store 或旧状态导入后不会再次冒出，新来源通知仍可正常进入。
 - 详情页展示媒体信息、版本能力、剧集、演职人员、相似内容、附加内容、类型/人员/工作室跳转和桌面下载入口。
@@ -134,9 +135,10 @@ node scripts\check-notification-clear.mjs
 - `npm.cmd run build:electron-helper`
 - `node scripts\smoke-electron-embedded-local.mjs`
 - `node --check electron\main.mjs`
+- `node --check electron\backend\emby.mjs`
 - `node --check scripts\smoke-electron-home-hero.mjs`
 - `node scripts\smoke-electron-home-hero.mjs`
-- 当前工作区无意外未跟踪文件；Electron 命令覆盖为 104/104，显式 no-op 命令为 0。首页 smoke 已覆盖双服务器同名同 ID 收藏/历史/聚合/搜索记录不会被合并、收藏/历史/聚合卡片缺 Backdrop 时的图片回退解码、巨幕无右侧海报且点击进入详情、侧边栏汉堡按钮折叠/展开，以及 960×600 compact 窗口下巨幕首屏自适应。
+- 当前工作区无意外未跟踪文件；Electron 命令覆盖为 104/104，显式 no-op 命令为 0。首页 smoke 已覆盖双服务器同名同 ID 收藏/历史/聚合/搜索记录不会被合并、收藏/历史/聚合卡片缺 Backdrop 时的图片回退解码、单集只有父级 Thumb 时仍能加载图片、巨幕无右侧海报且点击进入详情、侧边栏汉堡按钮折叠/展开，以及 960×600 compact 窗口下巨幕首屏自适应。
 
 ---
 

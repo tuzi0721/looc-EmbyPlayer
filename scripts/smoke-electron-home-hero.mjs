@@ -89,6 +89,11 @@ const resumeItem = {
   Name: "Resume Smoke",
   Type: "Episode",
   SeriesName: "Smoke Series",
+  SeriesId: "smoke-series",
+  ImageTags: {},
+  BackdropImageTags: [],
+  ParentThumbItemId: "smoke-series",
+  ParentThumbImageTag: "series-thumb-tag",
   IndexNumber: 2,
 };
 
@@ -154,16 +159,38 @@ function createFakeEmbyServer({
       return;
     }
 
-    const imageMatch = pathname.match(/^\/Items\/([^/]+)\/Images\/(Primary|Backdrop)$/);
+    const imageMatch = pathname.match(/^\/Items\/([^/]+)\/Images\/(Primary|Backdrop|Thumb)$/);
     if (req.method === "GET" && imageMatch) {
       const [, itemId, imageType] = imageMatch;
       const mediaItem = [item, ...resumeItems].find((candidate) => candidate.Id === itemId);
+      const parentItem = resumeItems.find(
+        (candidate) =>
+          candidate.SeriesId === itemId ||
+          candidate.ParentBackdropItemId === itemId ||
+          candidate.ParentThumbItemId === itemId,
+      );
+      if (imageType === "Backdrop" && parentItem?.ParentBackdropImageTags?.length) {
+        image(res);
+        return;
+      }
+      if (imageType === "Thumb" && parentItem?.ParentThumbImageTag) {
+        image(res);
+        return;
+      }
+      if (imageType === "Primary" && parentItem?.SeriesPrimaryImageTag) {
+        image(res);
+        return;
+      }
       if (imageType === "Backdrop" && !mediaItem?.BackdropImageTags?.length) {
         json(res, { error: "backdrop not found", path: pathname }, 404);
         return;
       }
       if (imageType === "Primary" && !mediaItem?.ImageTags?.Primary) {
         json(res, { error: "primary not found", path: pathname }, 404);
+        return;
+      }
+      if (imageType === "Thumb" && !mediaItem?.ImageTags?.Thumb) {
+        json(res, { error: "thumb not found", path: pathname }, 404);
         return;
       }
       image(res);

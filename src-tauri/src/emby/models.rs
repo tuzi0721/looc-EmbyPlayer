@@ -262,6 +262,22 @@ pub struct MediaItem {
     pub series_id: Option<String>,
     #[serde(default, deserialize_with = "optional_string")]
     pub season_id: Option<String>,
+    #[serde(default, deserialize_with = "optional_string")]
+    pub series_primary_image_tag: Option<String>,
+    #[serde(default, deserialize_with = "optional_string")]
+    pub series_thumb_image_tag: Option<String>,
+    #[serde(default, deserialize_with = "optional_string")]
+    pub parent_backdrop_item_id: Option<String>,
+    #[serde(default, deserialize_with = "optional_string_vec")]
+    pub parent_backdrop_image_tags: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "optional_string")]
+    pub parent_thumb_item_id: Option<String>,
+    #[serde(default, deserialize_with = "optional_string")]
+    pub parent_thumb_image_tag: Option<String>,
+    #[serde(default, deserialize_with = "optional_string")]
+    pub parent_primary_image_item_id: Option<String>,
+    #[serde(default, deserialize_with = "optional_string")]
+    pub parent_primary_image_tag: Option<String>,
     #[serde(default, deserialize_with = "optional_i32")]
     pub index_number: Option<i32>,
     #[serde(default, deserialize_with = "optional_i32")]

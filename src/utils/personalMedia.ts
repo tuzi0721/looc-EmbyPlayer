@@ -11,12 +11,12 @@ export interface PersonalHistoryResponse extends ItemsResponse {
 }
 
 const PERSONAL_FIELDS =
-  "PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks";
+  "PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks,ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag";
 const PERSONAL_IMAGE_PARAMS: [string, string][] = [
   ["EnableUserData", "true"],
   ["EnableImages", "true"],
-  ["ImageTypeLimit", "2"],
-  ["EnableImageTypes", "Primary,Backdrop"],
+  ["ImageTypeLimit", "3"],
+  ["EnableImageTypes", "Primary,Backdrop,Thumb"],
 ];
 
 function hasType(item: MediaItem, includeTypes: PersonalMediaTypes) {

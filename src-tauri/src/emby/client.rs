@@ -19,8 +19,13 @@ use crate::network::racer::race_first_success;
 const DEVICE_ID: &str = "emby-player-desktop-001";
 const CLIENT_NAME: &str = "EmbyPlayer";
 const CLIENT_VERSION: &str = "0.1.0";
-const PERSONAL_ITEM_FIELDS: &str =
-    "PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks";
+const IMAGE_FALLBACK_FIELDS: &str =
+    "ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag";
+const PERSONAL_ITEM_FIELDS: &str = concat!(
+    "PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks,",
+    "ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,",
+    "ParentPrimaryImageItemId,ParentPrimaryImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag",
+);
 
 #[derive(Clone)]
 pub struct EmbyClient {
@@ -184,7 +189,9 @@ impl EmbyClient {
         let mut url = url;
         url.query_pairs_mut().append_pair(
             "Fields",
-            "Overview,Genres,GenreItems,Studios,People,CommunityRating,OfficialRating,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo,ProductionYear,MediaSources",
+            &format!(
+                "Overview,Genres,GenreItems,Studios,People,CommunityRating,OfficialRating,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo,ProductionYear,MediaSources,{IMAGE_FALLBACK_FIELDS}"
+            ),
         );
         let resp = self
             .authed_request(Method::GET, url, server, account, &line)?
@@ -251,7 +258,7 @@ impl EmbyClient {
                 ("Recursive".into(), "true".into()),
                 (
                     "Fields".into(),
-                    "PrimaryImageAspectRatio,Overview,ProductionYear,UserData".into(),
+                    format!("PrimaryImageAspectRatio,Overview,ProductionYear,UserData,{IMAGE_FALLBACK_FIELDS}"),
                 ),
                 ("Limit".into(), "50".into()),
             ],
@@ -294,7 +301,7 @@ impl EmbyClient {
             }
             q.append_pair(
                 "Fields",
-                "Overview,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo",
+                &format!("Overview,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo,{IMAGE_FALLBACK_FIELDS}"),
             );
         }
         let resp = self
@@ -320,7 +327,7 @@ impl EmbyClient {
             q.append_pair("Limit", &limit.unwrap_or(18).max(1).to_string());
             q.append_pair(
                 "Fields",
-                "PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo",
+                &format!("PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo,{IMAGE_FALLBACK_FIELDS}"),
             );
         }
         let resp = self
@@ -349,7 +356,7 @@ impl EmbyClient {
             q.append_pair("Limit", &max.to_string());
             q.append_pair(
                 "Fields",
-                "PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo,RunTimeTicks",
+                &format!("PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo,RunTimeTicks,{IMAGE_FALLBACK_FIELDS}"),
             );
         }
         let resp = self
@@ -375,8 +382,8 @@ impl EmbyClient {
             q.append_pair("Fields", PERSONAL_ITEM_FIELDS);
             q.append_pair("EnableUserData", "true");
             q.append_pair("EnableImages", "true");
-            q.append_pair("ImageTypeLimit", "1");
-            q.append_pair("EnableImageTypes", "Primary,Backdrop");
+            q.append_pair("ImageTypeLimit", "3");
+            q.append_pair("EnableImageTypes", "Primary,Backdrop,Thumb");
             q.append_pair("Limit", "120");
         }
         let resp = self

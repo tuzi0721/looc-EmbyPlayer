@@ -141,6 +141,14 @@ export function normalizeItem(value) {
     SeriesName: stringFrom(item.SeriesName),
     SeriesId: stringFrom(item.SeriesId),
     SeasonId: stringFrom(item.SeasonId),
+    SeriesPrimaryImageTag: stringFrom(item.SeriesPrimaryImageTag),
+    SeriesThumbImageTag: stringFrom(item.SeriesThumbImageTag),
+    ParentBackdropItemId: stringFrom(item.ParentBackdropItemId),
+    ParentBackdropImageTags: stringArrayFrom(item.ParentBackdropImageTags),
+    ParentThumbItemId: stringFrom(item.ParentThumbItemId),
+    ParentThumbImageTag: stringFrom(item.ParentThumbImageTag),
+    ParentPrimaryImageItemId: stringFrom(item.ParentPrimaryImageItemId),
+    ParentPrimaryImageTag: stringFrom(item.ParentPrimaryImageTag),
     IndexNumber: numberFrom(item.IndexNumber),
     ParentIndexNumber: numberFrom(item.ParentIndexNumber),
     ImageTags: item.ImageTags && typeof item.ImageTags === "object" ? item.ImageTags : null,
@@ -362,8 +370,10 @@ const DIRECT_VIDEO_CONTAINERS = [
   "rmvb",
 ];
 const DIRECT_AUDIO_CONTAINERS = ["mp3", "aac", "flac", "ogg", "opus", "wav", "m4a", "ape", "alac"];
+const IMAGE_FALLBACK_FIELDS =
+  "ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag";
 const PERSONAL_ITEM_FIELDS =
-  "PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks";
+  `PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks,${IMAGE_FALLBACK_FIELDS}`;
 
 function directPlaybackOptions() {
   return {
@@ -667,7 +677,7 @@ export class EmbyClient {
     const value = await this.authedJson("GET", `Users/${account.userId}/Items/${itemId}`, server, account, {
       query: {
         Fields:
-          "Overview,Genres,GenreItems,Studios,People,ProviderIds,CommunityRating,OfficialRating,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo,ProductionYear,MediaSources",
+          `Overview,Genres,GenreItems,Studios,People,ProviderIds,CommunityRating,OfficialRating,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo,ProductionYear,MediaSources,${IMAGE_FALLBACK_FIELDS}`,
       },
       context: "get_item",
     });
@@ -678,7 +688,7 @@ export class EmbyClient {
     return this.listItems(server, account, null, [
       ["SearchTerm", term],
       ["Recursive", "true"],
-      ["Fields", "PrimaryImageAspectRatio,Overview,ProductionYear,UserData"],
+      ["Fields", `PrimaryImageAspectRatio,Overview,ProductionYear,UserData,${IMAGE_FALLBACK_FIELDS}`],
       ["Limit", "50"],
     ]);
   }
@@ -691,8 +701,8 @@ export class EmbyClient {
         Fields: PERSONAL_ITEM_FIELDS,
         EnableUserData: "true",
         EnableImages: "true",
-        ImageTypeLimit: "1",
-        EnableImageTypes: "Primary,Backdrop",
+        ImageTypeLimit: "3",
+        EnableImageTypes: "Primary,Backdrop,Thumb",
         Limit: "120",
       },
       context: "resume_items",
@@ -713,7 +723,7 @@ export class EmbyClient {
       query: {
         UserId: account.userId,
         SeasonId: seasonId,
-        Fields: "Overview,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo",
+        Fields: `Overview,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo,${IMAGE_FALLBACK_FIELDS}`,
       },
       context: "list_episodes",
     });
@@ -725,7 +735,7 @@ export class EmbyClient {
       query: {
         UserId: account.userId,
         Limit: numberFrom(limit) ?? 18,
-        Fields: "PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo",
+        Fields: `PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo,${IMAGE_FALLBACK_FIELDS}`,
       },
       context: "similar_items",
     });
@@ -742,7 +752,7 @@ export class EmbyClient {
       {
         query: {
           Limit: max,
-          Fields: "PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo,RunTimeTicks",
+          Fields: `PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo,RunTimeTicks,${IMAGE_FALLBACK_FIELDS}`,
         },
         context: "special_features",
       },

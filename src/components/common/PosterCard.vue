@@ -6,7 +6,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useServerStore } from "@/stores/server";
 import { useLazyVisible } from "@/composables/useLazyVisible";
 import type { MediaItem } from "@/types/models";
-import { mediaImageUrl } from "@/utils/mediaImages";
+import { mediaImageUrl, type MediaImageType } from "@/utils/mediaImages";
 import { mediaItemSourceLabel } from "@/utils/sourceContext";
 
 type PosterAspect = "portrait" | "backdrop" | "square";
@@ -48,7 +48,7 @@ const activeServer = computed(() => {
 
 interface ImageCandidate {
   itemId: string;
-  imageType: "Primary" | "Backdrop";
+  imageType: MediaImageType;
   tag?: string | null;
 }
 
@@ -58,7 +58,7 @@ const imageCandidates = computed<ImageCandidate[]>(() => {
   const candidates: ImageCandidate[] = [];
   const seen = new Set<string>();
 
-  function add(itemId: string | null | undefined, imageType: "Primary" | "Backdrop", tag?: string | null, allowUntagged = false) {
+  function add(itemId: string | null | undefined, imageType: MediaImageType, tag?: string | null, allowUntagged = false) {
     if (!itemId || (!tag && !allowUntagged)) return;
     const key = `${itemId}:${imageType}`;
     if (seen.has(key)) return;
@@ -66,16 +66,25 @@ const imageCandidates = computed<ImageCandidate[]>(() => {
     candidates.push({ itemId, imageType, tag });
   }
 
+  const parentBackdropId = item.ParentBackdropItemId ?? item.SeriesId;
+  const parentBackdropTag = item.ParentBackdropImageTags?.[0] ?? item.BackdropImageTags?.[0];
+  const parentThumbId = item.ParentThumbItemId ?? item.SeriesId;
+  const parentThumbTag = item.ParentThumbImageTag ?? item.SeriesThumbImageTag ?? item.ImageTags?.Thumb;
+  const parentPrimaryId = item.ParentPrimaryImageItemId ?? item.SeriesId;
+  const parentPrimaryTag = item.ParentPrimaryImageTag ?? item.SeriesPrimaryImageTag;
+
   if (useBackdrop) {
     add(item.Id, "Backdrop", item.BackdropImageTags?.[0]);
-    if (item.Type === "Episode") add(item.SeriesId, "Backdrop", null, true);
+    add(parentBackdropId, "Backdrop", parentBackdropTag, item.Type === "Episode");
+    add(parentThumbId, "Thumb", parentThumbTag, item.Type === "Episode");
     add(item.Id, "Primary", item.ImageTags?.Primary, true);
-    if (item.Type === "Episode") add(item.SeriesId, "Primary", null, true);
+    add(parentPrimaryId, "Primary", parentPrimaryTag, item.Type === "Episode");
   } else {
     add(item.Id, "Primary", item.ImageTags?.Primary, true);
-    if (item.Type === "Episode") add(item.SeriesId, "Primary", null, true);
-    if (item.Type === "Episode") add(item.SeriesId, "Backdrop", null, true);
+    add(parentPrimaryId, "Primary", parentPrimaryTag, item.Type === "Episode");
+    add(parentThumbId, "Thumb", parentThumbTag, item.Type === "Episode");
     add(item.Id, "Backdrop", item.BackdropImageTags?.[0]);
+    add(parentBackdropId, "Backdrop", parentBackdropTag, item.Type === "Episode");
   }
 
   return candidates;

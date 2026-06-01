@@ -596,8 +596,10 @@ const DIRECT_VIDEO_CONTAINERS = [
   "rmvb",
 ];
 const DIRECT_AUDIO_CONTAINERS = ["mp3", "aac", "flac", "ogg", "opus", "wav", "m4a", "ape", "alac"];
+const IMAGE_FALLBACK_FIELDS =
+  "ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag";
 const PERSONAL_ITEM_FIELDS =
-  "PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks";
+  `PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks,${IMAGE_FALLBACK_FIELDS}`;
 
 function directPlaybackOptions() {
   return {
@@ -1422,6 +1424,14 @@ function normalizeMediaItem(value: any): MediaItem {
     SeriesName: stringFrom(value?.SeriesName),
     SeriesId: stringFrom(value?.SeriesId),
     SeasonId: stringFrom(value?.SeasonId),
+    SeriesPrimaryImageTag: stringFrom(value?.SeriesPrimaryImageTag),
+    SeriesThumbImageTag: stringFrom(value?.SeriesThumbImageTag),
+    ParentBackdropItemId: stringFrom(value?.ParentBackdropItemId),
+    ParentBackdropImageTags: Array.isArray(value?.ParentBackdropImageTags) ? value.ParentBackdropImageTags : null,
+    ParentThumbItemId: stringFrom(value?.ParentThumbItemId),
+    ParentThumbImageTag: stringFrom(value?.ParentThumbImageTag),
+    ParentPrimaryImageItemId: stringFrom(value?.ParentPrimaryImageItemId),
+    ParentPrimaryImageTag: stringFrom(value?.ParentPrimaryImageTag),
     IndexNumber: numberFrom(value?.IndexNumber),
     ParentIndexNumber: numberFrom(value?.ParentIndexNumber),
     ImageTags: value?.ImageTags && typeof value.ImageTags === "object" ? value.ImageTags : null,
@@ -1843,8 +1853,8 @@ function invokeWebFallback<T>(
         Fields: PERSONAL_ITEM_FIELDS,
         EnableUserData: "true",
         EnableImages: "true",
-        ImageTypeLimit: "1",
-        EnableImageTypes: "Primary,Backdrop",
+        ImageTypeLimit: "3",
+        EnableImageTypes: "Primary,Backdrop,Thumb",
         Limit: "120",
       })
         .then(normalizeItemsResponse) as Promise<T>;
@@ -1855,8 +1865,8 @@ function invokeWebFallback<T>(
         Fields: PERSONAL_ITEM_FIELDS,
         EnableUserData: "true",
         EnableImages: "true",
-        ImageTypeLimit: "1",
-        EnableImageTypes: "Primary,Backdrop",
+        ImageTypeLimit: "3",
+        EnableImageTypes: "Primary,Backdrop,Thumb",
         Limit: "120",
       })
         .then(annotateWebItemsResponse) as Promise<T>;
@@ -1878,21 +1888,21 @@ function invokeWebFallback<T>(
       const pair = webActivePair();
       return webAuthedJson("GET", `Users/${pair.account.userId}/Items/${args?.itemId}`, {
         Fields:
-          "Overview,Genres,GenreItems,Studios,People,ProviderIds,CommunityRating,OfficialRating,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo,ProductionYear,MediaSources",
+          `Overview,Genres,GenreItems,Studios,People,ProviderIds,CommunityRating,OfficialRating,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo,ProductionYear,MediaSources,${IMAGE_FALLBACK_FIELDS}`,
       }).then(normalizeMediaItem) as Promise<T>;
     }
     case "search":
       return webAuthedJson("GET", `Users/${webActivePair().account.userId}/Items`, {
         SearchTerm: args?.term ?? "",
         Recursive: "true",
-        Fields: "PrimaryImageAspectRatio,Overview,ProductionYear,UserData",
+        Fields: `PrimaryImageAspectRatio,Overview,ProductionYear,UserData,${IMAGE_FALLBACK_FIELDS}`,
         Limit: "50",
       }).then(normalizeItemsResponse) as Promise<T>;
     case "search_all_accounts":
       return webAuthedJson("GET", `Users/${webActivePair().account.userId}/Items`, {
         SearchTerm: args?.term ?? "",
         Recursive: "true",
-        Fields: "PrimaryImageAspectRatio,Overview,ProductionYear,UserData",
+        Fields: `PrimaryImageAspectRatio,Overview,ProductionYear,UserData,${IMAGE_FALLBACK_FIELDS}`,
         Limit: "50",
       }).then(annotateWebItemsResponse) as Promise<T>;
     case "list_seasons":
@@ -1904,19 +1914,19 @@ function invokeWebFallback<T>(
       return webAuthedJson("GET", `Shows/${payload?.seriesId}/Episodes`, {
         UserId: webActivePair().account.userId,
         SeasonId: payload?.seasonId ?? null,
-        Fields: "Overview,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo",
+        Fields: `Overview,PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesInfo,${IMAGE_FALLBACK_FIELDS}`,
       }).then(normalizeItemsResponse) as Promise<T>;
     }
     case "similar_items":
       return webAuthedJson("GET", `Items/${args?.itemId}/Similar`, {
         UserId: webActivePair().account.userId,
         Limit: args?.limit ?? 18,
-        Fields: "PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo",
+        Fields: `PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo,${IMAGE_FALLBACK_FIELDS}`,
       }).then(normalizeItemsResponse) as Promise<T>;
     case "special_features":
       return webAuthedJson("GET", `Users/${webActivePair().account.userId}/Items/${args?.itemId}/SpecialFeatures`, {
         Limit: args?.limit ?? 18,
-        Fields: "PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo,RunTimeTicks",
+        Fields: `PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo,RunTimeTicks,${IMAGE_FALLBACK_FIELDS}`,
       }).then(normalizeItemsResponse) as Promise<T>;
     case "get_playback_source": {
       const payload = args?.payload as any;
