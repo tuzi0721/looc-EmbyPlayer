@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { Icon } from "@iconify/vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
 import GlassInput from "@/components/common/GlassInput.vue";
 import LineStatusDot from "@/components/common/LineStatusDot.vue";
@@ -11,6 +11,7 @@ import { api } from "@/api";
 import { openFileDialog, platformType } from "@/platform";
 import { useAuthStore } from "@/stores/auth";
 import { useLibraryStore } from "@/stores/library";
+import { useLocalFilesStore } from "@/stores/localFiles";
 import { useSettingsStore } from "@/stores/settings";
 import { useServerStore } from "@/stores/server";
 import type { Line, Server } from "@/types/models";
@@ -38,7 +39,9 @@ const auth = useAuthStore();
 const lib = useLibraryStore();
 const settings = useSettingsStore();
 const serverStore = useServerStore();
+const localFiles = useLocalFilesStore();
 const route = useRoute();
+const router = useRouter();
 
 const probing = ref<string | null>(null);
 const showAdd = ref(false);
@@ -317,6 +320,70 @@ async function openDownloadDirectory() {
   } finally {
     downloadDirectoryBusy.value = false;
   }
+}
+
+function openLocalPath(filePath: string) {
+  localFiles.remember(filePath);
+  router
+    .push({ name: "player", params: { id: "local-file" }, query: { file: filePath } })
+    .catch(() => {});
+}
+
+async function openLocalFile() {
+  if (!canOpenFileDialogs.value) return;
+  const selected = await openFileDialog({
+    multiple: false,
+    directory: false,
+    title: "打开本地视频",
+    filters: [
+      {
+        name: "Video",
+        extensions: [
+          "mp4",
+          "mkv",
+          "mov",
+          "avi",
+          "wmv",
+          "flv",
+          "webm",
+          "m4v",
+          "ts",
+          "m2ts",
+        ],
+      },
+      { name: "All", extensions: ["*"] },
+    ],
+  }).catch(() => null);
+  if (typeof selected !== "string" || selected.length === 0) return;
+  openLocalPath(selected);
+}
+
+async function openLocalFolder() {
+  if (!canOpenFileDialogs.value) {
+    router.push({ name: "local-folder" }).catch(() => {});
+    return;
+  }
+
+  const selected = await openFileDialog({
+    multiple: false,
+    directory: true,
+    title: "打开本地文件夹",
+  }).catch(() => null);
+
+  if (typeof selected === "string" && selected.length > 0) {
+    localFiles.rememberFolder(selected);
+    router.push({ name: "local-folder", query: { folder: selected } }).catch(() => {});
+  } else {
+    router.push({ name: "local-folder" }).catch(() => {});
+  }
+}
+
+function openWebDav() {
+  router.push({ name: "webdav" }).catch(() => {});
+}
+
+function openAlist() {
+  router.push({ name: "alist" }).catch(() => {});
 }
 
 async function openWindowsHdrSettings() {
@@ -623,7 +690,7 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
   {
     key: "local-file",
     label: "本地单文件",
-    detail: "侧边栏可选择单个视频并交给内嵌 mpv 播放",
+    detail: "设置页可选择单个视频并交给内嵌 mpv 播放",
     icon: "lucide:file-video",
     status: "available",
   },
@@ -784,6 +851,7 @@ const downloadDirectorySummary = computed(() => {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 });
 
+const canOpenFileDialogs = computed(() => isElectronRuntime || isTauriRuntime);
 const canPickDownloadDirectory = computed(() => isElectronRuntime || isTauriRuntime);
 
 const danmakuSummary = computed(() => {
@@ -1067,6 +1135,28 @@ const danmakuSummary = computed(() => {
         <span class="value">{{ fileServicesSummary }}</span>
       </button>
       <div v-if="openPanel === 'fileServices'" class="panel glass">
+        <div class="panel__actions">
+          <button
+            class="action-btn"
+            :disabled="!canOpenFileDialogs"
+            @click="openLocalFile"
+          >
+            <Icon icon="lucide:file-video" width="15" />
+            <span>打开本地文件</span>
+          </button>
+          <button class="action-btn" @click="openLocalFolder">
+            <Icon icon="lucide:folder-open" width="15" />
+            <span>本地文件夹</span>
+          </button>
+          <button class="action-btn" @click="openWebDav">
+            <Icon icon="lucide:cloud" width="15" />
+            <span>WebDAV</span>
+          </button>
+          <button class="action-btn" @click="openAlist">
+            <Icon icon="lucide:list-tree" width="15" />
+            <span>Alist / OpenList</span>
+          </button>
+        </div>
         <ul class="cap-list">
           <li v-for="cap in fileServiceCapabilities" :key="cap.key" class="cap-row">
             <div class="cap-row__icon">

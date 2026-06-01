@@ -5,16 +5,10 @@ import { Icon } from "@iconify/vue";
 
 import { useAuthStore } from "@/stores/auth";
 import { useDownloadsStore } from "@/stores/downloads";
-import { useLocalFilesStore } from "@/stores/localFiles";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useServerStore } from "@/stores/server";
 import { useSettingsStore } from "@/stores/settings";
-import { useAlistStore } from "@/stores/alist";
-import { useWebDavStore } from "@/stores/webdav";
-import { openFileDialog } from "@/platform";
 import LineStatusDot from "@/components/common/LineStatusDot.vue";
-import AddServerDialog from "@/components/login/AddServerDialog.vue";
-import { connectorPathLabel, connectorTitle, hasConnectorPath } from "@/utils/fileConnectorPaths";
 import { serverActiveLine, serverKindIcon, serverKindLabel } from "@/utils/serverVisuals";
 
 const router = useRouter();
@@ -23,12 +17,8 @@ const auth = useAuthStore();
 const serverStore = useServerStore();
 const settings = useSettingsStore();
 const downloads = useDownloadsStore();
-const localFiles = useLocalFilesStore();
 const notifications = useNotificationsStore();
-const webdav = useWebDavStore();
-const alist = useAlistStore();
 
-const showAdd = ref(false);
 const showVisibility = ref(false);
 
 const hiddenIds = computed(() => settings.settings.hiddenServerIds ?? []);
@@ -46,42 +36,6 @@ const activeDownloadsLabel = computed(() =>
 );
 const unreadNotificationsLabel = computed(() =>
   notifications.unread > 99 ? "99+" : String(notifications.unread),
-);
-const favoriteLocalFiles = computed(() => localFiles.favoriteItems.slice(0, 3));
-const favoriteLocalFileKeys = computed(
-  () => new Set(localFiles.favoriteItems.map((entry) => entry.filePath.toLowerCase())),
-);
-const recentLocalFiles = computed(() =>
-  localFiles.items
-    .filter((entry) => !favoriteLocalFileKeys.value.has(entry.filePath.toLowerCase()))
-    .slice(0, 3),
-);
-const favoriteLocalFolders = computed(() => localFiles.favoriteFolderItems.slice(0, 2));
-const favoriteLocalFolderKeys = computed(
-  () => new Set(localFiles.favoriteFolderItems.map((entry) => entry.folderPath.toLowerCase())),
-);
-const recentLocalFolders = computed(() =>
-  localFiles.folderItems
-    .filter((entry) => !favoriteLocalFolderKeys.value.has(entry.folderPath.toLowerCase()))
-    .slice(0, 2),
-);
-const favoriteWebDavConnections = computed(() => webdav.favoriteConnections.slice(0, 2));
-const favoriteWebDavConnectionIds = computed(
-  () => new Set(webdav.favoriteConnections.map((entry) => entry.id)),
-);
-const recentWebDavConnections = computed(() =>
-  webdav.recentConnections
-    .filter((entry) => !favoriteWebDavConnectionIds.value.has(entry.id))
-    .slice(0, 2),
-);
-const favoriteAlistConnections = computed(() => alist.favoriteConnections.slice(0, 2));
-const favoriteAlistConnectionIds = computed(
-  () => new Set(alist.favoriteConnections.map((entry) => entry.id)),
-);
-const recentAlistConnections = computed(() =>
-  alist.recentConnections
-    .filter((entry) => !favoriteAlistConnectionIds.value.has(entry.id))
-    .slice(0, 2),
 );
 
 function loggedInOn(serverId: string): boolean {
@@ -133,91 +87,6 @@ function gotoDownloads() {
 }
 function gotoRemote() {
   router.push("/remote").catch(() => {});
-}
-function gotoWebDav() {
-  router.push("/webdav").catch(() => {});
-}
-function openWebDavConnection(id: string) {
-  const connection = webdav.connections.find((entry) => entry.id === id);
-  router
-    .push({
-      name: "webdav",
-      query: { connection: id, path: connection?.lastPath ?? "" },
-    })
-    .catch(() => {});
-}
-function gotoAlist() {
-  router.push("/alist").catch(() => {});
-}
-function openAlistConnection(id: string) {
-  const connection = alist.connections.find((entry) => entry.id === id);
-  router
-    .push({
-      name: "alist",
-      query: { connection: id, path: connection?.lastPath ?? "" },
-    })
-    .catch(() => {});
-}
-function gotoLocalFolder(folderPath?: string) {
-  router
-    .push({
-      name: "local-folder",
-      query: folderPath ? { folder: folderPath } : {},
-    })
-    .catch(() => {});
-}
-
-function openLocalFolderPath(folderPath: string) {
-  localFiles.rememberFolder(folderPath);
-  gotoLocalFolder(folderPath);
-}
-
-function openLocalPath(filePath: string) {
-  localFiles.remember(filePath);
-  router
-    .push({ name: "player", params: { id: "local-file" }, query: { file: filePath } })
-    .catch(() => {});
-}
-
-async function openLocalFile() {
-  const selected = await openFileDialog({
-    multiple: false,
-    directory: false,
-    title: "打开本地视频",
-    filters: [
-      {
-        name: "Video",
-        extensions: [
-          "mp4",
-          "mkv",
-          "mov",
-          "avi",
-          "wmv",
-          "flv",
-          "webm",
-          "m4v",
-          "ts",
-          "m2ts",
-        ],
-      },
-      { name: "All", extensions: ["*"] },
-    ],
-  }).catch(() => null);
-  if (typeof selected !== "string" || selected.length === 0) return;
-  openLocalPath(selected);
-}
-
-async function openLocalFolder() {
-  const selected = await openFileDialog({
-    multiple: false,
-    directory: true,
-    title: "打开本地文件夹",
-  }).catch(() => null);
-  if (typeof selected === "string" && selected.length > 0) {
-    openLocalFolderPath(selected);
-  } else {
-    gotoLocalFolder();
-  }
 }
 </script>
 
@@ -371,210 +240,6 @@ async function openLocalFolder() {
     <div class="sb__flex" />
 
     <section class="sb__bottom">
-      <button class="nav-btn about-btn" type="button" @click="gotoSettings('about')">
-        <Icon icon="lucide:info" width="16" />
-        <span>关于 Hills Lite</span>
-      </button>
-
-      <button class="add-srv" @click="showAdd = true">
-        <Icon icon="lucide:plus" width="14" />
-        <span>添加服务器</span>
-      </button>
-
-      <button class="add-srv" @click="openLocalFile">
-        <Icon icon="lucide:file-video" width="14" />
-        <span>打开本地文件</span>
-      </button>
-
-      <div v-if="favoriteLocalFiles.length > 0" class="local-recent">
-        <div class="local-recent__head">
-          <span>收藏本地文件</span>
-          <button class="iconbtn" aria-label="清空收藏本地文件" @click="localFiles.clearFavoriteFiles()">
-            <Icon icon="lucide:x" width="13" />
-          </button>
-        </div>
-        <button
-          v-for="entry in favoriteLocalFiles"
-          :key="entry.filePath"
-          class="local-recent__item"
-          :title="entry.filePath"
-          @click="openLocalPath(entry.filePath)"
-        >
-          <Icon icon="lucide:star" width="14" />
-          <span>{{ entry.name }}</span>
-        </button>
-      </div>
-
-      <button
-        class="add-srv"
-        :class="{ active: route.name === 'local-folder' }"
-        @click="openLocalFolder"
-      >
-        <Icon icon="lucide:folder-open" width="14" />
-        <span>打开本地文件夹</span>
-      </button>
-
-      <button
-        class="add-srv"
-        :class="{ active: route.name === 'webdav' }"
-        @click="gotoWebDav"
-      >
-        <Icon icon="lucide:cloud" width="14" />
-        <span>WebDAV</span>
-      </button>
-
-      <button
-        class="add-srv"
-        :class="{ active: route.name === 'alist' }"
-        @click="gotoAlist"
-      >
-        <Icon icon="lucide:list-tree" width="14" />
-        <span>Alist / OpenList</span>
-      </button>
-
-      <div v-if="favoriteAlistConnections.length > 0" class="local-recent">
-        <div class="local-recent__head">
-          <span>收藏 Alist</span>
-          <button class="iconbtn" aria-label="清空收藏 Alist" @click="alist.clearFavorites()">
-            <Icon icon="lucide:x" width="13" />
-          </button>
-        </div>
-        <button
-          v-for="entry in favoriteAlistConnections"
-          :key="entry.id"
-          class="local-recent__item"
-          :title="connectorTitle(entry.baseUrl, entry.lastPath)"
-          @click="openAlistConnection(entry.id)"
-        >
-          <Icon icon="lucide:star" width="14" />
-          <div class="local-recent__text">
-            <span>{{ entry.name }}</span>
-            <small v-if="hasConnectorPath(entry.lastPath)">{{ connectorPathLabel(entry.lastPath) }}</small>
-          </div>
-        </button>
-      </div>
-
-      <div v-if="recentAlistConnections.length > 0" class="local-recent">
-        <div class="local-recent__head">
-          <span>最近 Alist</span>
-        </div>
-        <button
-          v-for="entry in recentAlistConnections"
-          :key="entry.id"
-          class="local-recent__item"
-          :title="connectorTitle(entry.baseUrl, entry.lastPath)"
-          @click="openAlistConnection(entry.id)"
-        >
-          <Icon icon="lucide:list-tree" width="14" />
-          <div class="local-recent__text">
-            <span>{{ entry.name }}</span>
-            <small v-if="hasConnectorPath(entry.lastPath)">{{ connectorPathLabel(entry.lastPath) }}</small>
-          </div>
-        </button>
-      </div>
-
-      <div v-if="favoriteWebDavConnections.length > 0" class="local-recent">
-        <div class="local-recent__head">
-          <span>收藏 WebDAV</span>
-          <button class="iconbtn" aria-label="清空收藏 WebDAV" @click="webdav.clearFavorites()">
-            <Icon icon="lucide:x" width="13" />
-          </button>
-        </div>
-        <button
-          v-for="entry in favoriteWebDavConnections"
-          :key="entry.id"
-          class="local-recent__item"
-          :title="connectorTitle(entry.baseUrl, entry.lastPath)"
-          @click="openWebDavConnection(entry.id)"
-        >
-          <Icon icon="lucide:star" width="14" />
-          <div class="local-recent__text">
-            <span>{{ entry.name }}</span>
-            <small v-if="hasConnectorPath(entry.lastPath)">{{ connectorPathLabel(entry.lastPath) }}</small>
-          </div>
-        </button>
-      </div>
-
-      <div v-if="recentWebDavConnections.length > 0" class="local-recent">
-        <div class="local-recent__head">
-          <span>最近 WebDAV</span>
-        </div>
-        <button
-          v-for="entry in recentWebDavConnections"
-          :key="entry.id"
-          class="local-recent__item"
-          :title="connectorTitle(entry.baseUrl, entry.lastPath)"
-          @click="openWebDavConnection(entry.id)"
-        >
-          <Icon icon="lucide:cloud" width="14" />
-          <div class="local-recent__text">
-            <span>{{ entry.name }}</span>
-            <small v-if="hasConnectorPath(entry.lastPath)">{{ connectorPathLabel(entry.lastPath) }}</small>
-          </div>
-        </button>
-      </div>
-
-      <div v-if="favoriteLocalFolders.length > 0" class="local-recent">
-        <div class="local-recent__head">
-          <span>收藏本地文件夹</span>
-          <button
-            class="iconbtn"
-            aria-label="清空收藏本地文件夹"
-            @click="localFiles.clearFavoriteFolders()"
-          >
-            <Icon icon="lucide:x" width="13" />
-          </button>
-        </div>
-        <button
-          v-for="entry in favoriteLocalFolders"
-          :key="entry.folderPath"
-          class="local-recent__item"
-          :title="entry.folderPath"
-          @click="openLocalFolderPath(entry.folderPath)"
-        >
-          <Icon icon="lucide:star" width="14" />
-          <span>{{ entry.name }}</span>
-        </button>
-      </div>
-
-      <div v-if="recentLocalFolders.length > 0" class="local-recent">
-        <div class="local-recent__head">
-          <span>最近本地文件夹</span>
-          <button class="iconbtn" aria-label="清空最近本地文件夹" @click="localFiles.clearFolders()">
-            <Icon icon="lucide:x" width="13" />
-          </button>
-        </div>
-        <button
-          v-for="entry in recentLocalFolders"
-          :key="entry.folderPath"
-          class="local-recent__item"
-          :title="entry.folderPath"
-          @click="openLocalFolderPath(entry.folderPath)"
-        >
-          <Icon icon="lucide:folder" width="14" />
-          <span>{{ entry.name }}</span>
-        </button>
-      </div>
-
-      <div v-if="recentLocalFiles.length > 0" class="local-recent">
-        <div class="local-recent__head">
-          <span>最近本地文件</span>
-          <button class="iconbtn" aria-label="清空最近本地文件" @click="localFiles.clear()">
-            <Icon icon="lucide:x" width="13" />
-          </button>
-        </div>
-        <button
-          v-for="entry in recentLocalFiles"
-          :key="entry.filePath"
-          class="local-recent__item"
-          :title="entry.filePath"
-          @click="openLocalPath(entry.filePath)"
-        >
-          <Icon icon="lucide:file-video" width="14" />
-          <span>{{ entry.name }}</span>
-        </button>
-      </div>
-
       <button
         class="nav-btn settings-btn"
         :class="{ active: route.name === 'settings' }"
@@ -584,17 +249,6 @@ async function openLocalFolder() {
         <span>设置</span>
       </button>
     </section>
-
-    <AddServerDialog
-      v-if="showAdd"
-      @close="showAdd = false"
-      @created="
-        (id, loggedIn) => {
-          showAdd = false;
-          router.push(loggedIn ? { name: 'home' } : { name: 'login', query: { server: id } });
-        }
-      "
-    />
   </aside>
 </template>
 
@@ -914,139 +568,5 @@ async function openLocalFolder() {
   gap: 3px;
   padding-top: 6px;
   border-top: 1px solid var(--separator);
-}
-
-.add-srv {
-  appearance: none;
-  border: 1px dashed var(--glass-border-strong);
-  background: transparent;
-  color: var(--fg-secondary);
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 12px;
-  border-radius: 10px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
-  text-align: left;
-  margin-bottom: 4px;
-  transition:
-    background 160ms var(--easing-glide),
-    border-color 160ms var(--easing-glide),
-    color 160ms var(--easing-glide);
-}
-.add-srv:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: rgba(10, 132, 255, 0.06);
-}
-.add-srv.active {
-  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.local-recent {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 2px 0 5px;
-}
-.local-recent__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 4px 1px 6px;
-  color: var(--fg-tertiary);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.local-recent__item {
-  appearance: none;
-  border: none;
-  background: transparent;
-  color: var(--fg-secondary);
-  display: grid;
-  grid-template-columns: 16px 1fr;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 30px;
-  padding: 6px 8px;
-  border-radius: 8px;
-  cursor: pointer;
-  text-align: left;
-  font-size: 12px;
-  transition:
-    background 160ms var(--easing-glide),
-    color 160ms var(--easing-glide);
-}
-.local-recent__item:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--fg-primary);
-}
-.local-recent__item span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.local-recent__text {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-.local-recent__text span,
-.local-recent__text small {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.local-recent__text small {
-  color: var(--fg-tertiary);
-  font-size: 10px;
-  line-height: 1.2;
-}
-
-.settings-btn .chev {
-  margin-left: auto;
-}
-
-.settings-cat {
-  list-style: none;
-  margin: 0 0 0 18px;
-  padding: 4px 0 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  border-left: 1px solid var(--separator);
-  padding-left: 6px;
-}
-.settings-cat__btn {
-  appearance: none;
-  border: none;
-  background: transparent;
-  color: var(--fg-secondary);
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 8px;
-  cursor: pointer;
-  width: 100%;
-  text-align: left;
-  font-size: 12px;
-}
-.settings-cat__btn:hover {
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--fg-primary);
-}
-.settings-cat__btn.active {
-  color: var(--accent);
-  background: rgba(10, 132, 255, 0.12);
 }
 </style>
