@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（首页巨幕真实媒体条目）
+> **更新时间**：2026-06-01（收藏、历史与聚合视界加载修正）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1439-home-hero-real-media.md`](./CHANGE_LOG/2026-06-01-1439-home-hero-real-media.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1450-personal-media-loading.md`](./CHANGE_LOG/2026-06-01-1450-personal-media-loading.md)
 
 ---
 
@@ -570,6 +570,8 @@ npm.cmd run electron:build
 本轮禁止服务端转码已闭环：Electron 与 Web Preview 的 PlaybackInfo 请求显式启用 Direct Play / Direct Stream、禁用 Transcoding，并移除 HLS 转码 profile；播放源选择不再优先 `TranscodingUrl`，只接受 Direct Play / Direct Stream 媒体源，最终播放 URL 固定走 `Videos/{id}/stream?Static=true`，HTML fallback 也不再生成 `master.m3u8` 转码地址。Tauri 播放、外部播放、远程会话播放和下载路径同样只选择支持本机解码的媒体源，服务端只返回转码源时会直接失败而不是偷偷压 NAS/VPS CPU。播放进度上报默认 `DirectStream`，避免把会话标记为转码。验证已覆盖 `node --check electron\backend\emby.mjs`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`npm.cmd run build`、`npm.cmd run check:electron-commands`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run electron:build`、`git diff --check`、转码关键字残留扫描与构建后残留进程检查。
 
 本轮首页巨幕真实媒体条目已闭环：`library` store 新增 `heroItems`，首页刷新时会从当前账号媒体库拉取真实电影 / 剧集 / 单集条目及 Overview、年份、播放状态等字段；`HeroCarousel` 不再把媒体库视图卡片混入巨幕候选池，而是使用 `heroItems` 并以继续观看作为兜底。巨幕背景优先使用 Backdrop，缺失时回退 Primary；右侧新增真实海报图，巨幕模式高度和标题布局同步放大，减少“巨幕太小、下方空”的观感。未登录空状态文案同步改为从设置页添加服务器。验证已覆盖 `npm.cmd run build`、`npm.cmd run electron:build`、`git diff --check`、代码路径检查与构建后残留进程检查；本轮 in-app Browser 通道不可用，未完成截图目检。
+
+本轮收藏、历史与聚合视界加载修正已闭环：新增 `src/utils/personalMedia.ts` 统一封装个人媒体集合查询，收藏页现在按电影 / 剧集 / 单集拉取并保留错误重试；历史页会合并 `IsPlayed` 与 `Items/Resume`，未看完但有播放进度的电影/单集不再从历史里消失，分页加载会继续按已播放记录推进并去重；聚合视界复用同一套收藏和个人历史加载逻辑，避免概览与独立页面口径不一致。验证已覆盖 `npm.cmd run build`、`npm.cmd run electron:build`、`git diff --check`、Electron 命令覆盖与 package 完整性检查；本轮 in-app Browser 仍无可用 route，未做浏览器目检。
 
 本轮设置页线路 URL 脱敏预览已闭环：服务器列表普通查看态不再直接显示完整远端线路 URL，而是展示保留协议、端口和部分主机名的脱敏预览；`localhost` / IP 线路保持原样便于本地调试，完整 URL 仍只能在“编辑”表单中查看和修改。验证已覆盖 `npm.cmd run build`、in-app Browser 1420 设置页目检、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`。
 

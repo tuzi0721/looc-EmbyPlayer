@@ -9,6 +9,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useSettingsStore } from "@/stores/settings";
 import type { MediaItem } from "@/types/models";
 import { filterJavItems } from "@/utils/javFilter";
+import { fetchFavoriteItems, fetchPersonalHistory } from "@/utils/personalMedia";
 
 type AggregateTab = "overview" | "favorites" | "history";
 
@@ -80,18 +81,8 @@ async function loadAggregate() {
   error.value = null;
   const [resume, favorites, history] = await Promise.allSettled([
     api.resumeItems(),
-    api.listItems({
-      params: [
-        ["Filters", "IsFavorite"],
-        ["Recursive", "true"],
-        ["IncludeItemTypes", "Movie,Series,Episode"],
-        ["Fields", "PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo"],
-        ["SortBy", "SortName"],
-        ["SortOrder", "Ascending"],
-        ["Limit", "36"],
-      ],
-    }),
-    api.playbackHistory({ limit: 36 }),
+    fetchFavoriteItems(36),
+    fetchPersonalHistory({ limit: 36 }),
   ]);
 
   if (resume.status === "fulfilled") {

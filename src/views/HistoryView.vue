@@ -3,12 +3,12 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
 
-import { api } from "@/api";
 import PosterCard from "@/components/common/PosterCard.vue";
 import { useAuthStore } from "@/stores/auth";
 import { useSettingsStore } from "@/stores/settings";
 import type { MediaItem } from "@/types/models";
 import { filterJavItems } from "@/utils/javFilter";
+import { fetchPersonalHistory, mergeMediaItems } from "@/utils/personalMedia";
 
 type HistoryFilter = "all" | "movie" | "episode";
 
@@ -67,14 +67,15 @@ async function loadHistory(reset = true) {
   error.value = null;
 
   try {
-    const r = await api.playbackHistory({
+    const r = await fetchPersonalHistory({
       includeTypes: includeTypesFor(filter.value),
       startIndex: reset ? 0 : rawLoaded.value,
       limit: PAGE_SIZE,
+      includeResume: reset,
     });
     const filteredItems = filterJavItems(r.Items, settings.settings.hideJavCodes);
-    rawLoaded.value = (reset ? 0 : rawLoaded.value) + r.Items.length;
-    items.value = reset ? filteredItems : [...items.value, ...filteredItems];
+    rawLoaded.value = (reset ? 0 : rawLoaded.value) + r.playedLoaded;
+    items.value = reset ? filteredItems : mergeMediaItems([items.value, filteredItems]);
     const rawTotal = r.TotalRecordCount ?? rawLoaded.value;
     total.value = settings.settings.hideJavCodes
       ? items.value.length + (rawLoaded.value < rawTotal ? 1 : 0)

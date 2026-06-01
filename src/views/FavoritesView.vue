@@ -4,11 +4,11 @@ import { useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
 
 import PosterCard from "@/components/common/PosterCard.vue";
-import { api } from "@/api";
 import { useAuthStore } from "@/stores/auth";
 import { useSettingsStore } from "@/stores/settings";
 import type { MediaItem } from "@/types/models";
 import { filterJavItems } from "@/utils/javFilter";
+import { fetchFavoriteItems } from "@/utils/personalMedia";
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -16,27 +16,24 @@ const settings = useSettingsStore();
 
 const items = ref<MediaItem[]>([]);
 const loading = ref(false);
+const error = ref<string | null>(null);
 
 const hasAccount = computed(() => !!auth.activeAccount);
 
 async function load() {
-  if (!hasAccount.value) return;
-  loading.value = true;
-  try {
-    const r = await api.listItems({
-      params: [
-        ["Filters", "IsFavorite"],
-        ["Recursive", "true"],
-        ["IncludeItemTypes", "Movie,Series"],
-        ["Fields", "PrimaryImageAspectRatio,ProductionYear,Overview"],
-        ["SortBy", "SortName"],
-        ["SortOrder", "Ascending"],
-        ["Limit", "400"],
-      ],
-    });
-    items.value = filterJavItems(r.Items, settings.settings.hideJavCodes);
-  } catch {
+  if (!hasAccount.value) {
     items.value = [];
+    error.value = null;
+    return;
+  }
+  loading.value = true;
+  error.value = null;
+  try {
+    const r = await fetchFavoriteItems();
+    items.value = filterJavItems(r.Items, settings.settings.hideJavCodes);
+  } catch (value) {
+    items.value = [];
+    error.value = value instanceof Error ? value.message : String(value || "收藏加载失败");
   } finally {
     loading.value = false;
   }
@@ -66,6 +63,11 @@ function open(id: string) {
       <div v-else-if="loading" class="empty">
         <Icon icon="lucide:loader" width="22" class="spin" />
         <p>加载中…</p>
+      </div>
+      <div v-else-if="error" class="empty empty--error">
+        <Icon icon="lucide:triangle-alert" width="28" />
+        <p>{{ error }}</p>
+        <button type="button" class="retry" @click="load">重试</button>
       </div>
       <div v-else-if="items.length === 0" class="empty">
         <Icon icon="lucide:heart-off" width="28" />
@@ -135,6 +137,23 @@ function open(id: string) {
 .empty .hint {
   font-size: 12px;
   color: var(--fg-quaternary);
+}
+.empty--error {
+  color: var(--danger);
+}
+.retry {
+  appearance: none;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg-primary);
+  cursor: pointer;
+  min-height: 32px;
+  padding: 0 12px;
+}
+.retry:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .spin {
   animation: spin 800ms linear infinite;
