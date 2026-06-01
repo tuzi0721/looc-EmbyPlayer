@@ -1589,15 +1589,31 @@ function currentEmbedRect() {
   const el = stageEl.value;
   if (!el) return null;
   const rect = el.getBoundingClientRect();
-  const height = Math.max(1, Math.round(rect.height));
+  const controls = embedControlInsets(rect);
+  const height = Math.max(1, Math.round(rect.height - controls.top - controls.bottom));
   const width = Math.max(1, Math.round(rect.width));
   return {
     x: Math.round(rect.left),
-    y: Math.round(rect.top),
+    y: Math.round(rect.top + controls.top),
     width,
     height,
     scale: window.devicePixelRatio || 1,
   };
+}
+
+function embedControlInsets(stageRect: DOMRect) {
+  if (!showControls.value) return { top: 0, bottom: 0 };
+  const topEl = document.querySelector<HTMLElement>(".player__top");
+  const bottomEl = document.querySelector<HTMLElement>(".player__bottom");
+  const topRect = topEl?.getBoundingClientRect();
+  const bottomRect = bottomEl?.getBoundingClientRect();
+  const top = topRect
+    ? Math.max(0, Math.min(stageRect.height - 1, Math.ceil(topRect.bottom - stageRect.top)))
+    : 0;
+  const bottom = bottomRect
+    ? Math.max(0, Math.min(stageRect.height - top - 1, Math.ceil(stageRect.bottom - bottomRect.top)))
+    : 0;
+  return { top, bottom };
 }
 
 async function syncEmbedRect() {

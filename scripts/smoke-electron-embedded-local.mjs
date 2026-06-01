@@ -303,6 +303,7 @@ function playerUiMetricsExpression() {
       const playButton = rectOf('[data-control="play-toggle"]');
       const seekBackButton = rectOf('[data-control="seek-back"]');
       const fullscreenButton = rectOf('[data-control="fullscreen"]');
+      const embedRects = window.__hillsEmbedRects ?? [];
       return {
         bounds: {
           x: window.screenX,
@@ -323,6 +324,8 @@ function playerUiMetricsExpression() {
         playButton,
         seekBackButton,
         fullscreenButton,
+        embedRect: embedRects.length > 0 ? embedRects[embedRects.length - 1] : null,
+        embedRectCount: embedRects.length,
         topVisible: visible(top),
         bottomVisible: visible(bottom),
         playButtonVisible: visible(playButton),
@@ -664,12 +667,22 @@ try {
     (async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       await wait(1200);
+      const { api } = await import("/src/api/index.ts");
       const { useAuthStore } = await import("/src/stores/auth.ts");
       const { useServerStore } = await import("/src/stores/server.ts");
       const serverStore = useServerStore();
       const auth = useAuthStore();
       const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
       if (!appRouter) throw new Error("mounted Vue router not found");
+      window.__hillsEmbedRects = [];
+      if (!api.__embedRectRecorder) {
+        const originalEmbedSetRect = api.embedSetRect.bind(api);
+        api.embedSetRect = async (rect) => {
+          window.__hillsEmbedRects.push({ ...rect, at: Date.now() });
+          return originalEmbedSetRect(rect);
+        };
+        api.__embedRectRecorder = true;
+      }
       const server = await serverStore.addServer({
         name: "Local Embedded Smoke",
         kind: "emby",
@@ -706,6 +719,7 @@ try {
         stage: stage ? { x: stage.x, y: stage.y, width: stage.width, height: stage.height } : null,
         mpvScreenshot,
         mpvScreenshotError,
+        embedRects: window.__hillsEmbedRects ?? [],
         state: {
           durationMs: state.durationMs,
           positionMs: state.positionMs,
@@ -897,6 +911,10 @@ try {
     startResult.route === `/player/${itemId}` &&
     startResult.state.durationMs > 0 &&
     startResult.state.trackCount >= 1 &&
+    (controlsInitial.embedRectCount ?? 0) > 0 &&
+    controlsInitial.embedRect?.y >= (controlsInitial.top?.height ?? 0) - 1 &&
+    controlsInitial.embedRect?.y + controlsInitial.embedRect?.height <=
+      (controlsInitial.bottom?.y ?? controlsInitial.viewport.height) + 1 &&
     longPressSpeed.active.speed >= 1.95 &&
     Math.abs(longPressSpeed.restored.speed - startResult.state.speed) < 0.05 &&
     !longPressSpeed.restored.badgeVisible &&

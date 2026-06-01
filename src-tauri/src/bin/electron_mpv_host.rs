@@ -16,6 +16,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 const CLASS_NAME: &str = "HillsLiteElectronMpvHost\0";
+const WM_NCHITTEST: u32 = 0x0084;
+const HTTRANSPARENT: isize = -1;
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -50,6 +52,9 @@ unsafe extern "system" fn wnd_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    if msg == WM_NCHITTEST {
+        return LRESULT(HTTRANSPARENT);
+    }
     DefWindowProcW(hwnd, msg, wparam, lparam)
 }
 
