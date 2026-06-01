@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（播放器 Stats 占位分页清理）
+> **更新时间**：2026-06-01（播放器媒体源本机解码保护）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1610-player-stats-placeholder-cleanup.md`](./CHANGE_LOG/2026-06-01-1610-player-stats-placeholder-cleanup.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1619-player-local-decode-source-guard.md`](./CHANGE_LOG/2026-06-01-1619-player-local-decode-source-guard.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：播放器“播放源 / 媒体源”菜单同步本机解码硬约束：候选源会显示“本机直连 / 本机直流 / 本机解码待确认”，当 Emby/Jellyfin 只上报服务端转码能力时，该媒体源在会话内切源菜单中直接禁用并阻止切换，避免用户误点导致 NAS、路由器或 VPS 服务端承担转码解码压力。底层 PlaybackInfo、静态流 URL 与进度上报继续保持 Direct Play / Direct Stream only，不允许服务端转码兜底。验证已覆盖 `npm.cmd run build`、`git diff --check`、主动转码入口扫描与 `npm.cmd run electron:build`。
 
 **2026-06-01**：播放器 Stats 面板删除只显示待接入状态的 Whisper 占位分页；播放器内只保留综合、视频、音频、轨道四个已有运行时数据页。AI 字幕 / Whisper 能力状态继续集中在设置页能力面板中展示，不再混入播放时工具面板。
 

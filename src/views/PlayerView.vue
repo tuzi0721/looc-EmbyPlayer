@@ -722,6 +722,7 @@ function mediaSourceMeta(source: PlaybackMediaSource): string {
   const resolution = source.width && source.height ? `${source.width}×${source.height}` : null;
   const bitrate = source.bitrate ? formatBitrate(source.bitrate) : null;
   return [
+    mediaSourceCapabilityLabel(source),
     resolution,
     source.videoCodec,
     source.audioCodec,
@@ -731,6 +732,19 @@ function mediaSourceMeta(source: PlaybackMediaSource): string {
   ]
     .filter(Boolean)
     .join(" · ") || "PlaybackInfo";
+}
+
+function canUsePlaybackMediaSource(source: PlaybackMediaSource): boolean {
+  return !(source.supportsDirectPlay === false && source.supportsDirectStream === false);
+}
+
+function mediaSourceCapabilityLabel(source: PlaybackMediaSource): string {
+  if (source.supportsDirectPlay === true) return "本机直连";
+  if (source.supportsDirectStream === true) return "本机直流";
+  if (!canUsePlaybackMediaSource(source) && source.supportsTranscoding) {
+    return "仅服务端转码";
+  }
+  return "本机解码待确认";
 }
 
 function lineMeta(line: PlaybackLineOption): string {
@@ -1760,6 +1774,11 @@ async function switchPlaybackLine(line: PlaybackLineOption) {
 }
 
 async function switchPlaybackMediaSource(source: PlaybackMediaSource) {
+  if (!canUsePlaybackMediaSource(source)) {
+    errorText.value = "该媒体源仅支持服务端转码，已阻止切换。请选择本机直连或本机直流源。";
+    showControls.value = true;
+    return;
+  }
   await switchPlaybackSource({ mediaSourceId: source.id });
 }
 
@@ -2356,8 +2375,11 @@ onBeforeUnmount(async () => {
                     v-for="source in playbackMediaSources"
                     :key="source.id"
                     class="popup-option"
-                    :class="{ active: source.id === selectedPlaybackMediaSourceId }"
-                    :disabled="playbackSwitching"
+                    :class="{
+                      active: source.id === selectedPlaybackMediaSourceId,
+                      'popup-option--blocked': !canUsePlaybackMediaSource(source),
+                    }"
+                    :disabled="playbackSwitching || !canUsePlaybackMediaSource(source)"
                     type="button"
                     @click="switchPlaybackMediaSource(source)"
                   >
@@ -3285,6 +3307,9 @@ onBeforeUnmount(async () => {
 .popup-menu .popup-option.active {
   background: var(--accent-soft);
   color: var(--accent-hover);
+}
+.popup-menu .popup-option--blocked {
+  color: rgba(255, 255, 255, 0.42);
 }
 .popup-option__text {
   min-width: 0;
