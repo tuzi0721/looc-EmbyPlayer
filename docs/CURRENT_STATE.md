@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-01（假入口与 no-op 扫描）
+> 更新时间：2026-06-01（真实服务器脱敏检查脚本）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-01-2146-fake-entry-scan.md`](./CHANGE_LOG/2026-06-01-2146-fake-entry-scan.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-01-2154-real-server-check-script.md`](./CHANGE_LOG/2026-06-01-2154-real-server-check-script.md)
 
 ---
 
@@ -30,6 +30,8 @@
 工作区卫生检查已接入 `npm.cmd run check:workspace`：该脚本允许当前 6 个运行/构建目录，拦截意外未跟踪文件和意外忽略目录，用来避免旧临时文件、旧 Git 目录或散落构建日志重新污染仓库判断。
 
 旧 `scripts/smoke-test.ps1` 已删除；该脚本仍含 Tauri-first 流程和 PATH mpv 误导提示，当前验证入口以 `npm.cmd run build`、Electron 打包检查和 Electron smoke 脚本为准。
+
+真实服务器复核新增 `scripts\real-server-connectivity-check.mjs`：脚本从 stdin 或 `HILLS_REAL_*` 环境变量读取线路和测试账号，只输出脱敏状态，不输出 token、账号、密码、完整线路 URL 或播放 URL。本轮未通过命令行传参执行真实账号密码，因为该方式会暴露凭据到本机 shell / 进程表面。
 
 关闭语义已收紧：设置页不再展示“关闭时最小化到托盘”旧开关，配置读写会过滤 `closeToTray` / `close_to_tray` 旧字段。窗口关闭继续走 runtime cleanup 与 `app.quit()`，托盘只保留显式“显示/隐藏窗口/退出”菜单动作，避免用户点关闭后误以为应用退出但播放仍藏在后台。
 
@@ -112,8 +114,7 @@ node scripts\smoke-electron-home-hero.mjs
 
 当前最新阶段已验证：
 
-- `npm.cmd run check:no-planned-ui`
-- `npm.cmd run check:electron-commands`
+- `node --check scripts\real-server-connectivity-check.mjs`
 
 ---
 
