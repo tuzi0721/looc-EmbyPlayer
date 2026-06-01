@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-01（本机解码合同 smoke）
+> 更新时间：2026-06-01（真实服务器脱敏复核）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-01-2211-local-decode-contract-smoke.md`](./CHANGE_LOG/2026-06-01-2211-local-decode-contract-smoke.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-01-2222-real-server-sanitized-check.md`](./CHANGE_LOG/2026-06-01-2222-real-server-sanitized-check.md)
 
 ---
 
@@ -33,7 +33,7 @@
 
 旧 `scripts/smoke-test.ps1` 已删除；该脚本仍含 Tauri-first 流程和 PATH mpv 误导提示，当前验证入口以 `npm.cmd run build`、Electron 打包检查和 Electron smoke 脚本为准。
 
-真实服务器复核新增 `scripts\real-server-connectivity-check.mjs`：脚本从 stdin 或 `HILLS_REAL_*` 环境变量读取线路和测试账号，只输出脱敏状态，不输出 token、账号、密码、完整线路 URL 或播放 URL。本轮未通过命令行传参执行真实账号密码，因为该方式会暴露凭据到本机 shell / 进程表面。
+真实服务器复核使用 `scripts\real-server-connectivity-check.mjs`：脚本从 stdin 或 `HILLS_REAL_*` 环境变量读取线路和测试账号，只输出脱敏状态，不输出 token、账号、密码、完整线路 URL 或播放 URL。已通过临时 stdin 输入文件执行真实线路检查，并在执行后删除临时输入文件；线路 1 公开信息、认证、媒体库视图均为 HTTP 200，识别为 Emby，媒体库视图数量 5；线路 2 在公开信息阶段返回 HTTP 403 HTML，未进入登录。
 
 关闭语义已收紧：设置页不再展示“关闭时最小化到托盘”旧开关，配置读写会过滤 `closeToTray` / `close_to_tray` 旧字段。窗口关闭继续走 runtime cleanup 与 `app.quit()`，托盘只保留显式“显示/隐藏窗口/退出”菜单动作，避免用户点关闭后误以为应用退出但播放仍藏在后台。
 
@@ -117,9 +117,7 @@ node scripts\smoke-electron-home-hero.mjs
 
 当前最新阶段已验证：
 
-- `node --check scripts\smoke-electron-embedded-local.mjs`
-- `npm.cmd run check:local-decode`
-- `node scripts\smoke-electron-embedded-local.mjs`（`localDecodeContract.ok=true`，同时覆盖后退、全屏、自适应、mpv 截图像素与退出清理）
+- `scripts\real-server-connectivity-check.mjs` 真实线路脱敏检查：线路 1 登录和媒体库读取通过；线路 2 公开信息接口返回 HTTP 403。
 
 ---
 
