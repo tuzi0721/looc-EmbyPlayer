@@ -373,6 +373,8 @@ export const api = {
     invoke<void>("show_mpv_stats_osd", { page }),
   setAlwaysOnTop: (enabled: boolean) =>
     invoke<void>("set_always_on_top", { enabled }),
+  setFullscreen: (enabled: boolean) =>
+    invoke<boolean>("set_fullscreen", { enabled }),
   setSecondaryDisplayBlackout: (enabled: boolean) =>
     invoke<SecondaryDisplayBlackoutResult>("set_secondary_display_blackout", { enabled }),
   takeScreenshot: (payload: { title?: string | null; includeSubtitles?: boolean } = {}) =>

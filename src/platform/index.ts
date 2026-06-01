@@ -85,7 +85,7 @@ const WEB_DEFAULT_SETTINGS: AppSettings = {
   appendAuthQuery: false,
   downloadDirectory: null,
   homeHeroStyle: "classic",
-  closeToTray: true,
+  closeToTray: false,
   traktSyncEnabled: false,
   traktUsername: null,
   traktSyncWatched: true,
@@ -1934,6 +1934,8 @@ function invokeWebFallback<T>(
       return Promise.resolve(undefined as T);
     case "set_secondary_display_blackout":
       return Promise.resolve({ count: 0 } as T);
+    case "set_fullscreen":
+      return Promise.resolve(false as T);
     default:
       return Promise.reject(new Error(`Web preview does not implement command: ${command}`));
   }

@@ -30,7 +30,7 @@ export const DEFAULT_SETTINGS = {
   appendAuthQuery: false,
   downloadDirectory: null,
   homeHeroStyle: "classic",
-  closeToTray: true,
+  closeToTray: false,
   traktSyncEnabled: false,
   traktUsername: null,
   traktSyncWatched: true,

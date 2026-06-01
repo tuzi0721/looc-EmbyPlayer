@@ -144,6 +144,20 @@ let pendingPlay = null;
 let pendingPlayKey = null;
 let currentPlaySession = null;
 const registeredGlobalShortcuts = new Map();
+let runtimeCleanupStarted = false;
+
+function forceKillProcessTree(pid) {
+  if (!pid || process.platform !== "win32") return;
+  try {
+    const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+      windowsHide: true,
+      stdio: "ignore",
+    });
+    killer.on("error", () => {});
+  } catch {
+    // Best-effort fallback for stale helper processes.
+  }
+}
 
 function platformType() {
   switch (process.platform) {
@@ -981,9 +995,11 @@ function destroyEmbedHostWindow() {
   embedHostHwnd = null;
   embedHostRect = null;
   if (child) {
+    const pid = child.pid;
     if (child.stdin?.writable) child.stdin.write(`${JSON.stringify({ type: "destroy" })}\n`);
     setTimeout(() => {
       if (!child.killed) child.kill();
+      if (child.exitCode == null) forceKillProcessTree(pid);
     }, 500);
   }
 }
@@ -1089,6 +1105,30 @@ function setSecondaryDisplayBlackout(enabled) {
 
 function refreshSecondaryDisplayBlackout() {
   if (secondaryBlackoutEnabled) setSecondaryDisplayBlackout(true);
+}
+
+function cleanupRuntime(reason = "quit") {
+  if (runtimeCleanupStarted) return;
+  runtimeCleanupStarted = true;
+  writePlaybackLog("runtime_cleanup", { reason });
+  desktopIntegration?.markQuitting();
+  desktopIntegration?.clearNowPlaying();
+  desktopIntegration?.stopPowerSaveBlocker();
+  try {
+    setSecondaryDisplayBlackout(false);
+  } catch (error) {
+    console.warn("failed to close blackout windows", error);
+  }
+  try {
+    globalShortcut.unregisterAll();
+  } catch (error) {
+    console.warn("failed to unregister global shortcuts", error);
+  }
+  void mpv.shutdown().catch((error) => {
+    console.warn("failed to shutdown mpv", error);
+  });
+  destroyEmbedHostWindow();
+  currentPlaySession = null;
 }
 
 async function emitNotificationUnread() {
@@ -1948,6 +1988,13 @@ async function handleInvoke(command, args = {}) {
     return null;
   }
 
+  if (command === "set_fullscreen") {
+    const target = BrowserWindow.getFocusedWindow() ?? getMainAppWindow();
+    if (!target || target.isDestroyed()) return false;
+    target.setFullScreen(Boolean(args.enabled));
+    return target.isFullScreen();
+  }
+
   if (command === "set_secondary_display_blackout") {
     return setSecondaryDisplayBlackout(args.enabled);
   }
@@ -2535,6 +2582,7 @@ function createWindow() {
     minHeight: 600,
     title: "Hills Lite",
     backgroundColor: "#000000",
+    autoHideMenuBar: true,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.mjs"),
@@ -2546,22 +2594,17 @@ function createWindow() {
     },
   });
   mainWindow = win;
+  win.setMenu(null);
+  win.setMenuBarVisibility(false);
+  win.setAutoHideMenuBar(true);
 
   win.once("ready-to-show", () => win.show());
-  win.on("close", (event) => {
-    if (desktopIntegration?.isQuitting()) return;
-    if (!desktopIntegration?.shouldCloseToTray()) {
-      desktopIntegration?.markQuitting();
-      return;
-    }
-    event.preventDefault();
-    if (secondaryBlackoutEnabled) setSecondaryDisplayBlackout(false);
-    win.hide();
+  win.on("close", () => {
+    cleanupRuntime("window-close");
   });
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
-    if (secondaryBlackoutEnabled) setSecondaryDisplayBlackout(false);
-    destroyEmbedHostWindow();
+    cleanupRuntime("window-closed");
   });
 
   if (devServerUrl) {
@@ -2626,9 +2669,5 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
-  desktopIntegration?.markQuitting();
-  desktopIntegration?.stopPowerSaveBlocker();
-  setSecondaryDisplayBlackout(false);
-  globalShortcut.unregisterAll();
-  void mpv.shutdown();
+  cleanupRuntime("before-quit");
 });

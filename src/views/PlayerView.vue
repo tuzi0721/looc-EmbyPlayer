@@ -77,6 +77,7 @@ const playbackSwitching = ref(false);
 const longPressSpeedActive = ref(false);
 const statsPage = ref<StatsPage>("summary");
 const alwaysOnTop = ref(false);
+const nativeFullscreen = ref(false);
 const screenshotBusy = ref(false);
 const screenshotMessage = ref<string | null>(null);
 const screenshotPath = ref<string | null>(null);
@@ -1453,7 +1454,8 @@ function activeFullscreenElement(): Element | null {
 
 async function syncSecondaryDisplayBlackout() {
   const shouldEnable =
-    settings.settings.blackoutOtherDisplays && Boolean(activeFullscreenElement());
+    settings.settings.blackoutOtherDisplays &&
+    (Boolean(activeFullscreenElement()) || nativeFullscreen.value);
   if (secondaryBlackoutActive.value === shouldEnable) return;
 
   const seq = ++blackoutSyncSeq;
@@ -1478,7 +1480,7 @@ function onFullscreenChange() {
   scheduleEmbedRectSync();
 }
 
-function toggleFullscreen() {
+async function requestDocumentFullscreen(enabled: boolean) {
   const doc = document as Document & {
     webkitFullscreenElement?: Element | null;
     webkitExitFullscreen?: () => void;
@@ -1486,13 +1488,43 @@ function toggleFullscreen() {
   const root = document.documentElement as HTMLElement & {
     webkitRequestFullscreen?: () => void;
   };
-  if (activeFullscreenElement()) {
+  if (!enabled) {
     if (doc.exitFullscreen) void doc.exitFullscreen();
     else if (doc.webkitExitFullscreen) doc.webkitExitFullscreen();
-  } else {
-    if (root.requestFullscreen) void root.requestFullscreen();
-    else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
+    return;
   }
+
+  if (root.requestFullscreen) await root.requestFullscreen();
+  else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
+}
+
+async function toggleFullscreen() {
+  const next = activeFullscreenElement() ? false : !nativeFullscreen.value;
+  if (embedVideo) {
+    try {
+      nativeFullscreen.value = await api.setFullscreen(next);
+      await syncSecondaryDisplayBlackout();
+      scheduleEmbedRectSync();
+      return;
+    } catch {
+      nativeFullscreen.value = false;
+    }
+  }
+
+  await requestDocumentFullscreen(next);
+}
+
+async function exitAnyFullscreen() {
+  if (nativeFullscreen.value) {
+    try {
+      nativeFullscreen.value = await api.setFullscreen(false);
+    } catch {
+      nativeFullscreen.value = false;
+    }
+  } else {
+    await requestDocumentFullscreen(false);
+  }
+  await syncSecondaryDisplayBlackout();
 }
 
 function handleEscapeShortcut() {
@@ -1510,9 +1542,10 @@ function handleEscapeShortcut() {
     episodeMenuOpen.value = false;
   } else if (
     document.fullscreenElement ||
-    (document as Document & { webkitFullscreenElement?: Element | null }).webkitFullscreenElement
+    (document as Document & { webkitFullscreenElement?: Element | null }).webkitFullscreenElement ||
+    nativeFullscreen.value
   ) {
-    toggleFullscreen();
+    void exitAnyFullscreen();
   } else {
     void back();
   }

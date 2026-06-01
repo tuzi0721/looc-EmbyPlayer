@@ -16,6 +16,19 @@ function fileExists(filePath) {
   }
 }
 
+function forceKillProcessTree(pid) {
+  if (!pid || process.platform !== "win32") return;
+  try {
+    const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+      windowsHide: true,
+      stdio: "ignore",
+    });
+    killer.on("error", () => {});
+  } catch {
+    // Best-effort fallback for stale mpv process trees.
+  }
+}
+
 function pathCandidates() {
   return [
     process.resourcesPath ? path.join(process.resourcesPath, "mpv", "mpv.exe") : null,
@@ -427,7 +440,13 @@ export class MpvController {
     if (this.child) {
       const child = this.child;
       this.child = null;
-      if (!child.killed && child.exitCode == null) child.kill();
+      if (!child.killed && child.exitCode == null) {
+        const pid = child.pid;
+        child.kill();
+        setTimeout(() => {
+          if (child.exitCode == null) forceKillProcessTree(pid);
+        }, 700);
+      }
     }
   }
 }

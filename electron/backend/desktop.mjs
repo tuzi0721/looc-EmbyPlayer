@@ -51,7 +51,7 @@ export class DesktopIntegration {
     this.quitting = false;
     this.nowPlaying = null;
     this.playbackStatus = "stopped";
-    this.closeToTray = true;
+    this.closeToTray = false;
   }
 
   async init() {
@@ -63,7 +63,7 @@ export class DesktopIntegration {
 
   async reloadSettings() {
     const settings = await this.store.getSettings().catch(() => ({}));
-    this.closeToTray = settings.closeToTray !== false;
+    this.closeToTray = settings.closeToTray === true;
   }
 
   markQuitting() {
