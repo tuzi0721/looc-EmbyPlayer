@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（本地文件夹手动路径）
+> **更新时间**：2026-06-01（内嵌播放 smoke 加固）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1246-local-folder-manual-path.md`](./CHANGE_LOG/2026-06-01-1246-local-folder-manual-path.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1247-embedded-playback-smoke.md`](./CHANGE_LOG/2026-06-01-1247-embedded-playback-smoke.md)
 
 ---
 
@@ -627,9 +627,11 @@ npm.cmd run electron:build
 
 本轮本地文件夹手动路径已闭环：`/local-folder` 空状态新增路径输入框，可直接粘贴盘符路径或当前系统已授权可访问的 UNC 共享路径并复用现有真实目录扫描链路；设置页新增“手动路径”可用能力，SMB 仍保持“待接入”，仅说明已授权 UNC 路径可先通过该入口访问。
 
+本轮内嵌播放 smoke 加固已闭环：`scripts/smoke-electron-embedded-local.mjs` 在本地假 Emby + 临时彩色视频链路中继续确认内嵌 mpv 非黑屏、长按倍速和 mpv 截图有效，并新增控制栏关键按钮可见、全屏进入/退出、窗口缩到 960×620 后无横向溢出与彩色视频像素检测，避免后续改动悄悄破坏内嵌窗口同步。
+
 ---
 
 ## 10. Phase 2 待办
 
-- 播放窗口内嵌已通过本地屏幕像素 smoke；后续仍建议用真实媒体人工走一遍控制栏显示/隐藏、全屏和窗口 resize 体验。
+- 播放窗口内嵌已通过本地屏幕像素 smoke，且自动覆盖控制栏关键按钮、全屏进入/退出和窗口 resize 后像素检测；后续仍建议用真实媒体人工走一遍长时间播放、全屏和窗口 resize 体验。
 - 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹手动路径输入、本地文件夹一层/递归视频浏览、本地文件夹列表搜索/排序/分组与播放队列、同名封面、同名 NFO 元数据、同名字幕自动关联及列表提示、同名 XML 弹幕自动关联及列表提示、最近本地文件入口、最近本地文件夹入口、收藏本地文件、收藏本地文件夹、WebDAV 基础目录浏览/直链播放、WebDAV 播放队列、WebDAV 收藏/最近入口、WebDAV 上次目录/路径标签、WebDAV 列表搜索/排序、WebDAV 同名封面提示、WebDAV 同名字幕提示/加载、WebDAV 同名 XML 弹幕提示/加载、WebDAV 路径面包屑、WebDAV 当前路径操作、Alist/OpenList 基础目录浏览/直链播放、Alist/OpenList 收藏/最近入口、Alist/OpenList 上次目录/路径标签、Alist/OpenList 同名封面提示、Alist/OpenList 播放前刷新视频和侧挂直链、Alist/OpenList 同名字幕/XML 弹幕提示与加载；在线元数据刮削、SMB 完整发现/凭据存储和 Plex 仍待后续分阶段接入。

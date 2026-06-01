@@ -216,7 +216,85 @@ async function cdpEval(ws, expression) {
   return result.result?.value ?? null;
 }
 
-function foregroundHillsWindow() {
+async function cdpClick(ws, point) {
+  await cdpCall(ws, "Input.dispatchMouseEvent", {
+    type: "mouseMoved",
+    x: point.x,
+    y: point.y,
+    button: "none",
+  });
+  await cdpCall(ws, "Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    x: point.x,
+    y: point.y,
+    button: "left",
+    clickCount: 1,
+  });
+  await cdpCall(ws, "Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    x: point.x,
+    y: point.y,
+    button: "left",
+    clickCount: 1,
+  });
+}
+
+function playerUiMetricsExpression() {
+  return `
+    (() => {
+      const rectOf = (selector) => {
+        const element = document.querySelector(selector);
+        if (!element) return null;
+        const rect = element.getBoundingClientRect();
+        return {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          center: {
+            x: Math.round(rect.x + rect.width / 2),
+            y: Math.round(rect.y + rect.height / 2),
+          },
+        };
+      };
+      const visible = (rect) => Boolean(rect && rect.width > 1 && rect.height > 1);
+      const doc = document;
+      const top = rectOf(".player__top");
+      const bottom = rectOf(".player__bottom");
+      const playButton = rectOf('[data-control="play-toggle"]');
+      const fullscreenButton = rectOf('[data-control="fullscreen"]');
+      return {
+        bounds: {
+          x: window.screenX,
+          y: window.screenY,
+          width: window.outerWidth,
+          height: window.outerHeight,
+        },
+        viewport: {
+          width: window.innerWidth,
+          height: window.innerHeight,
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        },
+        fullscreenActive: Boolean(doc.fullscreenElement || doc.webkitFullscreenElement),
+        top,
+        bottom,
+        stage: rectOf(".player__stage"),
+        playButton,
+        fullscreenButton,
+        topVisible: visible(top),
+        bottomVisible: visible(bottom),
+        playButtonVisible: visible(playButton),
+        fullscreenButtonVisible: visible(fullscreenButton),
+        hasHorizontalOverflow:
+          document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+      };
+    })()
+  `;
+}
+
+function foregroundHillsWindow(processId = null) {
+  const pid = Number(processId) || 0;
   const script = `
     Add-Type @"
       using System;
@@ -226,7 +304,13 @@ function foregroundHillsWindow() {
         [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
       }
 "@
-    $proc = Get-Process | Where-Object { $_.MainWindowTitle -eq "Hills Lite" } | Select-Object -First 1
+    $proc = $null
+    if (${pid} -gt 0) {
+      $proc = Get-Process -Id ${pid} -ErrorAction SilentlyContinue
+    }
+    if (-not $proc -or $proc.MainWindowHandle -eq 0) {
+      $proc = Get-Process | Where-Object { $_.MainWindowTitle -eq "Hills Lite" } | Select-Object -First 1
+    }
     if ($proc -and $proc.MainWindowHandle -ne 0) {
       [Win32]::ShowWindow($proc.MainWindowHandle, 9) | Out-Null
       [Win32]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null
@@ -349,14 +433,7 @@ try {
   });
   await cdpCall(ws, "Runtime.enable");
   await cdpCall(ws, "Page.enable");
-  await cdpCall(ws, "Browser.getWindowForTarget", { targetId: target.id })
-    .then(({ windowId }) =>
-      cdpCall(ws, "Browser.setWindowBounds", {
-        windowId,
-        bounds: { left: 40, top: 40, width: 1280, height: 800, windowState: "normal" },
-      }),
-    )
-    .catch(() => {});
+  await wait(500);
 
   const startResult = await cdpEval(ws, `
     (async () => {
@@ -461,9 +538,57 @@ try {
     restored: longPressRestored,
   };
 
-  foregroundHillsWindow();
+  const controlsInitial = await cdpEval(ws, playerUiMetricsExpression());
+  let fullscreenAfterEnter = null;
+  let fullscreenAfterExit = null;
+  let fullscreenError = null;
+  try {
+    if (!controlsInitial.fullscreenButton?.center) {
+      throw new Error("fullscreen button not visible");
+    }
+    await cdpClick(ws, controlsInitial.fullscreenButton.center);
+    await wait(1100);
+    fullscreenAfterEnter = await cdpEval(ws, playerUiMetricsExpression());
+    if (fullscreenAfterEnter.fullscreenActive) {
+      await cdpEval(ws, `
+        (async () => {
+          const doc = document;
+          if (doc.exitFullscreen) await doc.exitFullscreen();
+          else if (doc.webkitExitFullscreen) doc.webkitExitFullscreen();
+          return true;
+        })()
+      `);
+      await wait(900);
+    }
+    fullscreenAfterExit = await cdpEval(ws, playerUiMetricsExpression());
+  } catch (error) {
+    fullscreenError = error?.message ?? String(error);
+  }
+
+  let resizeResult = null;
+  let resizeError = null;
+  try {
+    await cdpEval(ws, `
+      (() => {
+        window.moveTo(80, 80);
+        window.resizeTo(960, 620);
+        return {
+          x: window.screenX,
+          y: window.screenY,
+          width: window.outerWidth,
+          height: window.outerHeight,
+        };
+      })()
+    `);
+    await wait(1500);
+    resizeResult = await cdpEval(ws, playerUiMetricsExpression());
+  } catch (error) {
+    resizeError = error?.message ?? String(error);
+  }
+
+  foregroundHillsWindow(child.pid);
   await wait(500);
-  const pixels = captureAndAnalyze(startResult.bounds);
+  const pixels = captureAndAnalyze(resizeResult?.bounds ?? startResult.bounds);
   const mpvPixels = startResult.mpvScreenshot?.filePath
     ? analyzePng(startResult.mpvScreenshot.filePath)
     : null;
@@ -484,6 +609,18 @@ try {
     longPressSpeed.active.speed >= 1.95 &&
     Math.abs(longPressSpeed.restored.speed - startResult.state.speed) < 0.05 &&
     !longPressSpeed.restored.badgeVisible &&
+    controlsInitial.topVisible &&
+    controlsInitial.bottomVisible &&
+    controlsInitial.playButtonVisible &&
+    controlsInitial.fullscreenButtonVisible &&
+    !controlsInitial.hasHorizontalOverflow &&
+    fullscreenAfterEnter?.fullscreenActive === true &&
+    fullscreenAfterExit?.fullscreenActive === false &&
+    resizeResult?.bounds?.width <= 1100 &&
+    resizeResult?.bounds?.height <= 720 &&
+    resizeResult?.stage?.width >= 760 &&
+    resizeResult?.stage?.height >= 480 &&
+    !resizeResult?.hasHorizontalOverflow &&
     pixels.brightRatio > 0.18 &&
     pixels.colorfulRatio > 0.08;
 
@@ -495,6 +632,16 @@ try {
     state: startResult.state,
     stage: startResult.stage,
     longPressSpeed,
+    controlsInitial,
+    fullscreen: {
+      afterEnter: fullscreenAfterEnter,
+      afterExit: fullscreenAfterExit,
+      error: fullscreenError,
+    },
+    resize: {
+      result: resizeResult,
+      error: resizeError,
+    },
     mpvScreenshot: startResult.mpvScreenshot,
     mpvScreenshotError: startResult.mpvScreenshotError,
     mpvPixels,
