@@ -113,7 +113,7 @@ const pictureModeOptions: Array<{ value: PictureMode; label: string; icon: strin
   { value: "autocrop", label: "自动去黑边", icon: "lucide:scan-line" },
 ];
 type PlayerPanel = "subtitle" | "settings" | "episode" | "chapter" | "danmaku" | "source" | "stats";
-type StatsPage = "summary" | "video" | "audio" | "tracks" | "whisper";
+type StatsPage = "summary" | "video" | "audio" | "tracks";
 type StatsRow = { label: string; value: string };
 type PlayerQueueEntry = {
   id: string;
@@ -128,7 +128,6 @@ const statsPageOptions: Array<{ value: StatsPage; label: string; nativePage: num
   { value: "video", label: "视频", nativePage: 2 },
   { value: "audio", label: "音频", nativePage: 3 },
   { value: "tracks", label: "轨道", nativePage: 4 },
-  { value: "whisper", label: "Whisper", nativePage: 5 },
 ];
 
 function isPlayerPanelOpen(panel: PlayerPanel): boolean {
@@ -556,18 +555,10 @@ const statsTrackRows = computed<StatsRow[]>(() => {
     value: trackDetailLabel(track),
   }));
 });
-const statsWhisperRows = computed<StatsRow[]>(() => [
-  { label: "实时字幕", value: "待接入" },
-  { label: "本地 Whisper", value: "未配置模型" },
-  { label: "API 字幕", value: "未配置" },
-  { label: "GPU 加速", value: "待检测" },
-  { label: "AI 翻译", value: "待接入" },
-]);
 const statsRows = computed<StatsRow[]>(() => {
   if (statsPage.value === "video") return statsVideoRows.value;
   if (statsPage.value === "audio") return statsAudioRows.value;
   if (statsPage.value === "tracks") return statsTrackRows.value;
-  if (statsPage.value === "whisper") return statsWhisperRows.value;
   return statsSummaryRows.value;
 });
 const queueEntries = computed<PlayerQueueEntry[]>(() => {

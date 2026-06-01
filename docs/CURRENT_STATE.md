@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（未引用图标资源清理）
+> **更新时间**：2026-06-01（播放器 Stats 占位分页清理）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1558-unused-icon-cleanup.md`](./CHANGE_LOG/2026-06-01-1558-unused-icon-cleanup.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1610-player-stats-placeholder-cleanup.md`](./CHANGE_LOG/2026-06-01-1610-player-stats-placeholder-cleanup.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：播放器 Stats 面板删除只显示待接入状态的 Whisper 占位分页；播放器内只保留综合、视频、音频、轨道四个已有运行时数据页。AI 字幕 / Whisper 能力状态继续集中在设置页能力面板中展示，不再混入播放时工具面板。
 
 **2026-06-01**：资源清理阶段删除未被 Electron builder 或 `tauri.conf.json` 引用的默认移动端/商店图标，只保留桌面构建实际引用的 `32x32.png`、`128x128.png`、`128x128@2x.png`、`icon.icns` 与 `icon.ico`。`blackout.html`、Tauri schema、随包 mpv 和实际功能模块未清理。
 
@@ -119,7 +121,7 @@
 
 **2026-05-30**：`scripts/run-release.ps1` 默认改为 Electron unpacked release，并新增 `-Target electron|portable|tauri` 与 `-NoLaunch`；脚本内部统一使用 `npm.cmd run` 触发已接入完整性闸门的构建脚本。
 
-**2026-05-30**：播放器 Stats 浮层升级为综合、视频、音频、轨道、Whisper 五页；设置页播放器面板新增“统计浮层”模式，默认 WinUI，也可切到 mpv OSD，播放器统计入口会调用 mpv `stats/display-page-N` / `stats/display-stats`。
+**2026-05-30**：播放器 Stats 浮层当前保留综合、视频、音频、轨道四页；设置页播放器面板新增“统计浮层”模式，默认 WinUI，也可切到 mpv OSD，播放器统计入口会调用 mpv `stats/display-page-N` / `stats/display-stats`。
 
 **2026-06-01**：播放器画面区域新增长按倍速手势；按住非控件区域 420ms 后临时切到 2.0x，并显示居中 `2.0x` 徽标，松开后恢复原倍速。控件、进度条、菜单、提示和错误浮层不触发，移动超过阈值会取消未触发的长按。
 
@@ -198,7 +200,7 @@
 - **2026-05-31**：Electron `get_playback_source` 会返回当前播放线路、线路候选和 `PlaybackInfo.MediaSources` 候选摘要；`play` / mpv 播放链支持传入 `lineId` 与 `mediaSourceId` 指定候选重新开流，播放日志与串行去重 key 同步区分切源请求；Tauri `play` / `play_external` 已同步兼容 `lineId` 与 `mediaSourceId`，并让服务器字幕列表跟随当前播放会话线路；Electron 外部播放器入口也会透传线路 / 媒体源选择。
 
 - **2026-05-30**：播放器底部控制栏按 1180px / 920px / 620px 三档收纳低频控件；倍速/截图、队列前后/音轨/章节、快退/快进/音量会随宽度逐级隐藏，核心播放、字幕/弹幕、设置、选集与全屏入口保持可用。
-- **2026-05-30**：播放器 Stats 浮层新增五页标签：综合页显示时间/进度/缓存/轨道概况，视频页显示 codec、硬解、尺寸、FPS、码率和丢帧，音频页显示 codec、采样率、声道、码率和速度，轨道页列出全部 mpv 轨道状态，Whisper 页显示当前实时字幕能力状态；播放行为设置可切换为 mpv 自带 OSD。
+- **2026-05-30**：播放器 Stats 浮层当前保留四页标签：综合页显示时间/进度/缓存/轨道概况，视频页显示 codec、硬解、尺寸、FPS、码率和丢帧，音频页显示 codec、采样率、声道、码率和速度，轨道页列出全部 mpv 轨道状态；播放行为设置可切换为 mpv 自带 OSD。
 - **2026-05-30**：播放器内嵌 mpv/composition 尺寸同步新增 stage `ResizeObserver`、rAF 节流和重复 rect 去重；全屏变化与窗口 resize 共用同一条同步路径，卸载时断开 observer 并并行执行 `embedSetVisible(false)` / `embedDetach()`。
 - **2026-05-30**：播放器页内快捷键改为 `PLAYER_SHORTCUTS` 动作分发表，设置页“播放页内”说明复用 `PLAYER_SHORTCUT_SUMMARY`；`useKeyboard` 复用共享组合键解析，并支持稳定匹配单独 `+` 键。
 - **2026-05-29**：播放器卸载清理改为并行执行置顶恢复、副屏遮黑关闭和 `player.stop()`，通过 `Promise.allSettled` 统一等待；HTML5/HLS fallback 的本地销毁仍保持同步处理，减少关闭播放页时被单个桌面命令拖慢的概率。
@@ -225,7 +227,7 @@
 - **2026-05-29**：播放器设置菜单“统计信息”改为可用 Stats 浮层，展示时间、进度、速度、音量、缓存、网络、当前音轨/字幕和轨道数量，支持菜单开关与 `Esc` 关闭。
 - **2026-05-29**：设置页播放器面板新增 `Windows HDR` 按钮，Windows 平台可直接打开系统显示/HDR 相关设置，非 Windows 平台禁用。
 - **2026-05-31**：设置页新增“画质增强”能力面板，Windows HDR 保持系统入口，其余 RTX VSR、RTX TrueHDR、AMD FSR、RIFE 与 GLSL Shaders 以待接入状态展示，不提供尚无后端支撑的假开关。
-- **2026-05-31**：设置页新增“AI 字幕”能力面板，Whisper 本地转写、Whisper API、CUDA / Vulkan、AI 翻译和 DTW 时间戳均以待接入状态展示；播放器 Stats 的 Whisper 页同步改成能力状态，不再显示尚无后端支撑的“0s / 0 段”任务数。
+- **2026-05-31**：设置页新增“AI 字幕”能力面板，Whisper 本地转写、Whisper API、CUDA / Vulkan、AI 翻译和 DTW 时间戳均以待接入状态展示；播放器 Stats 不再展示 AI 字幕占位分页。
 - **2026-05-29**：设置页新增“外部播放器”面板，持久化外部播放器路径和启动参数；播放器设置菜单新增“外部播放器”入口，Electron/Tauri 均可把当前媒体流、标题和当前位置交给系统默认或指定外部播放器打开。
 - **2026-05-29**：设置页新增“弹幕”面板，持久化弹幕透明度、速度和字号；播放器 `DanmakuOverlay` 改为读取设置 store 中的弹幕参数。
 - **2026-05-28**：设置页播放器分组新增“右上角网速”开关，默认关闭。
@@ -467,7 +469,7 @@ npm.cmd run electron:build
 
 本轮画质增强能力面板已接入：设置页新增只读能力列表，Windows HDR 保持系统入口，RTX VSR、RTX TrueHDR、AMD FSR、RIFE 和 GLSL Shaders 显示待接入状态，不提供尚无后端支撑的开关。验证已覆盖 `npm.cmd run build`、行尾空白检查、in-app Browser 面板目检与 `npm.cmd run electron:build`。
 
-本轮 AI 字幕能力面板已接入：设置页新增只读能力列表，Whisper 本地转写、Whisper API、CUDA / Vulkan、AI 翻译和 DTW 时间戳显示待接入状态；播放器 Stats 的 Whisper 页改为“待接入 / 未配置 / 待检测”，不再展示尚无运行时支撑的任务队列数。验证已覆盖 `npm.cmd run build`、行尾空白检查、in-app Browser 1421 干净 dev server 面板目检与 `npm.cmd run electron:build`。
+本轮 AI 字幕能力面板已接入：设置页新增只读能力列表，Whisper 本地转写、Whisper API、CUDA / Vulkan、AI 翻译和 DTW 时间戳显示待接入状态；播放器 Stats 不再展示 AI 字幕占位分页。验证已覆盖 `npm.cmd run build`、行尾空白检查、in-app Browser 1421 干净 dev server 面板目检与 `npm.cmd run electron:build`。
 
 本轮首启引导基础的 `node --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、行尾空白检查、`npm.cmd run build`、`npm.cmd run electron:build` 已通过。
 
