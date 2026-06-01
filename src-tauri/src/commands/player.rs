@@ -325,6 +325,7 @@ pub async fn play(state: State<'_, Arc<AppState>>, payload: PlayPayload) -> AppR
         item_id: item.id.clone(),
         play_session_id: pb.play_session_id.clone(),
         media_source_id: source.id.clone(),
+        play_method: source.local_decode_play_method().into(),
         line_id: line.id.clone(),
         record_task_id,
     });

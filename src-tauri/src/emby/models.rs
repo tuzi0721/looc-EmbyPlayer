@@ -448,6 +448,14 @@ impl MediaSource {
     pub fn supports_local_decode(&self) -> bool {
         self.supports_direct_play == Some(true) || self.supports_direct_stream == Some(true)
     }
+
+    pub fn local_decode_play_method(&self) -> &'static str {
+        if self.supports_direct_play == Some(true) {
+            "DirectPlay"
+        } else {
+            "DirectStream"
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -740,12 +740,16 @@ function canUsePlaybackMediaSource(source: PlaybackMediaSource): boolean {
 }
 
 function mediaSourceCapabilityLabel(source: PlaybackMediaSource): string {
-  if (source.supportsDirectPlay === true) return "本机直连";
-  if (source.supportsDirectStream === true) return "本机直流";
+  if (source.playMethod === "DirectPlay" || source.supportsDirectPlay === true) return "本机直连";
+  if (source.playMethod === "DirectStream" || source.supportsDirectStream === true) return "本机直流";
   if (!canUsePlaybackMediaSource(source) && source.supportsTranscoding) {
     return "仅服务端转码";
   }
   return "未确认本机解码";
+}
+
+function playbackReportMethod(): "DirectPlay" | "DirectStream" {
+  return player.playbackSource?.playMethod === "DirectStream" ? "DirectStream" : "DirectPlay";
 }
 
 function lineMeta(line: PlaybackLineOption): string {
@@ -949,7 +953,7 @@ function reportHtmlProgress(stopped = false) {
     playSessionId: activeSessionId,
     positionTicks,
     isPaused: paused.value,
-    playMethod: "DirectStream",
+    playMethod: playbackReportMethod(),
     volumeLevel: htmlVolume.value,
   }).catch(() => {});
 }

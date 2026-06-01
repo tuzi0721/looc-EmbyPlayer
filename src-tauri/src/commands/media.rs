@@ -25,9 +25,17 @@ impl From<PlaybackProgressInput> for PlaybackProgress {
             play_session_id: v.play_session_id,
             position_ticks: v.position_ticks,
             is_paused: v.is_paused,
-            play_method: v.play_method,
+            play_method: sanitize_play_method(&v.play_method).into(),
             volume_level: v.volume_level,
         }
+    }
+}
+
+fn sanitize_play_method(value: &str) -> &'static str {
+    if value == "DirectStream" {
+        "DirectStream"
+    } else {
+        "DirectPlay"
     }
 }
 
@@ -196,7 +204,12 @@ pub async fn report_playback_progress(
     progress: PlaybackProgressInput,
 ) -> AppResult<()> {
     let (server, account) = active_pair(&state)?;
-    let p: PlaybackProgress = progress.into();
+    let mut p: PlaybackProgress = progress.into();
+    if let Some(session) = state.current_play_session.lock().await.as_ref() {
+        if session.play_session_id == p.play_session_id {
+            p.play_method = sanitize_play_method(&session.play_method).into();
+        }
+    }
     state.emby.report_progress(&server, &account, &p).await
 }
 

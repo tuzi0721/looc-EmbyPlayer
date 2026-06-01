@@ -553,6 +553,7 @@ function normalizePlaybackMediaSource(
     audioLanguage: stringFrom(audio?.Language),
     supportsDirectPlay: boolFrom(mediaSource?.SupportsDirectPlay),
     supportsDirectStream: boolFrom(mediaSource?.SupportsDirectStream),
+    playMethod: isLocalDecodeSource(mediaSource) ? localDecodePlayMethod(mediaSource) : undefined,
     supportsTranscoding: boolFrom(mediaSource?.SupportsTranscoding),
     isRemote: boolFrom(mediaSource?.IsRemote),
     selected: id === selectedId,
@@ -634,8 +635,16 @@ function isLocalDecodeSource(mediaSource: any): boolean {
   return supportsDirectPlay === true || supportsDirectStream === true;
 }
 
+function localDecodePlayMethod(mediaSource: any): "DirectPlay" | "DirectStream" {
+  return boolFrom(mediaSource?.SupportsDirectPlay) === true ? "DirectPlay" : "DirectStream";
+}
+
 function localDecodeMode(mediaSource: any): "direct-play" | "direct-stream" {
-  return boolFrom(mediaSource?.SupportsDirectPlay) === true ? "direct-play" : "direct-stream";
+  return localDecodePlayMethod(mediaSource) === "DirectPlay" ? "direct-play" : "direct-stream";
+}
+
+function sanitizePlaybackMethod(value: any): "DirectPlay" | "DirectStream" {
+  return stringFrom(value) === "DirectStream" ? "DirectStream" : "DirectPlay";
 }
 
 function pickLocalDecodeMediaSource(mediaSources: any[], requestedMediaSourceId?: string | null) {
@@ -1511,6 +1520,7 @@ async function webPlaybackSource(
   const mediaSource = pickLocalDecodeMediaSource(mediaSources, requestedMediaSourceId);
 
   const mediaSourceId = stringFrom(mediaSource.Id) ?? "";
+  const playMethod = localDecodePlayMethod(mediaSource);
   const playSessionId =
     stringFrom(info?.PlaySessionId) ?? stringFrom(mediaSource.PlaySessionId) ?? createId("play");
   const streamUrl = joinWebUrl(line.baseUrl, `Videos/${itemId}/stream`);
@@ -1526,6 +1536,7 @@ async function webPlaybackSource(
     itemId,
     playSessionId,
     mediaSourceId,
+    playMethod,
     lineId: line.id,
     lineName: line.name,
     streamUrl: proxiedStreamUrl(streamUrl),
@@ -1566,7 +1577,11 @@ async function webReportPlaybackProgress(progress: any) {
     PlaySessionId: stringFrom(progress?.playSessionId) ?? "",
     PositionTicks: numberFrom(progress?.positionTicks) ?? 0,
     IsPaused: boolFrom(progress?.isPaused) ?? false,
-    PlayMethod: stringFrom(progress?.playMethod) ?? "DirectStream",
+    PlayMethod: sanitizePlaybackMethod(
+      webPlaybackSourceState?.playSessionId === progress?.playSessionId
+        ? webPlaybackSourceState?.playMethod
+        : progress?.playMethod,
+    ),
     VolumeLevel: numberFrom(progress?.volumeLevel) ?? 80,
   }, webPlaybackSourceState?.lineId ?? null);
 }

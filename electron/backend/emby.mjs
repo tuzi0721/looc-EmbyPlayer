@@ -289,6 +289,7 @@ function normalizePlaybackMediaSource(mediaSource, index, selectedId) {
     audioLanguage: stringFrom(audio?.Language),
     supportsDirectPlay: boolFrom(mediaSource.SupportsDirectPlay),
     supportsDirectStream: boolFrom(mediaSource.SupportsDirectStream),
+    playMethod: isLocalDecodeSource(mediaSource) ? localDecodePlayMethod(mediaSource) : undefined,
     supportsTranscoding: boolFrom(mediaSource.SupportsTranscoding),
     isRemote: boolFrom(mediaSource.IsRemote),
     selected: id === selectedId,
@@ -398,8 +399,17 @@ function isLocalDecodeSource(mediaSource) {
   return supportsDirectPlay === true || supportsDirectStream === true;
 }
 
+function localDecodePlayMethod(mediaSource) {
+  return boolFrom(mediaSource?.SupportsDirectPlay) === true ? "DirectPlay" : "DirectStream";
+}
+
 function localDecodeMode(mediaSource) {
-  return boolFrom(mediaSource?.SupportsDirectPlay) === true ? "direct-play" : "direct-stream";
+  return localDecodePlayMethod(mediaSource) === "DirectPlay" ? "direct-play" : "direct-stream";
+}
+
+function sanitizePlaybackMethod(value) {
+  const method = stringFrom(value);
+  return method === "DirectStream" ? "DirectStream" : "DirectPlay";
 }
 
 function pickLocalDecodeMediaSource(mediaSources, requestedMediaSourceId) {
@@ -897,6 +907,7 @@ export class EmbyClient {
     const mediaSource = pickLocalDecodeMediaSource(mediaSources, requestedMediaSourceId);
 
     const mediaSourceId = stringFrom(mediaSource.Id) ?? "";
+    const playMethod = localDecodePlayMethod(mediaSource);
     const playSessionId =
       stringFrom(info?.PlaySessionId) ?? stringFrom(mediaSource.PlaySessionId) ?? randomUUID();
     const streamUrl = joinUrl(line.baseUrl, `Videos/${itemId}/stream`);
@@ -922,6 +933,7 @@ export class EmbyClient {
       itemId,
       playSessionId,
       mediaSourceId,
+      playMethod,
       lineId: line.id,
       lineName: line.name,
       streamUrl: streamUrl.toString(),
@@ -979,7 +991,7 @@ export class EmbyClient {
       userAgent: defaultUserAgent(settings, server, line),
       diagnostics: {
         ...browserSource.diagnostics,
-        sourceKind: "direct-stream",
+        sourceKind: browserSource.playMethod === "DirectPlay" ? "direct-play" : "direct-stream",
         streamKind: "mpv-direct-static",
         preferDirect: true,
         serverTranscodingAllowed: false,
@@ -999,7 +1011,7 @@ export class EmbyClient {
         PlaySessionId: progress.playSessionId,
         PositionTicks: numberFrom(progress.positionTicks) ?? 0,
         IsPaused: boolFrom(progress.isPaused) ?? false,
-        PlayMethod: stringFrom(progress.playMethod) ?? "DirectStream",
+        PlayMethod: sanitizePlaybackMethod(progress.playMethod),
         VolumeLevel: numberFrom(progress.volumeLevel) ?? 80,
       },
       context: "report_playback_progress",

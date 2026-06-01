@@ -43,6 +43,10 @@ export const usePlayerStore = defineStore("player", () => {
   let pollBusy = false;
   let lastEof = false;
 
+  function playbackReportMethod(): "DirectPlay" | "DirectStream" {
+    return playbackSource.value?.playMethod === "DirectStream" ? "DirectStream" : "DirectPlay";
+  }
+
   async function play(payload: {
     itemId: string;
     startMs?: number;
@@ -557,7 +561,7 @@ export const usePlayerStore = defineStore("player", () => {
               playSessionId: playSessionId.value,
               positionTicks: snapshot.value.positionMs * 10_000,
               isPaused: snapshot.value.paused,
-              playMethod: "DirectStream",
+              playMethod: playbackReportMethod(),
               volumeLevel: snapshot.value.volume,
             });
           } catch {

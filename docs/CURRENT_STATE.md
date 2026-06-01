@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（登录账号去重与激活状态修复）
+> **更新时间**：2026-06-01（本机解码会话上报收紧）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1856-account-dedupe-login-state.md`](./CHANGE_LOG/2026-06-01-1856-account-dedupe-login-state.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1907-local-decode-play-method.md`](./CHANGE_LOG/2026-06-01-1907-local-decode-play-method.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：本机解码会话上报继续收紧：播放源现在把实际 `DirectPlay` / `DirectStream` 方法随 `PlaybackSource` 与候选媒体源带回前端，HTML 内嵌播放、Electron mpv 播放和 Web Preview 进度上报不再硬编码 `DirectStream`；Electron 主进程和 Tauri 命令层会在当前播放会话匹配时用后端记录的播放方法覆盖前端传值，且任何非 `DirectStream` 的误传都会压成 `DirectPlay`，避免 `Transcode` 或其它服务端解码语义进入 `Sessions/Playing/Progress`。播放请求仍然显式禁用 `EnableTranscoding`、保持空 `TranscodingProfiles`、只使用 `Videos/{id}/stream?Static=true`，目标是客户端本机解码，不让 NAS / 路由器 / VPS 服务端承担转码解码压力。验证已覆盖 `node --check electron\backend\emby.mjs`、`node --check electron\main.mjs`、`node --check scripts\check-local-decode-guard.mjs`、`npm.cmd run check:local-decode`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run check:electron-commands` 与 `npm.cmd run build`。
 
 **2026-06-01**：登录账号持久化去重已补齐：Electron / Tauri 重复登录同一服务器同一用户时不再生成新的随机账号记录，而是按 `serverId + userId`（缺失时回退用户名）更新现有账号，保留原 account id 并刷新 token、头像与 `lastUsedAt`；Electron 读取旧状态时还会自动合并历史重复账号，避免同一用户在设置、侧边栏和媒体库上下文里出现多份登录态。验证已覆盖 `node --check electron\backend\store.mjs`、`node --check electron\backend\emby.mjs`、Electron store 去重 smoke、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run check:electron-commands`、`npm.cmd run build`、`git diff --check` 与 `npm.cmd run electron:build`。
 

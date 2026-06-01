@@ -1929,6 +1929,7 @@ async function runPlayRequest(payload) {
       itemId: source.itemId,
       playSessionId: source.playSessionId,
       mediaSourceId: source.mediaSourceId,
+      playMethod: source.playMethod ?? "DirectPlay",
       lineId: source.lineId,
     };
     const snapshot = await mpv.snapshot().catch(() => defaultSnapshot());
@@ -2288,7 +2289,14 @@ async function handleInvoke(command, args = {}) {
 
   if (command === "report_playback_progress") {
     const { server, account } = await requireActivePair();
-    await emby.reportProgress(server, account, args.progress ?? {});
+    const progress = args.progress ?? {};
+    await emby.reportProgress(server, account, {
+      ...progress,
+      playMethod:
+        progress.playSessionId && currentPlaySession?.playSessionId === progress.playSessionId
+          ? currentPlaySession.playMethod
+          : progress.playMethod,
+    });
     return null;
   }
 

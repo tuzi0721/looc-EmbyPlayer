@@ -41,6 +41,7 @@ export interface PlaybackSource {
   itemId: string;
   playSessionId: string;
   mediaSourceId: string;
+  playMethod?: "DirectPlay" | "DirectStream";
   lineId?: string | null;
   lineName?: string | null;
   streamUrl: string;
@@ -69,6 +70,7 @@ export interface PlaybackMediaSource {
   audioLanguage?: string | null;
   supportsDirectPlay?: boolean | null;
   supportsDirectStream?: boolean | null;
+  playMethod?: "DirectPlay" | "DirectStream";
   supportsTranscoding?: boolean | null;
   isRemote?: boolean | null;
   selected: boolean;
