@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
 
 import { api, type WebDavEntry, type WebDavListing } from "@/api";
 import { usePlayerStore, type DirectQueueEntry } from "@/stores/player";
 import { useWebDavStore } from "@/stores/webdav";
+import { writeTextToClipboard } from "@/utils/clipboard";
 
 type SortMode = "name" | "modified" | "size" | "type";
 
@@ -26,6 +27,8 @@ const playingUrl = ref<string | null>(null);
 const errorText = ref<string | null>(null);
 const searchText = ref("");
 const sortMode = ref<SortMode>("name");
+const pathCopyStatus = ref<string | null>(null);
+let pathCopyStatusTimer: number | null = null;
 
 const currentPath = computed(() => {
   const value = route.query.path;
@@ -96,6 +99,7 @@ const recentShortcutConnections = computed(() =>
     .filter((entry) => !favoriteConnectionIds.value.has(entry.id))
     .slice(0, 4),
 );
+const copyableDirectoryUrl = computed(() => listing.value?.directoryUrl ?? "");
 
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "-";
@@ -197,6 +201,25 @@ function newConnection() {
   router.replace({ name: "webdav" }).catch(() => {});
 }
 
+function clearPathCopyStatus() {
+  pathCopyStatus.value = null;
+  if (pathCopyStatusTimer) {
+    window.clearTimeout(pathCopyStatusTimer);
+    pathCopyStatusTimer = null;
+  }
+}
+
+function showPathCopyStatus(message: string) {
+  pathCopyStatus.value = message;
+  if (pathCopyStatusTimer) {
+    window.clearTimeout(pathCopyStatusTimer);
+  }
+  pathCopyStatusTimer = window.setTimeout(() => {
+    pathCopyStatus.value = null;
+    pathCopyStatusTimer = null;
+  }, 2200);
+}
+
 async function connectAndLoad(path = currentPath.value) {
   if (!canLoad.value || loading.value) return;
   loading.value = true;
@@ -244,10 +267,28 @@ function goUp() {
     .catch(() => {});
 }
 
+function goRoot() {
+  router
+    .push({ name: "webdav", query: { connection: selectedConnectionId.value ?? "", path: "" } })
+    .catch(() => {});
+}
+
 function openBreadcrumb(path: string) {
   router
     .push({ name: "webdav", query: { connection: selectedConnectionId.value ?? "", path } })
     .catch(() => {});
+}
+
+async function copyCurrentDirectoryUrl() {
+  const directoryUrl = copyableDirectoryUrl.value;
+  if (!directoryUrl) return;
+  try {
+    await writeTextToClipboard(directoryUrl);
+    showPathCopyStatus("路径已复制");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    showPathCopyStatus(`复制失败：${message}`);
+  }
 }
 
 async function playEntry(entry: WebDavEntry) {
@@ -309,8 +350,11 @@ watch(
 watch(currentPath, (path, previous) => {
   if (path === previous) return;
   searchText.value = "";
+  clearPathCopyStatus();
   if (canLoad.value) void connectAndLoad(path);
 });
+
+onBeforeUnmount(() => clearPathCopyStatus());
 
 onMounted(() => {
   const hasConnectionQuery = typeof route.query.connection === "string" && route.query.connection.length > 0;
@@ -356,6 +400,19 @@ onMounted(() => {
         </button>
         <button v-if="currentPath" class="icon-btn" type="button" title="上一级" @click="goUp">
           <Icon icon="lucide:corner-up-left" width="16" />
+        </button>
+        <button v-if="currentPath" class="icon-btn" type="button" title="回到根目录" @click="goRoot">
+          <Icon icon="lucide:home" width="16" />
+        </button>
+        <button
+          v-if="copyableDirectoryUrl"
+          class="icon-btn"
+          type="button"
+          :title="pathCopyStatus ?? '复制当前路径'"
+          :aria-label="pathCopyStatus ?? '复制当前路径'"
+          @click="copyCurrentDirectoryUrl"
+        >
+          <Icon icon="lucide:copy" width="16" />
         </button>
         <button class="icon-btn" type="button" :disabled="loading || !canLoad" title="刷新" @click="connectAndLoad()">
           <Icon icon="lucide:refresh-cw" width="16" :class="{ spin: loading }" />
