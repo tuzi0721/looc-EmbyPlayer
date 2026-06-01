@@ -51,10 +51,15 @@ export const DEFAULT_SETTINGS = {
 export const DEFAULT_GLOBAL_SHORTCUTS = [
   { action: "play_pause", accelerator: "MediaPlayPause" },
   { action: "stop", accelerator: "MediaStop" },
-  { action: "next_track", accelerator: "MediaTrackNext" },
-  { action: "prev_track", accelerator: "MediaTrackPrevious" },
+  { action: "next_track", accelerator: "MediaNextTrack" },
+  { action: "prev_track", accelerator: "MediaPreviousTrack" },
   { action: "toggle_window", accelerator: "CommandOrControl+Alt+E" },
 ];
+
+const LEGACY_ACCELERATOR_ALIASES = new Map([
+  ["MediaTrackNext", "MediaNextTrack"],
+  ["MediaTrackPrevious", "MediaPreviousTrack"],
+]);
 
 const EMPTY_STATE = {
   settings: DEFAULT_SETTINGS,
@@ -84,14 +89,16 @@ function normalizeGlobalShortcuts(value, fallback = DEFAULT_GLOBAL_SHORTCUTS) {
   return value
     .filter((item) => {
       if (typeof item?.action !== "string" || typeof item?.accelerator !== "string") return false;
-      if (item.action.trim().length === 0 || item.accelerator.trim().length === 0) return false;
-      if (seen.has(item.action)) return false;
-      seen.add(item.action);
+      const action = item.action.trim();
+      const accelerator = item.accelerator.trim();
+      if (action.length === 0 || accelerator.length === 0) return false;
+      if (seen.has(action)) return false;
+      seen.add(action);
       return true;
     })
     .map((item) => ({
       action: item.action.trim(),
-      accelerator: item.accelerator.trim(),
+      accelerator: LEGACY_ACCELERATOR_ALIASES.get(item.accelerator.trim()) ?? item.accelerator.trim(),
     }));
 }
 

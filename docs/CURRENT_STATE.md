@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（用户问题清单 smoke 复核）
+> 更新时间：2026-06-02（媒体键默认快捷键修正）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-0546-user-issue-smoke-rerun.md`](./CHANGE_LOG/2026-06-02-0546-user-issue-smoke-rerun.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-0549-media-shortcut-defaults.md`](./CHANGE_LOG/2026-06-02-0549-media-shortcut-defaults.md)
 
 ---
 
