@@ -21,6 +21,20 @@ const KEY_SETTINGS: &str = "settings";
 const KEY_DOWNLOADS: &str = "downloads";
 const KEY_NOTIFICATIONS: &str = "notifications";
 
+fn account_identity_key(account: &Account) -> String {
+    if !account.server_id.trim().is_empty() && !account.user_id.trim().is_empty() {
+        return format!("{}\0user:{}", account.server_id, account.user_id);
+    }
+    if !account.server_id.trim().is_empty() && !account.username.trim().is_empty() {
+        return format!(
+            "{}\0name:{}",
+            account.server_id,
+            account.username.to_lowercase()
+        );
+    }
+    format!("id:{}", account.id)
+}
+
 #[derive(Clone)]
 pub struct ConfigStore {
     inner: Arc<RwLock<ConfigInner>>,
@@ -115,16 +129,36 @@ impl ConfigStore {
             .cloned()
     }
 
-    pub fn upsert_account(&self, account: Account) -> AppResult<()> {
+    pub fn upsert_account(&self, mut account: Account) -> AppResult<Account> {
         {
             let mut g = self.inner.write();
+            let key = account_identity_key(&account);
+            if let Some(existing) = g
+                .accounts
+                .iter()
+                .find(|existing| account_identity_key(existing) == key)
+                .cloned()
+            {
+                account.id = existing.id;
+                account.created_at = existing.created_at;
+            }
+            g.accounts.retain(|existing| {
+                existing.id == account.id || account_identity_key(existing) != key
+            });
             if let Some(existing) = g.accounts.iter_mut().find(|a| a.id == account.id) {
-                *existing = account;
+                *existing = account.clone();
             } else {
-                g.accounts.push(account);
+                g.accounts.push(account.clone());
+            }
+            if let Some(active) = g.active_account_id.as_ref() {
+                if !g.accounts.iter().any(|existing| existing.id == *active) {
+                    g.active_account_id = Some(account.id.clone());
+                }
             }
         }
-        self.persist_accounts()
+        self.persist_accounts()?;
+        self.persist_active_account()?;
+        Ok(account)
     }
 
     pub fn remove_account(&self, id: &str) -> AppResult<()> {

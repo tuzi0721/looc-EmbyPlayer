@@ -632,8 +632,8 @@ export class EmbyClient {
 
     const updatedServer = { ...server, activeLineId: line.id };
     await this.store.upsertServer(updatedServer);
-    await this.store.upsertAccount(account, true);
-    return { account, winningLineId: line.id };
+    const savedAccount = await this.store.upsertAccount(account, true);
+    return { account: savedAccount, winningLineId: line.id };
   }
 
   async listViews(server, account) {

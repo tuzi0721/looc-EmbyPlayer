@@ -48,7 +48,7 @@ pub async fn login(
         created_at: Utc::now(),
         last_used_at: Utc::now(),
     };
-    state.config.upsert_account(account.clone())?;
+    let account = state.config.upsert_account(account)?;
     state.config.set_active_account(Some(account.id.clone()))?;
 
     let mut updated = server.clone();

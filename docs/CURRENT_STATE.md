@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（首页巨幕比例复核）
+> **更新时间**：2026-06-01（登录账号去重与激活状态修复）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1846-home-hero-cinema-scale.md`](./CHANGE_LOG/2026-06-01-1846-home-hero-cinema-scale.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1856-account-dedupe-login-state.md`](./CHANGE_LOG/2026-06-01-1856-account-dedupe-login-state.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：登录账号持久化去重已补齐：Electron / Tauri 重复登录同一服务器同一用户时不再生成新的随机账号记录，而是按 `serverId + userId`（缺失时回退用户名）更新现有账号，保留原 account id 并刷新 token、头像与 `lastUsedAt`；Electron 读取旧状态时还会自动合并历史重复账号，避免同一用户在设置、侧边栏和媒体库上下文里出现多份登录态。验证已覆盖 `node --check electron\backend\store.mjs`、`node --check electron\backend\emby.mjs`、Electron store 去重 smoke、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run check:electron-commands`、`npm.cmd run build`、`git diff --check` 与 `npm.cmd run electron:build`。
 
 **2026-06-01**：首页巨幕比例继续放大并复核真实媒体候选：`cinema` 桌面高度上限从 900px 提升到 1080px，按 `calc(100dvh - 72px)` 铺开首屏，内容区、右侧海报和简介字号同步放大；低高度桌面窗口新增兜底规则，避免高度小于 760px 时标题/海报过大。真实服务器只读候选 smoke 显示 Movie / Series 候选接口 200，36 个候选中 35 个有 Backdrop，36 个有 Primary 海报，36 个有 Overview 简介，确认巨幕来源是当前媒体库真实资源。验证已覆盖 `npm.cmd run build`、`git diff --check` 与 `npm.cmd run electron:build`；Codex in-app Browser 通道本轮仍无可用路由，未完成截图目检。
 

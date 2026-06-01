@@ -184,6 +184,63 @@ function normalizeDownloadTask(value) {
   };
 }
 
+function accountIdentityKey(account) {
+  const serverId = textOrNull(account?.serverId);
+  if (!serverId) return `id:${textOrNull(account?.id) ?? ""}`;
+  const userId = textOrNull(account?.userId);
+  if (userId) return `${serverId}\u0000user:${userId}`;
+  const username = textOrNull(account?.username);
+  if (username) return `${serverId}\u0000name:${username.toLocaleLowerCase()}`;
+  return `${serverId}\u0000id:${textOrNull(account?.id) ?? ""}`;
+}
+
+function accountTime(account) {
+  const parsed = Date.parse(account?.lastUsedAt ?? account?.createdAt ?? "");
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function preferredAccount(left, right, activeAccountId) {
+  const leftActive = left?.id === activeAccountId;
+  const rightActive = right?.id === activeAccountId;
+  const preferred =
+    rightActive && !leftActive
+      ? right
+      : leftActive && !rightActive
+        ? left
+        : accountTime(right) >= accountTime(left)
+          ? right
+          : left;
+  const olderCreatedAt =
+    accountTime(left) <= accountTime(right)
+      ? (left?.createdAt ?? right?.createdAt)
+      : (right?.createdAt ?? left?.createdAt);
+  return {
+    ...preferred,
+    createdAt: olderCreatedAt ?? preferred.createdAt,
+  };
+}
+
+function dedupeAccounts(accounts, activeAccountId) {
+  const byIdentity = new Map();
+  let active = activeAccountId;
+  for (const account of accounts) {
+    const key = accountIdentityKey(account);
+    const existing = byIdentity.get(key);
+    if (!existing) {
+      byIdentity.set(key, account);
+      continue;
+    }
+    const preferred = preferredAccount(existing, account, active);
+    if (existing.id === active || account.id === active) active = preferred.id;
+    byIdentity.set(key, preferred);
+  }
+  const list = [...byIdentity.values()];
+  if (active && !list.some((account) => account.id === active)) {
+    active = list[0]?.id ?? null;
+  }
+  return { accounts: list, activeAccountId: active ?? null };
+}
+
 function normalizeDownloads(value) {
   if (!Array.isArray(value)) return [];
   return value
@@ -278,6 +335,15 @@ export class JsonStore {
         downloads: normalizeDownloads(parsed.downloads),
         globalShortcuts: normalizeGlobalShortcuts(parsed.globalShortcuts),
       };
+      const deduped = dedupeAccounts(this.state.accounts, this.state.activeAccountId);
+      if (
+        deduped.accounts.length !== this.state.accounts.length ||
+        deduped.activeAccountId !== this.state.activeAccountId
+      ) {
+        this.state.accounts = deduped.accounts;
+        this.state.activeAccountId = deduped.activeAccountId;
+        await this.save();
+      }
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
       this.state = (await readLegacyTauriState()) ?? structuredClone(EMPTY_STATE);
@@ -519,12 +585,23 @@ export class JsonStore {
 
   async upsertAccount(account, active = false) {
     await this.load();
-    const index = this.state.accounts.findIndex((item) => item.id === account.id);
-    if (index >= 0) this.state.accounts[index] = account;
-    else this.state.accounts.push(account);
-    if (active) this.state.activeAccountId = account.id;
+    const key = accountIdentityKey(account);
+    const existing = this.state.accounts.find((item) => accountIdentityKey(item) === key);
+    const next = existing
+      ? {
+          ...account,
+          id: existing.id,
+          createdAt: existing.createdAt ?? account.createdAt,
+        }
+      : account;
+    const deduped = dedupeAccounts(
+      [...this.state.accounts.filter((item) => item.id !== next.id), next],
+      active ? next.id : this.state.activeAccountId,
+    );
+    this.state.accounts = deduped.accounts;
+    this.state.activeAccountId = deduped.activeAccountId;
     await this.save();
-    return account;
+    return next;
   }
 
   async removeAccount(id) {
