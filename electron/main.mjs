@@ -2232,7 +2232,7 @@ async function handleInvoke(command, args = {}) {
   if (command === "unread_count") return store.unreadCount();
   if (command === "list_danmaku_providers") return danmaku.listProviders();
   if (command === "fetch_danmaku") return danmaku.fetch(args.itemId, args.provider ?? null);
-  if (command === "import_danmaku_xml") return danmaku.importXml(args.payload?.filePath);
+  if (command === "import_danmaku_xml") return danmaku.importXml(args.payload ?? {});
   if (command === "list_remote_sessions") {
     const { server, account } = await requireActivePair();
     return emby.listSessions(server, account);

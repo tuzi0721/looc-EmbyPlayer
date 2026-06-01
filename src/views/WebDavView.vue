@@ -47,6 +47,7 @@ const visibleItems = computed(() => {
           entry.extension,
           entry.contentType ?? "",
           entry.sidecarSubtitleCount ? "字幕" : "",
+          entry.sidecarDanmaku ? "弹幕 xml" : "",
         ]
           .join(" ")
           .toLocaleLowerCase()
@@ -113,9 +114,10 @@ function formatDate(ms?: number | null): string {
 }
 
 function sidecarSummary(entry: WebDavEntry): string {
-  return entry.sidecarSubtitleCount && entry.sidecarSubtitleCount > 0
+  const subtitles = entry.sidecarSubtitleCount && entry.sidecarSubtitleCount > 0
     ? `字幕 ${entry.sidecarSubtitleCount}`
     : "";
+  return [subtitles, entry.sidecarDanmaku ? "XML 弹幕" : ""].filter(Boolean).join(" · ");
 }
 
 function compareText(left: string, right: string): number {
@@ -243,6 +245,7 @@ async function playEntry(entry: WebDavEntry) {
       username: usernameDraft.value || null,
       password: passwordDraft.value || null,
       sidecarSubtitles: item.sidecarSubtitles ?? [],
+      sidecarDanmaku: item.sidecarDanmaku ?? null,
     }));
     const startIndex = Math.max(0, queue.findIndex((item) => item.url === entry.url));
     player.setDirectQueue(queue, startIndex);
@@ -253,6 +256,7 @@ async function playEntry(entry: WebDavEntry) {
       username: usernameDraft.value || null,
       password: passwordDraft.value || null,
       sidecarSubtitles: entry.sidecarSubtitles ?? [],
+      sidecarDanmaku: entry.sidecarDanmaku ?? null,
     });
     router
       .push({

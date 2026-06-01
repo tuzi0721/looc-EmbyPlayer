@@ -700,7 +700,7 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
   {
     key: "webdav",
     label: "WebDAV",
-    detail: "可保存/收藏连接、PROPFIND 浏览目录，识别同名字幕并把视频直链交给内嵌 mpv 播放",
+    detail: "可保存/收藏连接、PROPFIND 浏览目录，识别同名字幕/XML 弹幕并把视频直链交给内嵌 mpv 播放",
     icon: "lucide:cloud",
     status: "available",
   },

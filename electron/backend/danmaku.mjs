@@ -80,6 +80,13 @@ function parseColor(value) {
   return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
 }
 
+function basicAuthorization(username, password) {
+  const user = typeof username === "string" ? username : "";
+  const pass = typeof password === "string" ? password : "";
+  if (!user && !pass) return null;
+  return `Basic ${Buffer.from(`${user}:${pass}`, "utf8").toString("base64")}`;
+}
+
 function parseComment(raw) {
   const parts = String(raw?.p ?? "").split(",");
   if (parts.length < 3) return null;
@@ -168,13 +175,41 @@ export class DanmakuClient {
     return null;
   }
 
-  async importXml(filePath) {
+  async importXml(payload) {
+    if (payload && typeof payload === "object" && typeof payload.url === "string") {
+      return this.importXmlUrl(payload);
+    }
+    const filePath = typeof payload === "string" ? payload : payload?.filePath;
     if (typeof filePath !== "string" || filePath.trim().length === 0) {
       throw new Error("import_danmaku_xml requires a file path");
     }
     const text = await fs.readFile(filePath, "utf8");
     const episodeId = path.basename(filePath);
     return parseDanmakuXml(text, episodeId);
+  }
+
+  async importXmlUrl(payload = {}) {
+    const source = typeof payload.url === "string" ? payload.url.trim() : "";
+    if (!source) throw new Error("import_danmaku_xml requires a URL");
+    const url = new URL(source);
+    if (!["http:", "https:"].includes(url.protocol)) {
+      throw new Error("danmaku XML URL must use http or https");
+    }
+    const authorization = basicAuthorization(payload.username, payload.password);
+    const headers = {
+      Accept: "application/xml,text/xml,*/*",
+    };
+    if (authorization) headers.Authorization = authorization;
+    const settings = await this.store.getSettings();
+    const response = await fetch(url, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(Math.max(1000, settings.requestTimeoutMs ?? 15000)),
+    });
+    if (!response.ok) {
+      throw new Error(`danmaku XML fetch failed: HTTP ${response.status}`);
+    }
+    return parseDanmakuXml(await response.text(), path.basename(url.pathname) || "webdav-xml");
   }
 
   async fetchDanDanPlay(item, timeoutMs) {

@@ -5,7 +5,7 @@ import { api } from "@/api";
 import { useAuthStore } from "@/stores/auth";
 import { useLibraryStore } from "@/stores/library";
 import { useServerStore } from "@/stores/server";
-import type { PlaybackSource, WebDavSidecarSubtitle } from "@/api";
+import type { PlaybackSource, WebDavSidecarDanmaku, WebDavSidecarSubtitle } from "@/api";
 import type { MpvSnapshot, PictureMode, SubtitleStyleSettings } from "@/types/models";
 
 type PlaybackQueueKind = "remote" | "local" | "direct";
@@ -17,6 +17,7 @@ export interface DirectQueueEntry {
   username?: string | null;
   password?: string | null;
   sidecarSubtitles?: WebDavSidecarSubtitle[];
+  sidecarDanmaku?: WebDavSidecarDanmaku | null;
 }
 
 export const usePlayerStore = defineStore("player", () => {
@@ -97,6 +98,7 @@ export const usePlayerStore = defineStore("player", () => {
     username?: string | null;
     password?: string | null;
     sidecarSubtitles?: WebDavSidecarSubtitle[];
+    sidecarDanmaku?: WebDavSidecarDanmaku | null;
     startMs?: number | null;
   }) {
     await api.playWebDavFile(payload);

@@ -207,13 +207,31 @@ function sidecarSubtitlesFor(videoEntry, entries) {
     .map(({ name, url, extension }) => ({ name, url, extension }));
 }
 
+function sidecarDanmakuFor(videoEntry, entries) {
+  if (!videoEntry.playable) return null;
+  const videoStem = stemFromName(videoEntry.name).toLowerCase();
+  const candidates = new Set([
+    `${videoStem}.xml`,
+    `${videoStem}.danmaku.xml`,
+    `${videoStem}.comments.xml`,
+  ]);
+  const match = entries.find(
+    (entry) => !entry.isDirectory && entry.extension === "xml" && candidates.has(entry.name.toLowerCase()),
+  );
+  return match ? { name: match.name, url: match.url } : null;
+}
+
 function annotateSidecars(entries) {
   return entries.map((entry) => {
     if (!entry.playable) return entry;
     const sidecarSubtitles = sidecarSubtitlesFor(entry, entries);
-    return sidecarSubtitles.length > 0
-      ? { ...entry, sidecarSubtitleCount: sidecarSubtitles.length, sidecarSubtitles }
-      : { ...entry, sidecarSubtitleCount: 0, sidecarSubtitles: [] };
+    const sidecarDanmaku = sidecarDanmakuFor(entry, entries);
+    return {
+      ...entry,
+      sidecarSubtitleCount: sidecarSubtitles.length,
+      sidecarSubtitles,
+      sidecarDanmaku,
+    };
   });
 }
 

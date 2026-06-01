@@ -817,14 +817,30 @@ function webDavSidecarSubtitlesFor(videoEntry: WebDavEntry, entries: WebDavEntry
     .map(({ name, url, extension }) => ({ name, url, extension }));
 }
 
+function webDavSidecarDanmakuFor(videoEntry: WebDavEntry, entries: WebDavEntry[]) {
+  if (!videoEntry.playable) return null;
+  const videoStem = webDavStemFromName(videoEntry.name).toLocaleLowerCase();
+  const candidates = new Set([
+    `${videoStem}.xml`,
+    `${videoStem}.danmaku.xml`,
+    `${videoStem}.comments.xml`,
+  ]);
+  const match = entries.find(
+    (entry) => !entry.isDirectory && entry.extension === "xml" && candidates.has(entry.name.toLocaleLowerCase()),
+  );
+  return match ? { name: match.name, url: match.url } : null;
+}
+
 function webDavAnnotateSidecars(entries: WebDavEntry[]) {
   return entries.map((entry) => {
     if (!entry.playable) return entry;
     const sidecarSubtitles = webDavSidecarSubtitlesFor(entry, entries);
+    const sidecarDanmaku = webDavSidecarDanmakuFor(entry, entries);
     return {
       ...entry,
       sidecarSubtitleCount: sidecarSubtitles.length,
       sidecarSubtitles,
+      sidecarDanmaku,
     };
   });
 }

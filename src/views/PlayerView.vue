@@ -271,6 +271,36 @@ async function autoImportLocalDanmakuXml(filePath: string) {
   }
 }
 
+function currentDirectQueueEntry(): DirectQueueEntry | null {
+  const url = player.directUrl;
+  if (!url) return null;
+  return player.directQueue.find((entry) => entry.url === url) ?? null;
+}
+
+async function autoImportWebDavDanmaku(entry: DirectQueueEntry | null) {
+  if (!entry?.sidecarDanmaku?.url) {
+    resetDanmakuState();
+    return;
+  }
+  danmakuLoading.value = true;
+  try {
+    const result = await api.importDanmakuXml({
+      url: entry.sidecarDanmaku.url,
+      username: entry.username ?? null,
+      password: entry.password ?? null,
+    });
+    if ((result.comments ?? []).length > 0) {
+      applyDanmakuResult(result);
+    } else {
+      resetDanmakuState();
+    }
+  } catch {
+    resetDanmakuState();
+  } finally {
+    danmakuLoading.value = false;
+  }
+}
+
 function normalizeDanmakuText(text: string): string {
   return text.replace(/\s+/g, " ").trim().toLowerCase();
 }
@@ -611,6 +641,12 @@ watch(() => player.localFilePath, (filePath, oldFilePath) => {
     delete query.start;
     router.replace({ name: "player", params: { id: "local-file" }, query }).catch(() => {});
   }
+});
+
+watch(() => player.directUrl, (url, oldUrl) => {
+  if (!url || url === oldUrl) return;
+  resetDanmakuState();
+  void autoImportWebDavDanmaku(currentDirectQueueEntry());
 });
 
 watch(episodeMenuOpen, (open) => {

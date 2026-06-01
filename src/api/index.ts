@@ -153,12 +153,18 @@ export interface WebDavEntry {
   playable: boolean;
   sidecarSubtitleCount?: number;
   sidecarSubtitles?: WebDavSidecarSubtitle[];
+  sidecarDanmaku?: WebDavSidecarDanmaku | null;
 }
 
 export interface WebDavSidecarSubtitle {
   name: string;
   url: string;
   extension: string;
+}
+
+export interface WebDavSidecarDanmaku {
+  name: string;
+  url: string;
 }
 
 export interface WebDavListing {
@@ -362,7 +368,12 @@ export const api = {
     invoke<DanmakuProviderInfo[]>("list_danmaku_providers"),
   fetchDanmaku: (itemId: string, provider?: string) =>
     invoke<DanmakuResult | null>("fetch_danmaku", { itemId, provider }),
-  importDanmakuXml: (payload: { filePath: string }) =>
+  importDanmakuXml: (payload: {
+    filePath?: string;
+    url?: string;
+    username?: string | null;
+    password?: string | null;
+  }) =>
     invoke<DanmakuResult>("import_danmaku_xml", { payload }),
 
   // Downloads
@@ -395,6 +406,7 @@ export const api = {
     password?: string | null;
     userAgent?: string | null;
     sidecarSubtitles?: WebDavSidecarSubtitle[];
+    sidecarDanmaku?: WebDavSidecarDanmaku | null;
     startMs?: number | null;
   }) => invoke<void>("play_webdav_file", { payload }),
 
