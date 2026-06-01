@@ -297,10 +297,11 @@ function safeMediaSourceName(source: MediaSourceInfo, index: number) {
 
 function mediaCapabilityText(source: MediaSourceInfo) {
   const parts: string[] = [];
-  if (source.SupportsDirectPlay) parts.push("直连");
-  if (source.SupportsDirectStream) parts.push("直流");
-  if (source.SupportsTranscoding) parts.push("转码");
-  return parts.join(" / ");
+  if (source.SupportsDirectPlay) parts.push("本机直连");
+  if (source.SupportsDirectStream) parts.push("本机直流");
+  if (parts.length > 0) return parts.join(" / ");
+  if (source.SupportsTranscoding) return "仅服务端转码（不可播放）";
+  return "本机解码待确认";
 }
 
 function pushMediaInfoRow(rows: MediaInfoRow[], row: MediaInfoRow) {

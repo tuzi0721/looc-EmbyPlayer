@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（服务器线路高级编辑）
+> **更新时间**：2026-06-01（详情页本机解码能力文案）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1544-server-line-edit-advanced-ua.md`](./CHANGE_LOG/2026-06-01-1544-server-line-edit-advanced-ua.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1550-detail-local-decode-copy.md`](./CHANGE_LOG/2026-06-01-1550-detail-local-decode-copy.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：详情页“媒体信息”的播放能力文案同步本机解码硬约束：可用能力只显示“本机直连 / 本机直流”；如果媒体源只能依赖服务端转码，则显示“仅服务端转码（不可播放）”，不再把转码包装成可用播放能力。
 
 **2026-06-01**：设置页服务器编辑继续收敛到线路级配置：服务器级默认 User-Agent 不再显示，保存时清空为 `null`；每条线路保留名称、URL、启用开关，User-Agent 与 Headers 移入“高级”折叠区，避免和添加服务器流程重复。播放链路仍延续本机解码硬约束，不允许服务端转码。
 
@@ -597,7 +599,7 @@ npm.cmd run electron:build
 
 本轮 Web Preview 播放手势兜底已闭环：HTML/HLS 播放按钮在 `video.play()` 被浏览器拒绝为缺少用户手势时，会自动切到静音并重试，避免真实视频对象已加载但时间停在 0 秒；真实测试账号会话直接打开真实播放器页后，点击播放按钮将 HTML video 从 `currentTime = 0` 推进到约 10 秒，`paused = false`，视频尺寸保持 1440×1080 且页面无播放失败提示。验证已覆盖 `npm.cmd run build`、in-app Browser 1420 真实播放页回归、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`；Electron/Tauri 内嵌 mpv 路径不受该 Web Preview fallback 影响。
 
-本轮详情页媒体信息已闭环：Emby/Jellyfin 详情请求三端同步补齐 `MediaSources`，PDP 新增“媒体信息”摘要区，真实条目详情页显示媒体源、MKV 容器、H264 1440×1080、AAC 音频、字幕数量、总码率、大小和直连/直流/转码能力；页面文本检查确认未显示完整 URL、Windows 路径或常见 Unix 媒体路径。验证已覆盖 `node --check electron\backend\emby.mjs`、`cargo fmt --manifest-path src-tauri\Cargo.toml`、`npm.cmd run build`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、in-app Browser 1420 真实详情页目检、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`。
+本轮详情页媒体信息已闭环：Emby/Jellyfin 详情请求三端同步补齐 `MediaSources`，PDP 新增“媒体信息”摘要区，真实条目详情页显示媒体源、MKV 容器、H264 1440×1080、AAC 音频、字幕数量、总码率、大小和本机直连/直流能力；页面文本检查确认未显示完整 URL、Windows 路径或常见 Unix 媒体路径。验证已覆盖 `node --check electron\backend\emby.mjs`、`cargo fmt --manifest-path src-tauri\Cargo.toml`、`npm.cmd run build`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、in-app Browser 1420 真实详情页目检、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`。
 
 本轮 Web Preview 详情加载超时已闭环：`src/platform` 的浏览器直连请求与 `__hills_web_proxy` fallback 统一使用设置里的请求超时，Vite 本地代理会按前端传入的 `timeoutMs` 取消真实 API 请求，`DetailView` 主详情加载超过超时后进入既有错误态；HLS/播放流代理保持不加短超时，避免影响播放分片。验证已覆盖 `npm.cmd run build`、`git diff --check` 与敏感关键字扫描；未写入测试账号、密码、token 或完整线路地址。
 
