@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（Web Preview 本地假结果清理）
+> **更新时间**：2026-06-01（忽略目录残留清理）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1932-web-preview-local-fake-results.md`](./CHANGE_LOG/2026-06-01-1932-web-preview-local-fake-results.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1940-ignored-legacy-folder-cleanup.md`](./CHANGE_LOG/2026-06-01-1940-ignored-legacy-folder-cleanup.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：忽略目录残留继续清理：旧 `src-tauri/vendor/` 已删除，清掉历史 mpv 下载包、`mpv/` 与 `mpv-extract/`；本地助手工具目录 `.cunzhi-memory/` 也已从项目工作区移除。`.gitignore` 同步移除 `.cunzhi-memory/` 与 `/src-tauri/vendor/` 静默忽略项，避免这类非产品目录后续重新出现时继续被隐藏；当前 `git status --short --ignored` 只剩 `.electron-user-data/`、`.vscode/`、`dist/`、`node_modules/`、`release-electron/` 与 `src-tauri/target/` 这些运行/构建相关目录。验证已覆盖路径存在性检查、忽略状态检查与源码引用扫描。
 
 **2026-06-01**：Web Preview 本地假结果继续清理：`list_local_folder` 不再把任意本地目录伪装成空列表，`import_danmaku_xml` 也不再返回 `{ provider: "xml", comments: [] }` 假成功；浏览器无法真实完成的本地文件夹枚举和本地弹幕 XML 导入现在都会明确提示不支持，请使用桌面版。WebDAV / Alist 这些浏览器可执行的网络访问路径保持不变。验证已覆盖 `npm.cmd run build`、`git diff --check` 与 `npm.cmd run electron:build`。
 

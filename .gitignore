@@ -7,9 +7,6 @@ release-electron
 .git_disabled/
 *.local
 
-# Local assistant/tooling memory (keep on this machine, do not publish)
-.cunzhi-memory/
-
 # Editor
 .vscode/*
 !.vscode/extensions.json
@@ -23,7 +20,6 @@ release-electron
 
 # Tauri / Rust
 /src-tauri/target
-/src-tauri/vendor/
 **/*.rs.bk
 
 # Logs
