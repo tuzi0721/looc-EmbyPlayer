@@ -26,12 +26,10 @@ type PanelId =
   | "library"
   | "fileServices"
   | "backup"
-  | "sync"
   | "network"
   | "player"
   | "downloads"
   | "enhancement"
-  | "aiSubtitles"
   | "externalPlayer"
   | "danmaku"
   | "shortcuts"
@@ -115,7 +113,6 @@ function panelFromQuery(value: unknown): PanelId {
     case "danmaku":
     case "shortcuts":
     case "backup":
-    case "sync":
       return category;
     case "download":
       return "downloads";
@@ -127,10 +124,6 @@ function panelFromQuery(value: unknown): PanelId {
       return "fileServices";
     case "enhancement":
       return "enhancement";
-    case "ai-subtitles":
-    case "aiSubtitles":
-    case "whisper":
-      return "aiSubtitles";
     case "external-player":
       return "externalPlayer";
     case "appearance":
@@ -569,7 +562,7 @@ const runtimeLabel = computed(() =>
 const activeAccountLabel = computed(() => auth.activeAccount?.username ?? "未登录");
 const isWindowsPlatform = computed(() => platformLabel.value.toLowerCase().includes("windows"));
 
-type CapabilityStatus = "available" | "disabled" | "planned";
+type CapabilityStatus = "available" | "disabled";
 type EnhancementStatus = CapabilityStatus;
 
 type EnhancementCapability = {
@@ -579,22 +572,6 @@ type EnhancementCapability = {
   icon: string;
   status: EnhancementStatus;
   action?: "windows-hdr";
-};
-
-type AiSubtitleCapability = {
-  key: string;
-  label: string;
-  detail: string;
-  icon: string;
-  status: CapabilityStatus;
-};
-
-type SyncCapability = {
-  key: string;
-  label: string;
-  detail: string;
-  icon: string;
-  status: CapabilityStatus;
 };
 
 type FileServiceCapability = {
@@ -608,20 +585,14 @@ type FileServiceCapability = {
 const capabilityStatusLabel: Record<CapabilityStatus, string> = {
   available: "可用",
   disabled: "禁用",
-  planned: "待接入",
 };
 
 const enhancementSummary = computed(() =>
   isWindowsPlatform.value ? "HDR 系统入口" : "等待硬件路径",
 );
-const aiSubtitleSummary = computed(() => "待接入");
 const fileServicesSummary = computed(() => "本地 / WebDAV / Alist 可用");
 
 const enhancementCapabilities = computed<EnhancementCapability[]>(() => {
-  const mpvPath =
-    settings.settings.mpvBackend === "embedded"
-      ? "当前内嵌宿主仍走 mpv IPC 窗口托管"
-      : "当前播放核心为 mpv IPC";
   return [
     {
       key: "windows-hdr",
@@ -631,83 +602,8 @@ const enhancementCapabilities = computed<EnhancementCapability[]>(() => {
       status: isWindowsPlatform.value ? "available" : "disabled",
       action: "windows-hdr",
     },
-    {
-      key: "rtx-vsr",
-      label: "RTX VSR",
-      detail: `${mpvPath}，未接入 NVIDIA 检测`,
-      icon: "lucide:sparkles",
-      status: "planned",
-    },
-    {
-      key: "true-hdr",
-      label: "RTX TrueHDR",
-      detail: `${mpvPath}，未接入 HDR 输出链路`,
-      icon: "lucide:contrast",
-      status: "planned",
-    },
-    {
-      key: "amd-fsr",
-      label: "AMD FSR",
-      detail: "未接入 GPU 型号检测与滤镜链",
-      icon: "lucide:scan",
-      status: "planned",
-    },
-    {
-      key: "rife",
-      label: "RIFE 插帧",
-      detail: "未接入模型运行时与队列",
-      icon: "lucide:frames",
-      status: "planned",
-    },
-    {
-      key: "glsl-shaders",
-      label: "GLSL Shaders",
-      detail: "未开放 shader 文件选择与 mpv 配置",
-      icon: "lucide:sliders-horizontal",
-      status: "planned",
-    },
   ];
 });
-
-const aiSubtitleCapabilities = computed<AiSubtitleCapability[]>(() => [
-  {
-    key: "whisper-local",
-    label: "Whisper 本地转写",
-    detail: "未接入模型目录、任务队列与音频切片",
-    icon: "lucide:mic-vocal",
-    status: "planned",
-  },
-  {
-    key: "whisper-api",
-    label: "Whisper API",
-    detail: "未接入 API Key、用量限制与失败重试",
-    icon: "lucide:cloud",
-    status: "planned",
-  },
-  {
-    key: "gpu-acceleration",
-    label: "CUDA / Vulkan",
-    detail: "未接入 GPU 与运行时能力检测",
-    icon: "lucide:cpu",
-    status: "planned",
-  },
-  {
-    key: "ai-translation",
-    label: "AI 翻译",
-    detail: "未接入本地或云端翻译 worker",
-    icon: "lucide:languages",
-    status: "planned",
-  },
-  {
-    key: "dtw-timestamps",
-    label: "DTW 时间戳",
-    detail: "未接入 token 时间戳对齐与有限预读",
-    icon: "lucide:timer",
-    status: "planned",
-  },
-]);
-
-const syncSummary = computed(() => "待接入");
 
 const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
   {
@@ -802,63 +698,11 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
     status: "available",
   },
   {
-    key: "smb",
-    label: "SMB",
-    detail: "完整发现与凭据存储未接入；已授权 UNC 路径可通过手动路径打开",
-    icon: "lucide:network",
-    status: "planned",
-  },
-  {
     key: "alist-openlist",
     label: "Alist / OpenList",
     detail: "可配置/收藏站点，恢复上次目录，刷新签名直链并携带同名封面/字幕/XML 弹幕播放",
     icon: "lucide:list-tree",
     status: "available",
-  },
-  {
-    key: "plex",
-    label: "Plex 连接器",
-    detail: "未接入 Plex 鉴权、媒体库模型与播放会话",
-    icon: "lucide:server-cog",
-    status: "planned",
-  },
-]);
-
-const syncCapabilities = computed<SyncCapability[]>(() => [
-  {
-    key: "trakt-oauth",
-    label: "Trakt OAuth",
-    detail: "未接入 device flow、token 存储与刷新",
-    icon: "lucide:key-round",
-    status: "planned",
-  },
-  {
-    key: "watched-sync",
-    label: "观看记录同步",
-    detail: "未接入 Trakt 双向同步队列",
-    icon: "lucide:eye",
-    status: "planned",
-  },
-  {
-    key: "rating-sync",
-    label: "评分同步",
-    detail: "未接入评分读取、冲突合并与回写",
-    icon: "lucide:star",
-    status: "planned",
-  },
-  {
-    key: "favorite-sync",
-    label: "收藏同步",
-    detail: "未接入收藏状态映射与批量同步",
-    icon: "lucide:heart",
-    status: "planned",
-  },
-  {
-    key: "douban-rating",
-    label: "Douban 评分",
-    detail: "未接入 Douban 元数据评分 provider",
-    icon: "lucide:badge-star",
-    status: "planned",
   },
 ]);
 
@@ -1237,26 +1081,6 @@ const danmakuSummary = computed(() => {
         </div>
         <div v-if="backupStatus" class="status-line">{{ backupStatus }}</div>
       </div>
-      <button class="row" @click="togglePanel('sync')">
-        <span>同步</span>
-        <span class="value">{{ syncSummary }}</span>
-      </button>
-      <div v-if="openPanel === 'sync'" class="panel glass">
-        <ul class="cap-list">
-          <li v-for="cap in syncCapabilities" :key="cap.key" class="cap-row">
-            <div class="cap-row__icon">
-              <Icon :icon="cap.icon" width="16" />
-            </div>
-            <div class="cap-row__main">
-              <strong>{{ cap.label }}</strong>
-              <span>{{ cap.detail }}</span>
-            </div>
-            <span class="cap-status" :class="`cap-status--${cap.status}`">
-              {{ capabilityStatusLabel[cap.status] }}
-            </span>
-          </li>
-        </ul>
-      </div>
       <div class="row row--static">
         <span>关闭时最小化到托盘</span>
         <input
@@ -1530,27 +1354,6 @@ const danmakuSummary = computed(() => {
             >
               <Icon icon="lucide:external-link" width="14" />
             </button>
-          </li>
-        </ul>
-      </div>
-
-      <button class="row" @click="togglePanel('aiSubtitles')">
-        <span>AI 字幕</span>
-        <span class="value">{{ aiSubtitleSummary }}</span>
-      </button>
-      <div v-if="openPanel === 'aiSubtitles'" class="panel glass">
-        <ul class="cap-list">
-          <li v-for="cap in aiSubtitleCapabilities" :key="cap.key" class="cap-row">
-            <div class="cap-row__icon">
-              <Icon :icon="cap.icon" width="16" />
-            </div>
-            <div class="cap-row__main">
-              <strong>{{ cap.label }}</strong>
-              <span>{{ cap.detail }}</span>
-            </div>
-            <span class="cap-status" :class="`cap-status--${cap.status}`">
-              {{ capabilityStatusLabel[cap.status] }}
-            </span>
           </li>
         </ul>
       </div>
