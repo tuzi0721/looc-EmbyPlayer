@@ -179,8 +179,6 @@ pub struct AppSettings {
     pub download_directory: Option<String>,
     #[serde(default)]
     pub home_hero_style: HomeHeroStyle,
-    #[serde(default = "default_true")]
-    pub close_to_tray: bool,
     #[serde(default)]
     pub trakt_sync_enabled: bool,
     #[serde(default)]
@@ -247,7 +245,6 @@ impl Default for AppSettings {
             append_auth_query: false,
             download_directory: None,
             home_hero_style: HomeHeroStyle::default(),
-            close_to_tray: true,
             trakt_sync_enabled: false,
             trakt_username: None,
             trakt_sync_watched: true,

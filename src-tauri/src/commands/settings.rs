@@ -50,7 +50,6 @@ pub struct SettingsPatch {
     #[serde(default, deserialize_with = "deserialize_nullable_field")]
     pub download_directory: Option<Option<String>>,
     pub home_hero_style: Option<HomeHeroStyle>,
-    pub close_to_tray: Option<bool>,
     pub trakt_sync_enabled: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_nullable_field")]
     pub trakt_username: Option<Option<String>>,
@@ -229,9 +228,6 @@ pub async fn update_settings(
         }
         if let Some(v) = patch.home_hero_style {
             s.home_hero_style = v;
-        }
-        if let Some(v) = patch.close_to_tray {
-            s.close_to_tray = v;
         }
         if let Some(v) = patch.trakt_sync_enabled {
             s.trakt_sync_enabled = v;

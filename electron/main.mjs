@@ -2070,9 +2070,7 @@ async function handleInvoke(command, args = {}) {
   }
 
   if (command === "update_settings") {
-    const updated = await store.updateSettings(args.patch ?? {});
-    await desktopIntegration?.reloadSettings();
-    return updated;
+    return store.updateSettings(args.patch ?? {});
   }
 
   if (command === "export_config") {

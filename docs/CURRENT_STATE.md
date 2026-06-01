@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-01（工作区卫生检查）
+> 更新时间：2026-06-01（关闭到托盘旧设置清理）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-01-2040-workspace-hygiene-check.md`](./CHANGE_LOG/2026-06-01-2040-workspace-hygiene-check.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-01-2046-close-to-tray-setting-removal.md`](./CHANGE_LOG/2026-06-01-2046-close-to-tray-setting-removal.md)
 
 ---
 
@@ -26,6 +26,8 @@
 当前项目指导文档也已同步：`PROJECT_MEMORY.md` 与 `STANDARDS.md` 不再作为旧路线清单，而是指向当前 Electron 主线、随包 mpv、本机解码硬约束、阶段日志/提交/推送节奏和安全边界。
 
 工作区卫生检查已接入 `npm.cmd run check:workspace`：该脚本允许当前 6 个运行/构建目录，拦截意外未跟踪文件和意外忽略目录，用来避免旧临时文件、旧 Git 目录或散落构建日志重新污染仓库判断。
+
+关闭语义已收紧：设置页不再展示“关闭时最小化到托盘”旧开关，配置读写会过滤 `closeToTray` / `close_to_tray` 旧字段。窗口关闭继续走 runtime cleanup 与 `app.quit()`，托盘只保留显式“显示/隐藏窗口/退出”菜单动作，避免用户点关闭后误以为应用退出但播放仍藏在后台。
 
 ---
 

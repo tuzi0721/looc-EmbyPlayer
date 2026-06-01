@@ -66,7 +66,6 @@ export interface AppSettings {
   appendAuthQuery: boolean;
   downloadDirectory?: string | null;
   homeHeroStyle: "classic" | "cinema";
-  closeToTray: boolean;
   traktSyncEnabled: boolean;
   traktUsername?: string | null;
   traktSyncWatched: boolean;

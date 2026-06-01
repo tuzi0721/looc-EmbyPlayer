@@ -51,19 +51,12 @@ export class DesktopIntegration {
     this.quitting = false;
     this.nowPlaying = null;
     this.playbackStatus = "stopped";
-    this.closeToTray = false;
   }
 
   async init() {
-    await this.reloadSettings();
     this.registerProtocolClient();
     this.createTray();
     await this.refreshTray();
-  }
-
-  async reloadSettings() {
-    const settings = await this.store.getSettings().catch(() => ({}));
-    this.closeToTray = settings.closeToTray === true;
   }
 
   markQuitting() {
@@ -72,10 +65,6 @@ export class DesktopIntegration {
 
   isQuitting() {
     return this.quitting;
-  }
-
-  shouldCloseToTray() {
-    return this.closeToTray;
   }
 
   registerProtocolClient() {

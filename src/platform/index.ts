@@ -85,7 +85,6 @@ const WEB_DEFAULT_SETTINGS: AppSettings = {
   appendAuthQuery: false,
   downloadDirectory: null,
   homeHeroStyle: "cinema",
-  closeToTray: false,
   traktSyncEnabled: false,
   traktUsername: null,
   traktSyncWatched: true,

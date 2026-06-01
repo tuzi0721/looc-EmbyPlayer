@@ -30,7 +30,6 @@ export const DEFAULT_SETTINGS = {
   appendAuthQuery: false,
   downloadDirectory: null,
   homeHeroStyle: "cinema",
-  closeToTray: false,
   traktSyncEnabled: false,
   traktUsername: null,
   traktSyncWatched: true,
@@ -67,6 +66,16 @@ const EMPTY_STATE = {
   downloads: [],
   globalShortcuts: DEFAULT_GLOBAL_SHORTCUTS,
 };
+
+function normalizeSettings(value) {
+  const source = value && typeof value === "object" ? value : {};
+  return Object.fromEntries(
+    Object.entries(DEFAULT_SETTINGS).map(([key, fallback]) => [
+      key,
+      Object.prototype.hasOwnProperty.call(source, key) ? source[key] : fallback,
+    ]),
+  );
+}
 
 function normalizeGlobalShortcuts(value, fallback = DEFAULT_GLOBAL_SHORTCUTS) {
   if (!Array.isArray(value)) return structuredClone(fallback);
@@ -295,7 +304,7 @@ async function readLegacyTauriState() {
     const accounts = Array.isArray(parsed.accounts) ? parsed.accounts : [];
     if (servers.length === 0 && accounts.length === 0 && !parsed.settings) return null;
     return {
-      settings: { ...DEFAULT_SETTINGS, ...(parsed.settings ?? {}) },
+      settings: normalizeSettings(parsed.settings),
       servers,
       accounts,
       activeAccountId: parsed.active_account_id ?? parsed.activeAccountId ?? accounts[0]?.id ?? null,
@@ -328,7 +337,7 @@ export class JsonStore {
       this.state = {
         ...structuredClone(EMPTY_STATE),
         ...parsed,
-        settings: { ...DEFAULT_SETTINGS, ...(parsed.settings ?? {}) },
+        settings: normalizeSettings(parsed.settings),
         servers: Array.isArray(parsed.servers) ? parsed.servers : [],
         accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
         notifications: normalizeNotifications(parsed.notifications),
@@ -369,12 +378,12 @@ export class JsonStore {
 
   async getSettings() {
     await this.load();
-    return { ...DEFAULT_SETTINGS, ...this.state.settings };
+    return normalizeSettings(this.state.settings);
   }
 
   async updateSettings(patch) {
     await this.load();
-    this.state.settings = { ...DEFAULT_SETTINGS, ...this.state.settings, ...patch };
+    this.state.settings = normalizeSettings({ ...this.state.settings, ...patch });
     await this.save();
     return this.state.settings;
   }
@@ -416,7 +425,7 @@ export class JsonStore {
       version: 1,
       exportedAt: new Date().toISOString(),
       data: {
-        settings: { ...DEFAULT_SETTINGS, ...this.state.settings },
+        settings: normalizeSettings(this.state.settings),
         servers: structuredClone(this.state.servers),
         accounts: structuredClone(this.state.accounts),
         activeAccountId: this.state.activeAccountId,
@@ -436,7 +445,7 @@ export class JsonStore {
     const importedAccounts = normalizeBackupAccounts(data.accounts);
     const importedSettingsPatch =
       data.settings && typeof data.settings === "object" ? data.settings : {};
-    const importedSettings = { ...DEFAULT_SETTINGS, ...importedSettingsPatch };
+    const importedSettings = normalizeSettings(importedSettingsPatch);
     const importedShortcuts = normalizeGlobalShortcuts(
       data.globalShortcuts ?? data.global_shortcuts,
       this.state.globalShortcuts,
@@ -449,7 +458,7 @@ export class JsonStore {
       this.state.accounts = importedAccounts;
       this.state.globalShortcuts = importedShortcuts;
     } else {
-      this.state.settings = { ...DEFAULT_SETTINGS, ...this.state.settings, ...importedSettingsPatch };
+      this.state.settings = normalizeSettings({ ...this.state.settings, ...importedSettingsPatch });
       this.state.servers = mergeById(this.state.servers, importedServers);
       this.state.accounts = mergeById(this.state.accounts, importedAccounts);
       this.state.globalShortcuts = mergeShortcuts(this.state.globalShortcuts, importedShortcuts);
