@@ -9,6 +9,7 @@ import { useServerStore } from "@/stores/server";
 import { useSettingsStore } from "@/stores/settings";
 import type { MediaItem } from "@/types/models";
 import { mediaImageUrl } from "@/utils/mediaImages";
+import { openMediaItemFromSource } from "@/utils/sourceContext";
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -53,15 +54,26 @@ function backgroundUrl(item: MediaItem): string | null {
   return itemImageUrl(item, "Primary", heroImageWidth.value);
 }
 
-function primaryPosterUrl(item: MediaItem): string | null {
-  return itemImageUrl(item, "Primary", "520");
+function displayTitle(item: MediaItem): string {
+  if (item.Type === "Episode" && item.SeriesName) return item.SeriesName;
+  return item.Name;
+}
+
+function episodeSubtitle(item: MediaItem): string | null {
+  if (item.Type !== "Episode") return null;
+  const parts: string[] = [];
+  if (item.ParentIndexNumber != null && item.IndexNumber != null) {
+    parts.push(`S${String(item.ParentIndexNumber).padStart(2, "0")}E${String(item.IndexNumber).padStart(2, "0")}`);
+  }
+  if (item.Name && item.Name !== item.SeriesName) parts.push(item.Name);
+  return parts.length ? parts.join(" · ") : null;
 }
 
 function metaLine(item: MediaItem): string {
   const parts: string[] = [];
   if (item.Type === "Series") parts.push("剧集");
   if (item.Type === "Movie") parts.push("电影");
-  if (item.Type === "Episode" && item.SeriesName) parts.push(item.SeriesName);
+  if (item.Type === "Episode") parts.push("剧集");
   if (item.CommunityRating != null) parts.push(`★ ${item.CommunityRating.toFixed(1)}`);
   if (item.ProductionYear) parts.push(String(item.ProductionYear));
   if (item.OfficialRating) parts.push(item.OfficialRating);
@@ -78,7 +90,7 @@ function next() {
 }
 
 function openItem() {
-  if (current.value) router.push(`/item/${current.value.Id}`);
+  if (current.value) openMediaItemFromSource(router, auth, current.value).catch(() => {});
 }
 
 onMounted(() => {
@@ -90,23 +102,30 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section v-if="current" class="hero" :class="`hero--${heroStyle}`">
+  <section
+    v-if="current"
+    class="hero"
+    :class="`hero--${heroStyle}`"
+    role="button"
+    tabindex="0"
+    @click="openItem"
+    @keydown.enter.prevent="openItem"
+    @keydown.space.prevent="openItem"
+  >
     <div
       class="hero__bg"
       :style="backgroundUrl(current) ? { backgroundImage: `url(${backgroundUrl(current)})` } : undefined"
     />
     <div class="hero__shade" />
-    <button class="hero__nav hero__nav--prev" aria-label="上一张" @click="prev">
+    <button class="hero__nav hero__nav--prev" aria-label="上一张" @click.stop="prev">
       <Icon icon="lucide:chevron-left" width="22" />
     </button>
-    <button class="hero__nav hero__nav--next" aria-label="下一张" @click="next">
+    <button class="hero__nav hero__nav--next" aria-label="下一张" @click.stop="next">
       <Icon icon="lucide:chevron-right" width="22" />
     </button>
-    <button v-if="primaryPosterUrl(current)" class="hero__poster" type="button" @click="openItem">
-      <img :src="primaryPosterUrl(current) || ''" :alt="current.Name" draggable="false" />
-    </button>
-    <div class="hero__content" @click="openItem">
-      <h2 class="hero__title">{{ current.Name }}</h2>
+    <div class="hero__content">
+      <h2 class="hero__title">{{ displayTitle(current) }}</h2>
+      <p v-if="episodeSubtitle(current)" class="hero__episode">{{ episodeSubtitle(current) }}</p>
       <p v-if="metaLine(current)" class="hero__meta">{{ metaLine(current) }}</p>
       <p v-if="current.Overview" class="hero__desc">{{ current.Overview }}</p>
     </div>
@@ -116,7 +135,7 @@ onUnmounted(() => {
         :key="i"
         class="hero__dot"
         :class="{ active: i === index }"
-        @click="index = i"
+        @click.stop="index = i"
       />
     </div>
   </section>
@@ -130,6 +149,8 @@ onUnmounted(() => {
   border-radius: 0;
   overflow: hidden;
   flex-shrink: 0;
+  cursor: pointer;
+  outline: none;
 }
 .hero--cinema {
   height: clamp(620px, calc(100dvh - 72px), 1080px);
@@ -188,33 +209,7 @@ onUnmounted(() => {
 .hero--cinema .hero__content {
   left: clamp(36px, 7vw, 96px);
   bottom: clamp(72px, 10vh, 132px);
-  max-width: min(940px, 58%);
-}
-.hero__poster {
-  appearance: none;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(0, 0, 0, 0.24);
-  position: absolute;
-  right: clamp(34px, 7vw, 100px);
-  bottom: clamp(34px, 6vh, 72px);
-  width: clamp(148px, 14vw, 230px);
-  aspect-ratio: 2 / 3;
-  border-radius: 8px;
-  overflow: hidden;
-  padding: 0;
-  z-index: 2;
-  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.38);
-  cursor: pointer;
-}
-.hero--cinema .hero__poster {
-  right: clamp(48px, 8vw, 132px);
-  width: clamp(260px, 22vw, 420px);
-}
-.hero__poster img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  max-width: min(840px, 72%);
 }
 .hero__title {
   margin: 0 0 8px;
@@ -225,8 +220,18 @@ onUnmounted(() => {
   line-height: 1.08;
 }
 .hero--cinema .hero__title {
-  font-size: 82px;
+  font-size: 74px;
   max-width: 12em;
+}
+.hero__episode {
+  margin: 0 0 8px;
+  font-size: 15px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.78);
+  max-width: 64ch;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .hero__meta {
   margin: 0 0 8px;
@@ -289,9 +294,6 @@ onUnmounted(() => {
   .hero--cinema .hero__title {
     font-size: 40px;
   }
-  .hero__poster {
-    display: none;
-  }
   .hero__title {
     font-size: 28px;
   }
@@ -304,11 +306,8 @@ onUnmounted(() => {
   .hero--cinema .hero__content {
     bottom: clamp(52px, 8vh, 86px);
   }
-  .hero--cinema .hero__poster {
-    width: clamp(220px, 18vw, 300px);
-  }
   .hero--cinema .hero__title {
-    font-size: 68px;
+    font-size: 60px;
   }
 }
 @media (max-width: 420px) {

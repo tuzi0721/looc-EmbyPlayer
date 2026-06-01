@@ -339,7 +339,6 @@ try {
       const title = document.querySelector(".hero__title");
       const desc = document.querySelector(".hero__desc");
       const poster = document.querySelector(".hero__poster");
-      const posterImg = document.querySelector(".hero__poster img");
       const nextSection = document.querySelector(".row-section");
       const heroRect = hero?.getBoundingClientRect();
       const posterRect = poster?.getBoundingClientRect();
@@ -368,7 +367,7 @@ try {
           baseUrl: server.lines[0]?.baseUrl ?? null,
         },
         firstRunVisible: Boolean(firstRun),
-        posterNatural: posterImg ? { width: posterImg.naturalWidth, height: posterImg.naturalHeight, complete: posterImg.complete } : null,
+        posterExists: Boolean(poster),
         heroBg: getComputedStyle(document.querySelector(".hero__bg")).backgroundImage,
         errors: Array.from(document.querySelectorAll(".error, .alert, .toast--error")).map((node) => node.textContent),
       };
@@ -397,6 +396,18 @@ try {
         });
       }
       return routes;
+    })()
+  `);
+
+  const heroClick = await cdpEval(ws, `
+    (async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+      await appRouter.push("/home");
+      await wait(900);
+      document.querySelector(".hero")?.click();
+      await wait(500);
+      return appRouter.currentRoute.value.fullPath;
     })()
   `);
 
@@ -440,10 +451,8 @@ try {
   if (result.nextSectionTop == null || result.nextSectionTop > result.viewport.height + 2) {
     failures.push("next section is not hinted in first viewport");
   }
-  if (!result.poster || result.poster.width < 200) failures.push("cinema poster too small or missing");
-  if (!result.posterNatural?.complete || result.posterNatural.width < 1 || result.posterNatural.height < 1) {
-    failures.push("cinema poster image did not decode");
-  }
+  if (result.posterExists) failures.push("cinema hero still renders the removed side poster");
+  if (!heroClick.startsWith("/item/hero-movie")) failures.push(`hero click did not open item detail: ${heroClick}`);
   if (result.errors.length > 0) failures.push(`page errors: ${result.errors.join(" | ")}`);
   for (const route of personalRoutes) {
     if (route.errorTexts.length > 0) failures.push(`${route.path} errors: ${route.errorTexts.join(" | ")}`);
@@ -482,11 +491,11 @@ try {
 
   if (failures.length > 0) {
     throw new Error(
-      `home hero smoke failed: ${failures.join("; ")}\n${JSON.stringify({ result, personalRoutes, multiServerSearch }, null, 2)}`,
+      `home hero smoke failed: ${failures.join("; ")}\n${JSON.stringify({ result, heroClick, personalRoutes, multiServerSearch }, null, 2)}`,
     );
   }
 
-  console.log(JSON.stringify({ ok: true, screenshotPath, ...result, personalRoutes, multiServerSearch }, null, 2));
+  console.log(JSON.stringify({ ok: true, screenshotPath, ...result, heroClick, personalRoutes, multiServerSearch }, null, 2));
 } finally {
   if (ws) ws.close();
   child.kill();

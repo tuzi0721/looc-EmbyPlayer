@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（收藏/历史卡片图片与尺寸）
+> 更新时间：2026-06-02（首页巨幕去海报与点击进入）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-0400-personal-card-image-fit.md`](./CHANGE_LOG/2026-06-02-0400-personal-card-image-fit.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-0405-home-hero-click-layout.md`](./CHANGE_LOG/2026-06-02-0405-home-hero-click-layout.md)
 
 ---
 
@@ -48,7 +48,7 @@
 - 保存服务器会追加记录，不覆盖原服务器；已保存服务器的线路编辑同样使用地址 + 端口输入，线路名为高级可选项，线路级高级设置保留 User-Agent 与 headers。
 - 首页 smoke 已覆盖随机端口本地测试 Emby 的 `detect_server -> add_server -> login -> refreshHome` 链路，并断言新增服务器只追加 1 条。
 - 线路延迟显示不展示 `0ms` / `1ms` 这种误导性精确值，`0-9ms` 统一显示为 `<10ms`。
-- 首页巨幕默认启用 cinema 布局，从当前媒体库候选读取 Backdrop、Primary 海报、简介、年份、播放状态与运行时信息。
+- 首页巨幕默认启用 cinema 布局，从当前媒体库候选读取 Backdrop、简介、年份、播放状态与运行时信息；右侧额外海报已移除，巨幕整块可点击进入当前媒体详情，剧集标题优先使用系列名并把单集名放入副标题。
 - 收藏、历史、聚合视界和搜索已支持跨已登录账号聚合；条目保留来源服务器/账号，同名或同 ID 的不同服务器记录不会互相覆盖，点进条目会切到对应账号再进入详情/播放链路。
 - 收藏、历史和聚合视界中的个人媒体卡统一为横向比例；卡片取图会从自身 Backdrop 回退到系列图或 Primary，Electron smoke 已覆盖缺 Backdrop 时仍能成功解码。
 - 详情页展示媒体信息、版本能力、剧集、演职人员、相似内容、附加内容、类型/人员/工作室跳转和桌面下载入口。
@@ -125,7 +125,7 @@ node scripts\smoke-electron-home-hero.mjs
 - `node --check electron\main.mjs`
 - `node --check scripts\smoke-electron-home-hero.mjs`
 - `node scripts\smoke-electron-home-hero.mjs`
-- 当前工作区无意外未跟踪文件；Electron 命令覆盖为 104/104，显式 no-op 命令为 0。首页 smoke 已覆盖双服务器同名同 ID 收藏/历史/聚合/搜索记录不会被合并，并覆盖收藏/历史/聚合卡片缺 Backdrop 时的图片回退解码。
+- 当前工作区无意外未跟踪文件；Electron 命令覆盖为 104/104，显式 no-op 命令为 0。首页 smoke 已覆盖双服务器同名同 ID 收藏/历史/聚合/搜索记录不会被合并、收藏/历史/聚合卡片缺 Backdrop 时的图片回退解码，以及巨幕无右侧海报且点击进入详情。
 
 ---
 
