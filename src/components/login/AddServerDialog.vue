@@ -44,10 +44,10 @@ function createId(): string {
   return `line-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function createLineDraft(name: string): LineDraft {
+function createLineDraft(): LineDraft {
   return {
     id: createId(),
-    name,
+    name: "",
     baseUrl: "",
     port: "",
     userAgent: "",
@@ -59,7 +59,7 @@ const form = reactive({
   username: "",
   password: "",
   showPassword: false,
-  lines: [createLineDraft("主线路")],
+  lines: [createLineDraft()],
 });
 
 const submitting = ref(false);
@@ -69,14 +69,15 @@ const statusText = ref<string | null>(null);
 const hasCredentials = computed(
   () => form.username.trim().length > 0 || form.password.length > 0,
 );
-const primaryLabel = computed(() => (hasCredentials.value ? "保存并登录" : "保存"));
+const primaryLabel = computed(() => (hasCredentials.value ? "保存并登录" : "保存服务器"));
 
 function addLine() {
-  form.lines.push(createLineDraft(`线路 ${form.lines.length + 1}`));
+  form.lines.push(createLineDraft());
 }
-function removeLine(idx: number) {
+
+function removeLine(index: number) {
   if (form.lines.length === 1) return;
-  form.lines.splice(idx, 1);
+  form.lines.splice(index, 1);
 }
 
 function linePayload(line: LineDraft, index: number): LinePayload {
@@ -118,7 +119,7 @@ async function submit() {
   errorText.value = null;
   statusText.value = null;
   if (hasCredentials.value && (!form.username.trim() || !form.password)) {
-    errorText.value = "登录需要同时填写账号和密码";
+    errorText.value = "登录需要同时填写用户名和密码";
     return;
   }
 
@@ -132,7 +133,7 @@ async function submit() {
 
   submitting.value = true;
   try {
-    statusText.value = "正在识别 Emby/Jellyfin…";
+    statusText.value = "正在识别 Emby / Jellyfin";
     const detected = await serverStore.detectServer({
       lines,
       defaultUserAgent: null,
@@ -141,7 +142,7 @@ async function submit() {
     const activeLineId = detected.winningLineId;
     const name = detected.serverName?.trim() || fallbackServerName(lines, activeLineId);
 
-    statusText.value = hasCredentials.value ? "正在保存并登录…" : "正在保存服务器…";
+    statusText.value = hasCredentials.value ? "正在保存并登录" : "正在保存服务器";
     const server = await serverStore.addServer({
       name,
       kind,
@@ -174,18 +175,22 @@ async function submit() {
 <template>
   <Teleport to="body">
     <div class="modal-mask" @click.self="emit('close')">
-      <div class="modal glass glass-strong">
+      <form class="modal glass glass-strong" @submit.prevent="submit">
         <header class="modal__head">
-          <h3>添加服务器</h3>
-          <button class="iconbtn" @click="emit('close')" aria-label="Close">
+          <div>
+            <h3>添加服务器</h3>
+            <p>自动识别 Emby / Jellyfin，保存后追加到现有服务器列表。</p>
+          </div>
+          <button class="iconbtn" type="button" @click="emit('close')" aria-label="关闭">
             <Icon icon="lucide:x" width="18" />
           </button>
         </header>
 
         <div class="modal__body">
-          <section>
+          <section class="section">
             <header class="section-head">
               <h4>账号</h4>
+              <span>可留空，只保存服务器</span>
             </header>
             <div class="account-grid">
               <GlassInput
@@ -206,39 +211,55 @@ async function submit() {
             </div>
           </section>
 
-          <section>
+          <section class="section">
             <header class="section-head">
               <h4>线路</h4>
-              <button class="link" @click="addLine">
+              <button class="text-action" type="button" @click="addLine">
                 <Icon icon="lucide:plus" width="14" />
                 新增线路
               </button>
             </header>
-            <div v-for="(line, idx) in form.lines" :key="line.id" class="line-card">
-              <div class="line-card__top">
-                <GlassInput v-model="line.name" placeholder="线路名（可选）" />
-                <button class="iconbtn danger" @click="removeLine(idx)" :disabled="form.lines.length === 1">
+
+            <div class="lines">
+              <div v-for="(line, index) in form.lines" :key="line.id" class="line-entry">
+                <div class="line-entry__index">{{ index + 1 }}</div>
+                <div class="line-entry__main">
+                  <div class="line-url">
+                    <GlassInput
+                      v-model="line.baseUrl"
+                      placeholder="https://example.com 或 192.168.1.2"
+                      icon="lucide:globe-2"
+                    />
+                    <GlassInput v-model="line.port" placeholder="端口：443 / 8096 / 任意" />
+                  </div>
+
+                  <details class="line-advanced">
+                    <summary>
+                      <Icon icon="lucide:sliders-horizontal" width="14" />
+                      高级设置
+                    </summary>
+                    <div class="advanced-grid">
+                      <GlassInput v-model="line.name" placeholder="线路名（可选）" />
+                      <GlassInput v-model="line.userAgent" placeholder="User-Agent（可选）" />
+                    </div>
+                    <label class="field">
+                      <span>Headers</span>
+                      <textarea v-model="line.headersText" placeholder="X-Header: value"></textarea>
+                    </label>
+                  </details>
+                </div>
+
+                <button
+                  class="iconbtn danger"
+                  type="button"
+                  title="删除线路"
+                  aria-label="删除线路"
+                  :disabled="form.lines.length === 1"
+                  @click="removeLine(index)"
+                >
                   <Icon icon="lucide:trash-2" width="16" />
                 </button>
               </div>
-              <div class="line-url">
-                <GlassInput v-model="line.baseUrl" placeholder="https://example.com:443 或 192.168.1.2:8096" />
-                <GlassInput v-model="line.port" placeholder="可选端口" />
-              </div>
-              <details class="line-advanced">
-                <summary>
-                  <Icon icon="lucide:sliders-horizontal" width="14" />
-                  高级
-                </summary>
-                <label class="field">
-                  <span>User-Agent</span>
-                  <GlassInput v-model="line.userAgent" placeholder="留空使用默认 UA" />
-                </label>
-                <label class="field">
-                  <span>Headers</span>
-                  <textarea v-model="line.headersText" placeholder="X-Header: value"></textarea>
-                </label>
-              </details>
             </div>
           </section>
 
@@ -247,12 +268,12 @@ async function submit() {
         </div>
 
         <footer class="modal__foot">
-          <GlassButton variant="ghost" @click="emit('close')">取消</GlassButton>
-          <GlassButton variant="primary" :loading="submitting" @click="submit">
+          <GlassButton type="button" variant="ghost" @click="emit('close')">取消</GlassButton>
+          <GlassButton type="submit" variant="primary" :loading="submitting">
             {{ primaryLabel }}
           </GlassButton>
         </footer>
-      </div>
+      </form>
     </div>
   </Teleport>
 </template>
@@ -269,27 +290,39 @@ async function submit() {
   backdrop-filter: blur(8px);
   padding: 24px;
 }
+
 .modal {
   box-sizing: border-box;
-  width: min(600px, calc(100vw - 48px));
+  width: min(680px, calc(100vw - 48px));
   max-height: 84vh;
   display: flex;
   flex-direction: column;
   border-radius: 8px;
   overflow: hidden;
 }
+
 .modal__head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 16px;
   padding: 16px 20px;
   border-bottom: 1px solid var(--separator);
 }
+
 .modal__head h3 {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
 }
+
+.modal__head p {
+  margin: 6px 0 0;
+  color: var(--fg-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .modal__body {
   flex: 1;
   min-height: 0;
@@ -299,6 +332,7 @@ async function submit() {
   flex-direction: column;
   gap: 20px;
 }
+
 .modal__foot {
   display: flex;
   flex: 0 0 auto;
@@ -311,24 +345,20 @@ async function submit() {
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
 }
-.field {
+
+.section {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
 }
-.field > span {
-  font-size: 12px;
-  color: var(--fg-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 600;
-}
+
 .section-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  gap: 12px;
 }
+
 .section-head h4 {
   margin: 0;
   font-size: 13px;
@@ -337,38 +367,68 @@ async function submit() {
   letter-spacing: 0.06em;
   font-weight: 600;
 }
-.line-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 0 14px;
-  border-top: 1px solid var(--separator);
+
+.section-head span {
+  color: var(--fg-tertiary);
+  font-size: 12px;
 }
-.line-card:first-of-type {
-  border-top: none;
-  padding-top: 0;
-}
-.line-card__top {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-  align-items: center;
-}
-.line-url {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 160px;
-  gap: 8px;
-}
-.account-grid {
+
+.account-grid,
+.advanced-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
-.line-advanced {
-  margin-top: 2px;
-  border-top: 1px solid var(--separator);
-  padding-top: 10px;
+
+.lines {
+  display: flex;
+  flex-direction: column;
 }
+
+.line-entry {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 14px 0;
+  border-top: 1px solid var(--separator);
+}
+
+.line-entry:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.line-entry:last-child {
+  padding-bottom: 0;
+}
+
+.line-entry__index {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.line-entry__main {
+  min-width: 0;
+}
+
+.line-url {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 190px);
+  gap: 8px;
+}
+
+.line-advanced {
+  margin-top: 8px;
+}
+
 .line-advanced summary {
   display: inline-flex;
   align-items: center;
@@ -377,10 +437,27 @@ async function submit() {
   color: var(--fg-secondary);
   font-size: 12px;
 }
+
 .line-advanced[open] summary {
   margin-bottom: 10px;
   color: var(--accent);
 }
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.field > span {
+  font-size: 12px;
+  color: var(--fg-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
 textarea {
   min-height: 78px;
   resize: vertical;
@@ -392,13 +469,16 @@ textarea {
   font: inherit;
   padding: 11px 13px;
 }
+
 textarea:focus {
   border-color: rgba(10, 132, 255, 0.6);
   box-shadow: 0 0 0 4px rgba(10, 132, 255, 0.18);
 }
+
 textarea::placeholder {
   color: var(--fg-tertiary);
 }
+
 .iconbtn {
   appearance: none;
   border: none;
@@ -412,18 +492,21 @@ textarea::placeholder {
   border-radius: 8px;
   cursor: pointer;
 }
+
 .iconbtn:hover {
   background: rgba(255, 255, 255, 0.08);
 }
+
 .iconbtn.danger {
   color: var(--danger);
 }
+
 .iconbtn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 
-.link {
+.text-action {
   background: transparent;
   border: none;
   color: var(--accent);
@@ -432,32 +515,50 @@ textarea::placeholder {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  padding: 0;
 }
+
 .status,
 .err {
   font-size: 13px;
   margin: 0;
 }
+
 .status {
   color: var(--fg-secondary);
 }
+
 .err {
   color: var(--danger);
 }
-@media (max-width: 620px) {
+
+@media (max-width: 680px) {
   .modal-mask {
     padding: 12px;
   }
+
   .modal {
     width: calc(100vw - 24px);
     max-height: calc(100vh - 24px);
   }
+
   .modal__foot {
     justify-content: stretch;
   }
-  .line-url,
-  .account-grid {
+
+  .account-grid,
+  .advanced-grid,
+  .line-url {
     grid-template-columns: 1fr;
+  }
+
+  .line-entry {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .line-entry > .danger {
+    grid-column: 2;
+    justify-self: start;
   }
 }
 </style>

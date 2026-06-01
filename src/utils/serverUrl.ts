@@ -38,4 +38,3 @@ export function normalizeServerBaseUrl(address: string, portInput = ""): string 
   if (url.pathname === "/" && text.endsWith("/")) return text.slice(0, -1);
   return text.replace(/\/+$/, "");
 }
-
