@@ -51,13 +51,15 @@ const server = http.createServer(async (req, res) => {
       code: 200,
       message: "success",
       data: {
-        total: 6,
+        total: 8,
         provider: "Mock",
         content: [
           { name: "Movies", is_dir: true, size: 0, modified: "2026-06-01T01:00:00Z" },
-          { name: "Episode 1.mkv", is_dir: false, size: 734003200, modified: "2026-06-01T01:05:00Z", sign: "signed-1", type: 2 },
+          { name: "Episode 1.mkv", is_dir: false, size: 734003200, modified: "2026-06-01T01:05:00Z", sign: "signed-1", type: 2, thumb: "https://thumb.example.invalid/video1.jpg" },
           { name: "Episode 2.mp4", is_dir: false, size: 524288000, modified: "2026-06-01T01:06:00Z", sign: "signed-2", type: 2 },
           { name: "Episode 1.zh.srt", is_dir: false, size: 1024, modified: "2026-06-01T01:06:30Z", sign: "signed-sub", type: 4 },
+          { name: "Episode 1.jpg", is_dir: false, size: 4096, modified: "2026-06-01T01:06:35Z", sign: "signed-poster", type: 4 },
+          { name: "cover.png", is_dir: false, size: 8192, modified: "2026-06-01T01:06:36Z", sign: "signed-cover", type: 4 },
           { name: "Episode 1.danmaku.xml", is_dir: false, size: 2048, modified: "2026-06-01T01:06:40Z", sign: "signed-xml", type: 4 },
           { name: "readme.txt", is_dir: false, size: 12, modified: "2026-06-01T01:07:00Z", type: 4 },
         ],
@@ -90,7 +92,7 @@ try {
   const listing = await client.list({ baseUrl, token: expectedAuth });
 
   assert(listing.rootUrl === baseUrl, "root URL should be normalized");
-  assert(listing.items.length === 6, `expected 6 entries, got ${listing.items.length}`);
+  assert(listing.items.length === 8, `expected 8 entries, got ${listing.items.length}`);
   assert(listing.items[0].isDirectory && listing.items[0].name === "Movies", "directory should sort first");
   assert(listing.items.filter((entry) => entry.playable).length === 2, "should detect two playable videos");
 
@@ -102,6 +104,10 @@ try {
   assert(video.sidecarSubtitles?.[0]?.path === "Episode 1.zh.srt", "sidecar subtitle path should be linked");
   assert(video.sidecarDanmaku?.name === "Episode 1.danmaku.xml", "sidecar danmaku should be linked");
   assert(video.sidecarDanmaku?.path === "Episode 1.danmaku.xml", "sidecar danmaku path should be linked");
+  assert(video.posterUrl?.endsWith("/d/Episode%201.jpg?sign=signed-poster"), `same-name poster should be linked: ${video.posterUrl}`);
+
+  const fallbackPosterVideo = listing.items.find((entry) => entry.name === "Episode 2.mp4");
+  assert(fallbackPosterVideo?.posterUrl?.endsWith("/d/cover.png?sign=signed-cover"), "folder-level poster should be linked");
 
   const resolved = await client.resolveFile({ baseUrl, token: expectedAuth, path: "Episode 1.mkv" });
   assert(resolved.url.endsWith("/raw/Episode%201.mkv"), `unexpected raw url: ${resolved.url}`);

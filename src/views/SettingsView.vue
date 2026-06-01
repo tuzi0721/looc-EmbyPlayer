@@ -644,7 +644,7 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
   {
     key: "sidecar-posters",
     label: "同名封面",
-    detail: "本地文件夹识别同名图片与 cover/poster/folder 图片",
+    detail: "本地、WebDAV 与 Alist/OpenList 识别同名图片与 cover/poster/folder 图片",
     icon: "lucide:image",
     status: "available",
   },
@@ -700,7 +700,7 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
   {
     key: "webdav",
     label: "WebDAV",
-    detail: "可保存/收藏连接、PROPFIND 浏览目录，识别同名字幕/XML 弹幕并把视频直链交给内嵌 mpv 播放",
+    detail: "可保存/收藏连接、PROPFIND 浏览目录，识别同名封面/字幕/XML 弹幕并把视频直链交给内嵌 mpv 播放",
     icon: "lucide:cloud",
     status: "available",
   },
@@ -714,7 +714,7 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
   {
     key: "alist-openlist",
     label: "Alist / OpenList",
-    detail: "可配置/收藏站点，恢复上次目录，刷新签名直链并携带同名字幕/XML 弹幕播放",
+    detail: "可配置/收藏站点，恢复上次目录，刷新签名直链并携带同名封面/字幕/XML 弹幕播放",
     icon: "lucide:list-tree",
     status: "available",
   },

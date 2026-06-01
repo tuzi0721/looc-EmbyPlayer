@@ -21,6 +21,15 @@ const subtitleExtensions = new Map([
   ["ssa", 2],
   ["vtt", 3],
 ]);
+const posterExtensions = new Map([
+  ["jpg", 0],
+  ["jpeg", 1],
+  ["png", 2],
+  ["webp", 3],
+  ["avif", 4],
+  ["bmp", 5],
+]);
+const folderPosterStems = new Set(["poster", "cover", "folder"]);
 
 function stringFrom(value) {
   if (typeof value === "string") return value;
@@ -133,13 +142,40 @@ function sidecarDanmakuFor(videoEntry, entries) {
   return match ? { name: match.name, url: match.url, path: match.path } : null;
 }
 
+function betterPoster(left, right) {
+  if (!left) return right;
+  const leftRank = posterExtensions.get(left.extension) ?? 99;
+  const rightRank = posterExtensions.get(right.extension) ?? 99;
+  return rightRank < leftRank ? right : left;
+}
+
+function posterUrlFor(entry, allowFileUrl = false) {
+  return stringFrom(entry?.thumb) || (allowFileUrl ? stringFrom(entry?.url) : null);
+}
+
+function sidecarPosterFor(videoEntry, entries) {
+  if (!videoEntry.playable) return null;
+  const videoStem = stemFromName(videoEntry.name).toLowerCase();
+  let exact = null;
+  let folderPoster = null;
+  for (const entry of entries) {
+    if (entry.isDirectory || !posterExtensions.has(entry.extension)) continue;
+    const stem = stemFromName(entry.name).toLowerCase();
+    if (stem === videoStem) exact = betterPoster(exact, entry);
+    if (folderPosterStems.has(stem)) folderPoster = betterPoster(folderPoster, entry);
+  }
+  return exact ?? folderPoster;
+}
+
 function annotateSidecars(entries) {
   return entries.map((entry) => {
     if (!entry.playable) return entry;
     const sidecarSubtitles = sidecarSubtitlesFor(entry, entries);
     const sidecarDanmaku = sidecarDanmakuFor(entry, entries);
+    const poster = sidecarPosterFor(entry, entries);
     return {
       ...entry,
+      posterUrl: posterUrlFor(poster, true) ?? posterUrlFor(entry),
       sidecarSubtitleCount: sidecarSubtitles.length,
       sidecarSubtitles,
       sidecarDanmaku,
@@ -220,6 +256,7 @@ function entryFromContent(rootUrl, currentPath, item) {
     thumb: stringFrom(item?.thumb) || null,
     sign: stringFrom(item?.sign) || null,
     playable: !isDirectory && videoExtensions.has(extension),
+    posterUrl: isDirectory ? null : stringFrom(item?.thumb) || null,
   };
 }
 

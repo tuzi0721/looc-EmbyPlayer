@@ -49,6 +49,24 @@ function multistatus(baseUrl) {
     </d:prop></d:propstat>
   </d:response>
   <d:response>
+    <d:href>${baseUrl}Episode%201.jpg</d:href>
+    <d:propstat><d:prop>
+      <d:displayname>Episode 1.jpg</d:displayname>
+      <d:resourcetype />
+      <d:getcontentlength>4096</d:getcontentlength>
+      <d:getcontenttype>image/jpeg</d:getcontenttype>
+    </d:prop></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>${baseUrl}cover.png</d:href>
+    <d:propstat><d:prop>
+      <d:displayname>cover.png</d:displayname>
+      <d:resourcetype />
+      <d:getcontentlength>8192</d:getcontentlength>
+      <d:getcontenttype>image/png</d:getcontenttype>
+    </d:prop></d:propstat>
+  </d:response>
+  <d:response>
     <d:href>${baseUrl}Episode%201.danmaku.xml</d:href>
     <d:propstat><d:prop>
       <d:displayname>Episode 1.danmaku.xml</d:displayname>
@@ -106,7 +124,7 @@ try {
   });
 
   assert(listing.rootUrl === baseUrl, "root URL should be normalized");
-  assert(listing.items.length === 6, `expected 6 entries, got ${listing.items.length}`);
+  assert(listing.items.length === 8, `expected 8 entries, got ${listing.items.length}`);
   assert(listing.items[0].isDirectory && listing.items[0].name === "Movies", "directory should sort first");
 
   const video = listing.items.find((entry) => entry.name === "Episode 1.mkv");
@@ -117,6 +135,10 @@ try {
   assert(video.sidecarSubtitleCount === 1, "mkv entry should detect one sidecar subtitle");
   assert(video.sidecarSubtitles?.[0]?.name === "Episode 1.zh.srt", "sidecar subtitle should be linked");
   assert(video.sidecarDanmaku?.name === "Episode 1.danmaku.xml", "sidecar danmaku should be linked");
+  assert(video.posterUrl?.endsWith("/Episode%201.jpg"), `same-name poster should be linked: ${video.posterUrl}`);
+
+  const fallbackPosterVideo = listing.items.find((entry) => entry.name === "Episode 2.mp4");
+  assert(fallbackPosterVideo?.posterUrl?.endsWith("/cover.png"), "folder-level poster should be linked");
 
   const text = listing.items.find((entry) => entry.name === "readme.txt");
   assert(text && !text.playable, "non-video file should not be playable");

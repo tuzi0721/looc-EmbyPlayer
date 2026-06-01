@@ -151,6 +151,7 @@ export interface WebDavEntry {
   modifiedAtMs?: number | null;
   contentType?: string | null;
   playable: boolean;
+  posterUrl?: string | null;
   sidecarSubtitleCount?: number;
   sidecarSubtitles?: WebDavSidecarSubtitle[];
   sidecarDanmaku?: WebDavSidecarDanmaku | null;
@@ -188,6 +189,7 @@ export interface AlistEntry {
   thumb?: string | null;
   sign?: string | null;
   playable: boolean;
+  posterUrl?: string | null;
   sidecarSubtitleCount?: number;
   sidecarSubtitles?: WebDavSidecarSubtitle[];
   sidecarDanmaku?: WebDavSidecarDanmaku | null;

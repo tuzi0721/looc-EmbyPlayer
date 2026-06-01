@@ -1,0 +1,24 @@
+# 远程文件源封面
+
+- **动机**：本地文件夹已支持同名封面缩略图，但 WebDAV 与 Alist/OpenList 远程目录仍只有文件图标；同一套目录侧挂规则可以先覆盖远程文件源，减少用户在长列表里靠文件名辨认视频。
+- **改动**：
+  - `electron/backend/webdav.mjs` / `src/platform/index.ts` — WebDAV 目录解析识别同层同名 `.jpg/.jpeg/.png/.webp/.avif/.bmp`，并用 `poster`、`cover`、`folder` 图片作为目录级兜底，返回 `posterUrl`。
+  - `electron/backend/alist.mjs` / `src/platform/index.ts` — Alist/OpenList 目录解析同样识别同名封面，且会复用接口返回的 `thumb` 字段。
+  - `src/api/index.ts` — WebDAV 与 Alist 条目新增可选 `posterUrl`。
+  - `src/views/WebDavView.vue` / `src/views/AlistView.vue` — 视频行显示远程缩略图，图片加载失败时回退文件图标，并支持用“封面 / poster / cover”搜索匹配。
+  - `scripts/smoke-webdav-connector.mjs` / `scripts/smoke-alist-connector.mjs` — mock 目录增加同名图片和 `cover.png`，断言同名优先与目录级兜底。
+  - `src/views/SettingsView.vue` / `docs/CURRENT_STATE.md` — 文件服务能力面板同步记录远程文件源封面。
+- **验证**：
+  - `node --check electron\backend\webdav.mjs`
+  - `node --check electron\backend\alist.mjs`
+  - `node --check scripts\smoke-webdav-connector.mjs`
+  - `node --check scripts\smoke-alist-connector.mjs`
+  - `node scripts\smoke-webdav-connector.mjs`
+  - `node scripts\smoke-alist-connector.mjs`
+  - `npm.cmd run check:electron-commands`
+  - `npm.cmd run build`
+  - `git diff --check`
+  - 敏感关键字扫描
+  - in-app Browser 打开 `/settings?c=file-services`、`/alist` 与 `/webdav`，确认页面可加载且无横向溢出
+- **结果**：通过；WebDAV 与 Alist mock smoke 已覆盖同名封面优先和 `cover.png` 兜底，前端构建与页面基础布局验证通过，触碰文件未出现测试账号、密码、真实线路或 token 明文。
+- **风险**：需要鉴权 header 的 WebDAV 图片在普通 `<img>` 下可能无法加载；前端会在失败后回退图标，真实私有站点如果需要图片代理再单独补。

@@ -29,6 +29,7 @@ const errorText = ref<string | null>(null);
 const searchText = ref("");
 const sortMode = ref<SortMode>("name");
 const pathCopyStatus = ref<string | null>(null);
+const posterFailures = ref<Set<string>>(new Set());
 let pathCopyStatusTimer: number | null = null;
 
 const currentPath = computed(() => {
@@ -63,6 +64,7 @@ const visibleItems = computed(() => {
           entry.contentType ?? "",
           entry.sidecarSubtitleCount ? "字幕" : "",
           entry.sidecarDanmaku ? "弹幕 xml" : "",
+          entry.posterUrl ? "封面 poster cover" : "",
         ]
           .join(" ")
           .toLocaleLowerCase()
@@ -134,6 +136,21 @@ function sidecarSummary(entry: WebDavEntry): string {
     ? `字幕 ${entry.sidecarSubtitleCount}`
     : "";
   return [subtitles, entry.sidecarDanmaku ? "XML 弹幕" : ""].filter(Boolean).join(" · ");
+}
+
+function posterKey(entry: WebDavEntry): string {
+  return entry.path || entry.url;
+}
+
+function entryPosterUrl(entry: WebDavEntry): string {
+  if (posterFailures.value.has(posterKey(entry))) return "";
+  return entry.posterUrl?.trim() ?? "";
+}
+
+function markPosterFailed(entry: WebDavEntry) {
+  const next = new Set(posterFailures.value);
+  next.add(posterKey(entry));
+  posterFailures.value = next;
 }
 
 function compareText(left: string, right: string): number {
@@ -355,6 +372,7 @@ watch(
 watch(currentPath, (path, previous) => {
   if (path === previous) return;
   searchText.value = "";
+  posterFailures.value = new Set();
   clearPathCopyStatus();
   if (canLoad.value) void connectAndLoad(path);
 });
@@ -596,7 +614,9 @@ onMounted(() => {
           <ul v-else class="entry-list">
             <li v-for="entry in directoryItems" :key="entry.url">
               <button class="entry-row" type="button" :title="entry.url" @click="openDirectory(entry)">
-                <Icon icon="lucide:folder" width="18" />
+                <span class="entry-row__thumb">
+                  <Icon icon="lucide:folder" width="18" />
+                </span>
                 <span>
                   <strong>{{ entry.name }}</strong>
                   <small>{{ formatDate(entry.modifiedAtMs) || "目录" }}</small>
@@ -612,7 +632,16 @@ onMounted(() => {
                 :disabled="playingUrl === entry.url"
                 @click="playEntry(entry)"
               >
-                <Icon icon="lucide:file-video" width="18" />
+                <span class="entry-row__thumb" :class="{ 'entry-row__thumb--image': entryPosterUrl(entry) }">
+                  <img
+                    v-if="entryPosterUrl(entry)"
+                    :src="entryPosterUrl(entry)"
+                    alt=""
+                    loading="lazy"
+                    @error="markPosterFailed(entry)"
+                  />
+                  <Icon icon="lucide:file-video" width="18" />
+                </span>
                 <span>
                   <strong>{{ entry.name }}</strong>
                   <small v-if="sidecarSummary(entry)" class="entry-row__sidecar">
@@ -630,7 +659,9 @@ onMounted(() => {
             </li>
             <li v-for="entry in otherItems" :key="entry.url">
               <div class="entry-row entry-row--muted" :title="entry.url">
-                <Icon icon="lucide:file" width="18" />
+                <span class="entry-row__thumb">
+                  <Icon icon="lucide:file" width="18" />
+                </span>
                 <span>
                   <strong>{{ entry.name }}</strong>
                   <small>{{ entry.extension || entry.contentType || "文件" }} · {{ formatBytes(entry.sizeBytes) }}</small>
@@ -930,7 +961,7 @@ onMounted(() => {
   background: transparent;
   color: var(--fg-secondary);
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 24px;
+  grid-template-columns: 44px minmax(0, 1fr) 24px;
   align-items: center;
   gap: 10px;
   padding: 8px 4px;
@@ -947,6 +978,30 @@ onMounted(() => {
 .entry-row--muted {
   cursor: default;
   opacity: 0.58;
+}
+.entry-row__thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--fg-secondary);
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+  position: relative;
+}
+.entry-row__thumb img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.entry-row__thumb--image {
+  background: #111;
+}
+.entry-row__thumb--image svg {
+  opacity: 0;
 }
 .entry-row span {
   min-width: 0;

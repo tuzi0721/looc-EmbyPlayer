@@ -21,6 +21,15 @@ const subtitleExtensions = new Map([
   ["ssa", 2],
   ["vtt", 3],
 ]);
+const posterExtensions = new Map([
+  ["jpg", 0],
+  ["jpeg", 1],
+  ["png", 2],
+  ["webp", 3],
+  ["avif", 4],
+  ["bmp", 5],
+]);
+const folderPosterStems = new Set(["poster", "cover", "folder"]);
 
 const propfindBody = `<?xml version="1.0" encoding="utf-8" ?>
 <d:propfind xmlns:d="DAV:">
@@ -221,13 +230,36 @@ function sidecarDanmakuFor(videoEntry, entries) {
   return match ? { name: match.name, url: match.url } : null;
 }
 
+function betterPoster(left, right) {
+  if (!left) return right;
+  const leftRank = posterExtensions.get(left.extension) ?? 99;
+  const rightRank = posterExtensions.get(right.extension) ?? 99;
+  return rightRank < leftRank ? right : left;
+}
+
+function sidecarPosterFor(videoEntry, entries) {
+  if (!videoEntry.playable) return null;
+  const videoStem = stemFromName(videoEntry.name).toLowerCase();
+  let exact = null;
+  let folderPoster = null;
+  for (const entry of entries) {
+    if (entry.isDirectory || !posterExtensions.has(entry.extension)) continue;
+    const stem = stemFromName(entry.name).toLowerCase();
+    if (stem === videoStem) exact = betterPoster(exact, entry);
+    if (folderPosterStems.has(stem)) folderPoster = betterPoster(folderPoster, entry);
+  }
+  return exact ?? folderPoster;
+}
+
 function annotateSidecars(entries) {
   return entries.map((entry) => {
     if (!entry.playable) return entry;
     const sidecarSubtitles = sidecarSubtitlesFor(entry, entries);
     const sidecarDanmaku = sidecarDanmakuFor(entry, entries);
+    const poster = sidecarPosterFor(entry, entries);
     return {
       ...entry,
+      posterUrl: poster?.url ?? null,
       sidecarSubtitleCount: sidecarSubtitles.length,
       sidecarSubtitles,
       sidecarDanmaku,

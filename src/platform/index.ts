@@ -129,6 +129,15 @@ const WEB_DAV_SUBTITLE_EXTENSIONS = new Map([
   ["ssa", 2],
   ["vtt", 3],
 ]);
+const REMOTE_POSTER_EXTENSIONS = new Map([
+  ["jpg", 0],
+  ["jpeg", 1],
+  ["png", 2],
+  ["webp", 3],
+  ["avif", 4],
+  ["bmp", 5],
+]);
+const REMOTE_FOLDER_POSTER_STEMS = new Set(["poster", "cover", "folder"]);
 let webSettings: AppSettings = { ...WEB_DEFAULT_SETTINGS };
 let webServers: Server[] = [];
 let webAccounts: Account[] = [];
@@ -817,6 +826,7 @@ function alistEntryFromItem(root: URL, currentPath: string, item: unknown): Alis
     thumb: stringFrom(record.thumb) || null,
     sign: stringFrom(record.sign) || null,
     playable: !isDirectory && WEB_DAV_VIDEO_EXTENSIONS.has(extension),
+    posterUrl: isDirectory ? null : stringFrom(record.thumb) || null,
   };
 }
 
@@ -857,13 +867,43 @@ function alistSidecarDanmakuFor(videoEntry: AlistEntry, entries: AlistEntry[]) {
   return match ? { name: match.name, url: match.url, path: match.path } : null;
 }
 
+function betterRemotePoster<T extends { extension: string }>(left: T | null, right: T): T {
+  if (!left) return right;
+  const leftRank = REMOTE_POSTER_EXTENSIONS.get(left.extension) ?? 99;
+  const rightRank = REMOTE_POSTER_EXTENSIONS.get(right.extension) ?? 99;
+  return rightRank < leftRank ? right : left;
+}
+
+function remotePosterFor<T extends { name: string; extension: string; isDirectory: boolean; playable: boolean }>(
+  videoEntry: T,
+  entries: T[],
+): T | null {
+  if (!videoEntry.playable) return null;
+  const videoStem = webDavStemFromName(videoEntry.name).toLocaleLowerCase();
+  let exact: T | null = null;
+  let folderPoster: T | null = null;
+  for (const entry of entries) {
+    if (entry.isDirectory || !REMOTE_POSTER_EXTENSIONS.has(entry.extension)) continue;
+    const stem = webDavStemFromName(entry.name).toLocaleLowerCase();
+    if (stem === videoStem) exact = betterRemotePoster(exact, entry);
+    if (REMOTE_FOLDER_POSTER_STEMS.has(stem)) folderPoster = betterRemotePoster(folderPoster, entry);
+  }
+  return exact ?? folderPoster;
+}
+
+function alistPosterUrl(entry?: AlistEntry | null, allowFileUrl = false): string | null {
+  return stringFrom(entry?.thumb) || (allowFileUrl ? stringFrom(entry?.url) : null);
+}
+
 function alistAnnotateSidecars(entries: AlistEntry[]) {
   return entries.map((entry) => {
     if (!entry.playable) return entry;
     const sidecarSubtitles = alistSidecarSubtitlesFor(entry, entries);
     const sidecarDanmaku = alistSidecarDanmakuFor(entry, entries);
+    const poster = remotePosterFor(entry, entries);
     return {
       ...entry,
+      posterUrl: alistPosterUrl(poster, true) ?? alistPosterUrl(entry),
       sidecarSubtitleCount: sidecarSubtitles.length,
       sidecarSubtitles,
       sidecarDanmaku,
@@ -1046,8 +1086,10 @@ function webDavAnnotateSidecars(entries: WebDavEntry[]) {
     if (!entry.playable) return entry;
     const sidecarSubtitles = webDavSidecarSubtitlesFor(entry, entries);
     const sidecarDanmaku = webDavSidecarDanmakuFor(entry, entries);
+    const poster = remotePosterFor(entry, entries);
     return {
       ...entry,
+      posterUrl: poster?.url ?? null,
       sidecarSubtitleCount: sidecarSubtitles.length,
       sidecarSubtitles,
       sidecarDanmaku,
