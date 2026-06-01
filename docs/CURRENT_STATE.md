@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-01（旧 smoke 脚本清理）
+> 更新时间：2026-06-01（Electron unpacked 包刷新）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-01-2127-stale-smoke-script-removal.md`](./CHANGE_LOG/2026-06-01-2127-stale-smoke-script-removal.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-01-2134-electron-unpacked-refresh.md`](./CHANGE_LOG/2026-06-01-2134-electron-unpacked-refresh.md)
 
 ---
 
@@ -22,6 +22,8 @@
 | 内置 mpv | `release-electron\win-unpacked\resources\mpv\mpv.exe`；Tauri 为 `src-tauri\target\release\resources\mpv\mpv.exe` |
 
 历史流水和每轮验证保留在 [`CHANGE_LOG`](./CHANGE_LOG/)；本文件只记录当前可执行状态，避免旧阶段描述误导后续判断。
+
+当前最新 Electron unpacked 产物已刷新：`A:\vsc\emby-player\release-electron\win-unpacked\Hills Lite.exe`，文件时间 2026-06-01 21:33:56。
 
 当前项目指导文档也已同步：`PROJECT_MEMORY.md` 与 `STANDARDS.md` 不再作为旧路线清单，而是指向当前 Electron 主线、随包 mpv、本机解码硬约束、阶段日志/提交/推送节奏和安全边界。
 
@@ -109,8 +111,9 @@ node scripts\smoke-electron-home-hero.mjs
 
 当前最新阶段已验证：
 
+- `npm.cmd run electron:build`
 - `npm.cmd run build`
-- `git diff --check`
+- `check:electron-package`
 
 ---
 
