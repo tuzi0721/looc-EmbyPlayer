@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-01（真实服务器脱敏检查脚本）
+> 更新时间：2026-06-01（Electron portable 构建阻塞）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-01-2154-real-server-check-script.md`](./CHANGE_LOG/2026-06-01-2154-real-server-check-script.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-01-2202-electron-portable-build-blocked.md`](./CHANGE_LOG/2026-06-01-2202-electron-portable-build-blocked.md)
 
 ---
 
@@ -23,7 +23,9 @@
 
 历史流水和每轮验证保留在 [`CHANGE_LOG`](./CHANGE_LOG/)；本文件只记录当前可执行状态，避免旧阶段描述误导后续判断。
 
-当前最新 Electron unpacked 产物已刷新：`A:\vsc\emby-player\release-electron\win-unpacked\Hills Lite.exe`，文件时间 2026-06-01 21:33:56。
+当前最新 Electron unpacked 产物已刷新：`A:\vsc\emby-player\release-electron\win-unpacked\Hills Lite.exe`，文件时间 2026-06-01 22:02:16。
+
+当前 Electron portable 单文件包尚未刷新成功：`A:\vsc\emby-player\release-electron\Hills Lite 0.1.0.exe` 仍是 2026-05-30 14:51:48 的旧产物。`npm.cmd run electron:dist` 在 `electron-builder --win portable` 阶段因 GitHub NSIS 依赖下载超时失败，不能把该 portable exe 当作最新版本分发。
 
 当前项目指导文档也已同步：`PROJECT_MEMORY.md` 与 `STANDARDS.md` 不再作为旧路线清单，而是指向当前 Electron 主线、随包 mpv、本机解码硬约束、阶段日志/提交/推送节奏和安全边界。
 
