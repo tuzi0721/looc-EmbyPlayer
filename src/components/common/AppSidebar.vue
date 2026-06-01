@@ -4,8 +4,6 @@ import { useRoute, useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
 
 import { useAuthStore } from "@/stores/auth";
-import { useDownloadsStore } from "@/stores/downloads";
-import { useNotificationsStore } from "@/stores/notifications";
 import { useServerStore } from "@/stores/server";
 import { useSettingsStore } from "@/stores/settings";
 import LineStatusDot from "@/components/common/LineStatusDot.vue";
@@ -16,8 +14,6 @@ const route = useRoute();
 const auth = useAuthStore();
 const serverStore = useServerStore();
 const settings = useSettingsStore();
-const downloads = useDownloadsStore();
-const notifications = useNotificationsStore();
 
 const showVisibility = ref(false);
 
@@ -27,16 +23,6 @@ const visibleServers = computed(() =>
 );
 
 const activeServerId = computed(() => auth.activeAccount?.serverId ?? null);
-
-const activeDownloads = computed(
-  () => downloads.tasks.filter((t) => t.status === "running" || t.status === "paused").length,
-);
-const activeDownloadsLabel = computed(() =>
-  activeDownloads.value > 99 ? "99+" : String(activeDownloads.value),
-);
-const unreadNotificationsLabel = computed(() =>
-  notifications.unread > 99 ? "99+" : String(notifications.unread),
-);
 
 function loggedInOn(serverId: string): boolean {
   return auth.accounts.some((a) => a.serverId === serverId);
@@ -82,12 +68,6 @@ function gotoHistory() {
 function gotoAggregate() {
   router.push("/aggregate").catch(() => {});
 }
-function gotoDownloads() {
-  router.push("/downloads").catch(() => {});
-}
-function gotoRemote() {
-  router.push("/remote").catch(() => {});
-}
 </script>
 
 <template>
@@ -131,32 +111,6 @@ function gotoRemote() {
       >
         <Icon icon="lucide:infinity" width="16" />
         <span>聚合视界</span>
-      </button>
-      <button
-        class="nav-btn"
-        :class="{ active: route.name === 'downloads' }"
-        @click="gotoDownloads"
-      >
-        <Icon icon="lucide:download" width="16" />
-        <span>下载</span>
-        <span v-if="activeDownloads > 0" class="badge">{{ activeDownloadsLabel }}</span>
-      </button>
-      <button
-        class="nav-btn"
-        :class="{ active: notifications.centerOpen }"
-        @click="notifications.toggleCenter"
-      >
-        <Icon icon="lucide:bell" width="16" />
-        <span>通知</span>
-        <span v-if="notifications.unread > 0" class="badge danger">{{ unreadNotificationsLabel }}</span>
-      </button>
-      <button
-        class="nav-btn"
-        :class="{ active: route.name === 'remote' }"
-        @click="gotoRemote"
-      >
-        <Icon icon="lucide:cast" width="16" />
-        <span>遥控</span>
       </button>
     </nav>
 
@@ -351,20 +305,6 @@ function gotoRemote() {
 .nav-btn .chev {
   margin-left: auto;
 }
-.nav-btn .badge {
-  margin-left: auto;
-  font-size: 10px;
-  background: rgba(255, 255, 255, 0.12);
-  color: var(--fg-primary);
-  padding: 2px 7px;
-  border-radius: 999px;
-  font-weight: 700;
-}
-.nav-btn .badge.danger {
-  background: var(--danger);
-  color: white;
-}
-
 .sb__section {
   display: flex;
   flex-direction: column;

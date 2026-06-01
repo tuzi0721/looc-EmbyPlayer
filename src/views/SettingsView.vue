@@ -12,6 +12,8 @@ import { openFileDialog, platformType } from "@/platform";
 import { useAuthStore } from "@/stores/auth";
 import { useLibraryStore } from "@/stores/library";
 import { useLocalFilesStore } from "@/stores/localFiles";
+import { useDownloadsStore } from "@/stores/downloads";
+import { useNotificationsStore } from "@/stores/notifications";
 import { useSettingsStore } from "@/stores/settings";
 import { useServerStore } from "@/stores/server";
 import type { Line, Server } from "@/types/models";
@@ -40,6 +42,8 @@ const lib = useLibraryStore();
 const settings = useSettingsStore();
 const serverStore = useServerStore();
 const localFiles = useLocalFilesStore();
+const downloads = useDownloadsStore();
+const notifications = useNotificationsStore();
 const route = useRoute();
 const router = useRouter();
 
@@ -63,6 +67,15 @@ const isTauriRuntime =
   typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
 const backupAvailable = computed(
   () => isElectronRuntime || isTauriRuntime || platformLabel.value === "web",
+);
+const activeDownloads = computed(
+  () => downloads.tasks.filter((t) => t.status === "running" || t.status === "paused").length,
+);
+const activeDownloadsLabel = computed(() =>
+  activeDownloads.value > 99 ? "99+" : `${activeDownloads.value}`,
+);
+const unreadNotificationsLabel = computed(() =>
+  notifications.unread > 99 ? "99+" : `${notifications.unread}`,
 );
 
 type ServerLineDraft = {
@@ -383,6 +396,18 @@ function openWebDav() {
 
 function openAlist() {
   router.push({ name: "alist" }).catch(() => {});
+}
+
+function openDownloadsCenter() {
+  router.push({ name: "downloads" }).catch(() => {});
+}
+
+function openRemoteControl() {
+  router.push({ name: "remote" }).catch(() => {});
+}
+
+function openNotificationsCenter() {
+  notifications.toggleCenter();
 }
 
 async function openWindowsHdrSettings() {
@@ -958,6 +983,25 @@ const danmakuSummary = computed(() => {
           />
         </label>
       </div>
+
+      <h2 class="group-title">工具</h2>
+
+      <button class="row" @click="openDownloadsCenter">
+        <span>下载中心</span>
+        <span v-if="activeDownloads > 0" class="value">{{ activeDownloadsLabel }} 个任务</span>
+        <Icon v-else icon="lucide:chevron-right" width="16" class="chev" />
+      </button>
+
+      <button class="row" @click="openNotificationsCenter">
+        <span>通知中心</span>
+        <span v-if="notifications.unread > 0" class="value">{{ unreadNotificationsLabel }} 未读</span>
+        <Icon v-else icon="lucide:chevron-right" width="16" class="chev" />
+      </button>
+
+      <button class="row" @click="openRemoteControl">
+        <span>遥控器</span>
+        <Icon icon="lucide:chevron-right" width="16" class="chev" />
+      </button>
 
       <button class="row" @click="togglePanel('servers')">
         <span>媒体库 / 服务器</span>

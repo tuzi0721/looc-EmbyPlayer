@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（Electron 桌面菜单清理）
+> **更新时间**：2026-06-01（侧边栏工具入口收敛）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1740-electron-menu-cleanup.md`](./CHANGE_LOG/2026-06-01-1740-electron-menu-cleanup.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1747-sidebar-tool-entry-cleanup.md`](./CHANGE_LOG/2026-06-01-1747-sidebar-tool-entry-cleanup.md)
 
 ---
 
@@ -46,6 +46,8 @@
 **2026-06-01**：播放器后退修正已闭环：后退/前进按钮和快捷键改用运行时相对 seek，Electron 与 Tauri mpv 后端都新增 `seek_relative` 并使用 `relative+keyframes`，避免 UI 进度回读滞后时把后退误算成原地跳转；进度条、章节、片头跳转仍保留绝对 seek。紧凑布局中后退/前进按钮不再被 `small` 规则隐藏，960x620 与 960x600 窗口 smoke 均确认后退按钮可见、无水平溢出。内嵌播放 smoke 中后退从 10633ms 退到 900ms，全屏、窗口缩放、彩色视频像素与退出清理继续通过；转码入口扫描无 `TranscodingUrl`、`master.m3u8`、`EnableTranscoding.*true` 或 `PlayMethod.*Transcode` 命中，播放链路仍坚持本机解码。
 
 **2026-06-01**：Electron 桌面壳菜单已清理：主进程在应用级调用 `Menu.setApplicationMenu(null)`，并对所有新建 BrowserWindow 兜底清空菜单、隐藏菜单栏与自动隐藏菜单栏，避免默认 `File / Edit` 菜单露出；开发模式不再默认弹出 DevTools，只有显式设置 `HILLS_ELECTRON_OPEN_DEVTOOLS=1` 才打开。应用内文件打开、字幕导入、备份导入导出仍通过现有按钮和原生对话框完成，不依赖系统菜单。
+
+**2026-06-01**：侧边栏工具入口已收敛：主导航移除下载、通知、遥控，只保留首页、收藏、历史、聚合视界、服务器与设置，降低主界面杂乱感；设置页新增“工具”分组，集中放置下载中心、通知中心与遥控器入口，并保留下载任务数和通知未读数提示。路由与功能本身未删除，入口位置迁移到设置页。
 
 **2026-06-01**：播放器“播放源 / 媒体源”菜单同步本机解码硬约束：候选源会显示“本机直连 / 本机直流 / 本机解码待确认”，当 Emby/Jellyfin 只上报服务端转码能力时，该媒体源在会话内切源菜单中直接禁用并阻止切换，避免用户误点导致 NAS、路由器或 VPS 服务端承担转码解码压力。底层 PlaybackInfo、静态流 URL 与进度上报继续保持 Direct Play / Direct Stream only，不允许服务端转码兜底。验证已覆盖 `npm.cmd run build`、`git diff --check`、主动转码入口扫描与 `npm.cmd run electron:build`。
 
