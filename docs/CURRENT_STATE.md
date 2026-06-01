@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（Alist / OpenList 侧挂资源刷新）
+> **更新时间**：2026-06-01（Web Preview 直链队列切换）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1157-alist-sidecar-resolve.md`](./CHANGE_LOG/2026-06-01-1157-alist-sidecar-resolve.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1202-direct-queue-html-src.md`](./CHANGE_LOG/2026-06-01-1202-direct-queue-html-src.md)
 
 ---
 
@@ -614,6 +614,8 @@ npm.cmd run electron:build
 本轮 Alist / OpenList 播放前刷新直链已闭环：`/alist` 写入 direct queue 时会保留站点 URL、文件路径、路径密码和 token 元数据；播放器每次播放 Alist 队列项前都会重新调用 `/api/fs/get`，优先使用最新 `raw_url`，否则使用最新签名 `/d/...` URL，并同步当前队列 URL，避免下一条/上一条沿用过期签名。播放器侧挂弹幕读取也会按当前 `queueIndex` 找回 Alist 条目，并在远程 XML 导入时携带 token header，私有 Alist/OpenList 站点的同名 XML 弹幕不再只依赖公开直链。
 
 本轮 Alist / OpenList 侧挂资源刷新已闭环：Alist 同名字幕和 XML 弹幕关联结果会保留文件路径，播放器播放 Alist 队列项前会在刷新主视频直链的同时 best-effort 刷新侧挂字幕和 XML 弹幕 URL；侧挂刷新失败时保留目录列表里的原 URL，不阻断主视频播放。这样私有站点或短期签名站点切换上一条/下一条时，不再只刷新视频而让字幕/弹幕沿用旧签名。
+
+本轮 Web Preview 直链队列切换已闭环：播放器把 Web Preview 下的直链 HTML video 播放抽成统一入口，`/player/webdav-file`、`/player/alist-file` 初始播放和 direct queue 上一条/下一条/选集切换都会在 store 更新当前直链后重新绑定 HTML `<video>` 的 `src`。桌面 Electron/Tauri 仍以运行时内嵌 mpv 为准；Web Preview 仅用于无需额外鉴权 header 的直链预览。
 
 ---
 

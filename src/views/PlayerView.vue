@@ -1034,6 +1034,33 @@ async function startHtmlPlayback(
   bumpControls();
 }
 
+async function startDirectHtmlPlayback(startMs = 0) {
+  const video = videoEl.value;
+  if (!video) throw new Error("播放器尚未初始化");
+  if (!player.directUrl) throw new Error("缺少直链播放地址");
+
+  destroyHtmlPlayback();
+  htmlTracks.value = [];
+  htmlDurationMs.value = 0;
+  htmlPaused.value = true;
+  pendingStartSeconds = startMs > 0 ? startMs / 1000 : null;
+
+  video.src = player.directUrl;
+  video.volume = Math.max(0, Math.min(1, htmlVolume.value / 100));
+  video.muted = htmlMuted.value;
+  video.playbackRate = htmlSpeed.value;
+
+  try {
+    await video.play();
+  } catch (error) {
+    if (!(error instanceof DOMException) || error.name !== "NotAllowedError") {
+      throw error;
+    }
+    htmlPaused.value = true;
+    showControls.value = true;
+  }
+}
+
 function onVideoLoadedMetadata() {
   const video = videoEl.value;
   if (!video) return;
@@ -1284,6 +1311,7 @@ async function playQueueIndex(index: number) {
     player.queueIndex = index;
     resetDanmakuState();
     await player.playDirectEntry(entry);
+    if (useHtmlVideo) await startDirectHtmlPlayback(0);
   } else if (useHtmlVideo) {
     const id = player.queue[index];
     if (!id) return;
@@ -1856,17 +1884,7 @@ async function startCurrentPlayback() {
       throw new Error(props.id === "alist-file" ? "请从 Alist 页面打开一个视频文件" : "请从 WebDAV 页面打开一个视频文件");
     }
     if (useHtmlVideo && videoEl.value) {
-      destroyHtmlPlayback();
-      videoEl.value.src = player.directUrl;
-      videoEl.value.volume = Math.max(0, Math.min(1, htmlVolume.value / 100));
-      videoEl.value.muted = htmlMuted.value;
-      videoEl.value.playbackRate = htmlSpeed.value;
-      pendingStartSeconds = start > 0 ? start / 1000 : null;
-      await videoEl.value.play().catch((error) => {
-        if (!(error instanceof DOMException) || error.name !== "NotAllowedError") throw error;
-        htmlPaused.value = true;
-        showControls.value = true;
-      });
+      await startDirectHtmlPlayback(start);
     } else {
       await player.refresh();
     }
