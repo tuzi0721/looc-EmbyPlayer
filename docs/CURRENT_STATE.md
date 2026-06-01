@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-01（首页首屏阻塞引导清理）
+> 更新时间：2026-06-01（播放器内嵌与退出清理验证）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-01-2058-first-run-guide-removal.md`](./CHANGE_LOG/2026-06-01-2058-first-run-guide-removal.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-01-2108-player-embedded-smoke-check.md`](./CHANGE_LOG/2026-06-01-2108-player-embedded-smoke-check.md)
 
 ---
 
@@ -50,7 +50,7 @@
 - 默认只使用应用随包 mpv；不扫描系统 PATH、不读取旧 vendor mpv、不提供用户选择 mpv 路径。
 - 全屏阶段视频舞台铺满 viewport，控制层作为覆盖层，不再挤压视频区域。
 - 后退/前进使用运行时相对 seek；后退、全屏、窗口缩放、控制栏可见性和退出清理已进入 Electron smoke。
-- 退出清理会等待 runtime cleanup，关闭后应无 `mpv.exe`、`electron_mpv_host.exe` 或 `Hills Lite` 残留播放进程。
+- Electron 内嵌播放 smoke 已覆盖后退、长按倍速、真全屏、自适应、mpv 截图像素和关闭清理；退出后应无 `mpv.exe`、`electron_mpv_host.exe` 或 `Hills Lite` 残留播放进程。
 - Electron 默认系统菜单已清空；开发工具只在显式环境变量开启时打开。
 
 ---
