@@ -7,6 +7,8 @@ import { api, type WebDavEntry, type WebDavListing } from "@/api";
 import { usePlayerStore, type DirectQueueEntry } from "@/stores/player";
 import { useWebDavStore } from "@/stores/webdav";
 
+type SortMode = "name" | "modified" | "size" | "type";
+
 const route = useRoute();
 const router = useRouter();
 const player = usePlayerStore();
@@ -22,6 +24,8 @@ const listing = ref<WebDavListing | null>(null);
 const loading = ref(false);
 const playingUrl = ref<string | null>(null);
 const errorText = ref<string | null>(null);
+const searchText = ref("");
+const sortMode = ref<SortMode>("name");
 
 const currentPath = computed(() => {
   const value = route.query.path;
@@ -31,14 +35,33 @@ const folderTitle = computed(() => {
   if (!currentPath.value) return "WebDAV";
   return currentPath.value.replace(/\/+$/, "").split("/").filter(Boolean).pop() ?? "WebDAV";
 });
-const directoryItems = computed(() => (listing.value?.items ?? []).filter((entry) => entry.isDirectory));
+const normalizedSearchText = computed(() => searchText.value.trim().toLocaleLowerCase());
+const visibleItems = computed(() => {
+  const items = listing.value?.items ?? [];
+  const query = normalizedSearchText.value;
+  const filtered = query
+    ? items.filter((entry) =>
+        [entry.name, entry.path, entry.extension, entry.contentType ?? ""]
+          .join(" ")
+          .toLocaleLowerCase()
+          .includes(query),
+      )
+    : items;
+  return [...filtered].sort(compareEntries);
+});
+const directoryItems = computed(() => visibleItems.value.filter((entry) => entry.isDirectory));
 const playableItems = computed(() =>
-  (listing.value?.items ?? []).filter((entry) => !entry.isDirectory && entry.playable),
+  visibleItems.value.filter((entry) => !entry.isDirectory && entry.playable),
 );
 const otherItems = computed(() =>
-  (listing.value?.items ?? []).filter((entry) => !entry.isDirectory && !entry.playable),
+  visibleItems.value.filter((entry) => !entry.isDirectory && !entry.playable),
 );
 const canLoad = computed(() => baseUrlDraft.value.trim().length > 0);
+const countLabel = computed(() => {
+  const total = listing.value?.items.length ?? 0;
+  if (normalizedSearchText.value) return `${visibleItems.value.length} / ${total} 项`;
+  return `${total} 项`;
+});
 const selectedConnection = computed(() =>
   selectedConnectionId.value
     ? webdav.connections.find((entry) => entry.id === selectedConnectionId.value) ?? null
@@ -83,6 +106,32 @@ function formatDate(ms?: number | null): string {
   }
 }
 
+function compareText(left: string, right: string): number {
+  return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+}
+
+function entryKindRank(entry: WebDavEntry): number {
+  if (entry.isDirectory) return 0;
+  if (entry.playable) return 1;
+  return 2;
+}
+
+function compareEntries(left: WebDavEntry, right: WebDavEntry): number {
+  const kind = entryKindRank(left) - entryKindRank(right);
+  if (kind !== 0) return kind;
+  if (sortMode.value === "modified") {
+    return (right.modifiedAtMs ?? 0) - (left.modifiedAtMs ?? 0) || compareText(left.name, right.name);
+  }
+  if (sortMode.value === "size") {
+    return right.sizeBytes - left.sizeBytes || compareText(left.name, right.name);
+  }
+  if (sortMode.value === "type") {
+    return compareText(left.extension || left.contentType || "", right.extension || right.contentType || "")
+      || compareText(left.name, right.name);
+  }
+  return compareText(left.name, right.name);
+}
+
 function parentPath(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/").filter(Boolean);
   parts.pop();
@@ -101,6 +150,7 @@ function fillConnection(id: string | null) {
 
 function selectConnection(id: string) {
   fillConnection(id);
+  searchText.value = "";
   router.replace({ name: "webdav", query: { connection: id, path: "" } }).catch(() => {});
 }
 
@@ -118,6 +168,7 @@ function newConnection() {
   rememberPassword.value = false;
   listing.value = null;
   errorText.value = null;
+  searchText.value = "";
   router.replace({ name: "webdav" }).catch(() => {});
 }
 
@@ -222,6 +273,7 @@ watch(
 
 watch(currentPath, (path, previous) => {
   if (path === previous) return;
+  searchText.value = "";
   if (canLoad.value) void connectAndLoad(path);
 });
 
@@ -380,48 +432,85 @@ onMounted(() => {
           <strong>目录为空</strong>
         </div>
 
-        <ul v-else class="entry-list">
-          <li v-for="entry in directoryItems" :key="entry.url">
-            <button class="entry-row" type="button" :title="entry.url" @click="openDirectory(entry)">
-              <Icon icon="lucide:folder" width="18" />
-              <span>
-                <strong>{{ entry.name }}</strong>
-                <small>{{ formatDate(entry.modifiedAtMs) || "目录" }}</small>
-              </span>
-              <Icon icon="lucide:chevron-right" width="16" />
-            </button>
-          </li>
-          <li v-for="entry in playableItems" :key="entry.url">
+        <template v-else>
+          <div class="webdav-toolbar">
+            <label class="search-box">
+              <Icon icon="lucide:search" width="15" />
+              <input v-model="searchText" type="search" placeholder="搜索名称、路径或类型" />
+            </label>
+            <label class="sort-box" title="排序">
+              <Icon icon="lucide:arrow-up-down" width="15" />
+              <select v-model="sortMode">
+                <option value="name">名称</option>
+                <option value="modified">最近修改</option>
+                <option value="size">大小</option>
+                <option value="type">类型</option>
+              </select>
+            </label>
             <button
-              class="entry-row"
+              v-if="searchText"
+              class="icon-btn"
               type="button"
-              :title="entry.url"
-              :disabled="playingUrl === entry.url"
-              @click="playEntry(entry)"
+              title="清空搜索"
+              @click="searchText = ''"
             >
-              <Icon icon="lucide:file-video" width="18" />
-              <span>
-                <strong>{{ entry.name }}</strong>
-                <small>
-                  {{ entry.extension.toUpperCase() }} · {{ formatBytes(entry.sizeBytes) }}
-                  <template v-if="formatDate(entry.modifiedAtMs)">
-                    · {{ formatDate(entry.modifiedAtMs) }}
-                  </template>
-                </small>
-              </span>
-              <Icon :icon="playingUrl === entry.url ? 'lucide:loader' : 'lucide:play'" width="16" :class="{ spin: playingUrl === entry.url }" />
+              <Icon icon="lucide:x" width="15" />
             </button>
-          </li>
-          <li v-for="entry in otherItems" :key="entry.url">
-            <div class="entry-row entry-row--muted" :title="entry.url">
-              <Icon icon="lucide:file" width="18" />
-              <span>
-                <strong>{{ entry.name }}</strong>
-                <small>{{ entry.extension || entry.contentType || "文件" }} · {{ formatBytes(entry.sizeBytes) }}</small>
-              </span>
-            </div>
-          </li>
-        </ul>
+          </div>
+          <div class="webdav-meta">
+            <span>{{ countLabel }}</span>
+            <span v-if="playableItems.length > 0">{{ playableItems.length }} 个可播放</span>
+            <span v-if="loading">读取中</span>
+          </div>
+
+          <div v-if="visibleItems.length === 0" class="empty glass">
+            <Icon icon="lucide:file-question" width="32" />
+            <strong>未匹配到 WebDAV 条目</strong>
+          </div>
+
+          <ul v-else class="entry-list">
+            <li v-for="entry in directoryItems" :key="entry.url">
+              <button class="entry-row" type="button" :title="entry.url" @click="openDirectory(entry)">
+                <Icon icon="lucide:folder" width="18" />
+                <span>
+                  <strong>{{ entry.name }}</strong>
+                  <small>{{ formatDate(entry.modifiedAtMs) || "目录" }}</small>
+                </span>
+                <Icon icon="lucide:chevron-right" width="16" />
+              </button>
+            </li>
+            <li v-for="entry in playableItems" :key="entry.url">
+              <button
+                class="entry-row"
+                type="button"
+                :title="entry.url"
+                :disabled="playingUrl === entry.url"
+                @click="playEntry(entry)"
+              >
+                <Icon icon="lucide:file-video" width="18" />
+                <span>
+                  <strong>{{ entry.name }}</strong>
+                  <small>
+                    {{ entry.extension.toUpperCase() }} · {{ formatBytes(entry.sizeBytes) }}
+                    <template v-if="formatDate(entry.modifiedAtMs)">
+                      · {{ formatDate(entry.modifiedAtMs) }}
+                    </template>
+                  </small>
+                </span>
+                <Icon :icon="playingUrl === entry.url ? 'lucide:loader' : 'lucide:play'" width="16" :class="{ spin: playingUrl === entry.url }" />
+              </button>
+            </li>
+            <li v-for="entry in otherItems" :key="entry.url">
+              <div class="entry-row entry-row--muted" :title="entry.url">
+                <Icon icon="lucide:file" width="18" />
+                <span>
+                  <strong>{{ entry.name }}</strong>
+                  <small>{{ entry.extension || entry.contentType || "文件" }} · {{ formatBytes(entry.sizeBytes) }}</small>
+                </span>
+              </div>
+            </li>
+          </ul>
+        </template>
       </main>
     </div>
   </section>
@@ -568,6 +657,73 @@ onMounted(() => {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+}
+.webdav-toolbar {
+  max-width: 900px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.search-box {
+  min-width: 0;
+  flex: 1;
+  height: 36px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-tertiary);
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+}
+.search-box input {
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg-primary);
+  font: inherit;
+}
+.search-box input::placeholder {
+  color: var(--fg-tertiary);
+}
+.sort-box {
+  width: 136px;
+  height: 36px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-tertiary);
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+}
+.sort-box select {
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.sort-box option {
+  background: #1f1f24;
+  color: white;
+}
+.webdav-meta {
+  max-width: 900px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-height: 26px;
+  color: var(--fg-tertiary);
+  font-size: 12px;
 }
 .entry-list {
   list-style: none;
@@ -752,6 +908,12 @@ onMounted(() => {
   .webdav-config,
   .webdav-list {
     overflow: visible;
+  }
+  .webdav-toolbar {
+    flex-wrap: wrap;
+  }
+  .sort-box {
+    width: 100%;
   }
   .shortcut-list {
     grid-template-columns: minmax(0, 1fr);
