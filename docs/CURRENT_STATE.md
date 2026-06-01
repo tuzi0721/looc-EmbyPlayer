@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-01（关闭到托盘旧设置清理）
+> 更新时间：2026-06-01（首页首屏阻塞引导清理）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-01-2046-close-to-tray-setting-removal.md`](./CHANGE_LOG/2026-06-01-2046-close-to-tray-setting-removal.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-01-2058-first-run-guide-removal.md`](./CHANGE_LOG/2026-06-01-2058-first-run-guide-removal.md)
 
 ---
 
@@ -28,6 +28,8 @@
 工作区卫生检查已接入 `npm.cmd run check:workspace`：该脚本允许当前 6 个运行/构建目录，拦截意外未跟踪文件和意外忽略目录，用来避免旧临时文件、旧 Git 目录或散落构建日志重新污染仓库判断。
 
 关闭语义已收紧：设置页不再展示“关闭时最小化到托盘”旧开关，配置读写会过滤 `closeToTray` / `close_to_tray` 旧字段。窗口关闭继续走 runtime cleanup 与 `app.quit()`，托盘只保留显式“显示/隐藏窗口/退出”菜单动作，避免用户点关闭后误以为应用退出但播放仍藏在后台。
+
+首页首屏不再弹出“开始使用 Hills Lite”引导层；首次进入会直接露出真实媒体库巨幕或服务器/登录空态，旧 `firstRunCompleted` 配置字段由运行时设置归一化过滤。
 
 ---
 

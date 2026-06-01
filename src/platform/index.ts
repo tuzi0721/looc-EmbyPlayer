@@ -63,7 +63,6 @@ const WEB_DEFAULT_SETTINGS: AppSettings = {
   raceTimeoutMs: 3500,
   requestTimeoutMs: 15000,
   defaultUserAgent: "Emby-Player/0.1 (Web Preview)",
-  firstRunCompleted: false,
   theme: "dark",
   blurStrength: 24,
   enableWindowVibrancy: true,

@@ -134,8 +134,6 @@ pub struct AppSettings {
     #[serde(default = "default_global_ua")]
     pub default_user_agent: String,
     #[serde(default)]
-    pub first_run_completed: bool,
-    #[serde(default)]
     pub theme: Theme,
     #[serde(default = "default_blur_strength")]
     pub blur_strength: u32,
@@ -223,7 +221,6 @@ impl Default for AppSettings {
             race_timeout_ms: default_race_timeout_ms(),
             request_timeout_ms: default_request_timeout_ms(),
             default_user_agent: default_global_ua(),
-            first_run_completed: false,
             theme: Theme::default(),
             blur_strength: default_blur_strength(),
             enable_window_vibrancy: true,

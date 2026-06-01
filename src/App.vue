@@ -4,7 +4,6 @@ import { useRoute, useRouter } from "vue-router";
 
 import TopBar from "./components/common/TopBar.vue";
 import AppSidebar from "./components/common/AppSidebar.vue";
-import FirstRunGuide from "./components/common/FirstRunGuide.vue";
 import NotificationCenter from "./components/common/NotificationCenter.vue";
 import ToastStack from "./components/common/ToastStack.vue";
 import { api } from "./api";
@@ -27,9 +26,6 @@ const route = useRoute();
 const bootstrapped = ref(false);
 
 const isFullscreen = computed(() => Boolean(route.meta?.fullscreen));
-const showFirstRunGuide = computed(
-  () => bootstrapped.value && !isFullscreen.value && !settings.settings.firstRunCompleted,
-);
 
 watch(
   () => route.name,
@@ -114,7 +110,6 @@ onMounted(async () => {
     </div>
     <NotificationCenter />
     <ToastStack />
-    <FirstRunGuide v-if="showFirstRunGuide" />
   </div>
 </template>
 

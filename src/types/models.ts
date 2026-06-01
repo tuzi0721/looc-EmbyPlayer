@@ -44,7 +44,6 @@ export interface AppSettings {
   raceTimeoutMs: number;
   requestTimeoutMs: number;
   defaultUserAgent: string;
-  firstRunCompleted: boolean;
   theme: "dark" | "light" | "auto";
   blurStrength: number;
   enableWindowVibrancy: boolean;

@@ -12,7 +12,7 @@ const userDataDir = path.join(tmpDir, "user-data");
 const screenshotPath = path.join(tmpDir, "home-hero.png");
 
 const png = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAkCAIAAADrrE2jAAAAWElEQVR4nO3PQQ3AMAwEwU3Sf7dONFMiNQFBZlk2zj3sntkF+LYC7AeWDywfWD6wfGD5wPKB5QPLB5YPLB9YPrB8YPnA8oHlA8sHlg8sH1g+sHxg+cDygeUDyweWDywfWD7wAJ+eAksbzo5xAAAAAElFTkSuQmCC",
+  "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAkCAYAAAA5DDySAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAD1SURBVGhD7dKxDcMwDETRjJg642SwDJHauzhwYYAQviCRZiwKYvEaFuTpoMfzve0rywJouJIsgIYryQJo6OX7+rih/R7cC6Dw3uiulUsBFPIulEfjUgEUaBTK18NcAIUYjXK2qAugw9FQ7hpVAXQsKspPugugI9HRO0pZAA1LtHwW9B4pC6BhiRbPgt4jNQugpTOhN0n5A2hYosWzoPdIWQANCS2Pjt5RygJoWENHoqL8RFXAgY5FQ7lr1AWc6PBolLPFXMCBQoxC+XpcKuBEge5CeTRcCpAopDe6a+VegEThrWi/h78WMIMsgIYryQJouI5t/wGkpvo5amdmyAAAAABJRU5ErkJggg==",
   "base64",
 );
 
@@ -266,9 +266,11 @@ try {
       await lib.refreshHome();
       await wait(1500);
       const hero = document.querySelector(".hero.hero--cinema");
+      const firstRun = document.querySelector(".first-run");
       const title = document.querySelector(".hero__title");
       const desc = document.querySelector(".hero__desc");
       const poster = document.querySelector(".hero__poster");
+      const posterImg = document.querySelector(".hero__poster img");
       const nextSection = document.querySelector(".row-section");
       const heroRect = hero?.getBoundingClientRect();
       const posterRect = poster?.getBoundingClientRect();
@@ -284,6 +286,8 @@ try {
         heroItems: lib.heroItems.length,
         resumeItems: lib.resume.length,
         views: lib.views.length,
+        firstRunVisible: Boolean(firstRun),
+        posterNatural: posterImg ? { width: posterImg.naturalWidth, height: posterImg.naturalHeight, complete: posterImg.complete } : null,
         heroBg: getComputedStyle(document.querySelector(".hero__bg")).backgroundImage,
         errors: Array.from(document.querySelectorAll(".error, .alert, .toast--error")).map((node) => node.textContent),
       };
@@ -316,6 +320,7 @@ try {
   const failures = [];
   if (result.route !== "/home") failures.push(`route ${result.route}`);
   if (!result.hero) failures.push("hero missing");
+  if (result.firstRunVisible) failures.push("first-run guide blocks the home hero");
   if (!result.title.includes(heroMovie.Name)) failures.push("hero title missing media item");
   if (!result.desc.includes("real media-library candidate")) failures.push("hero overview missing");
   if (result.heroItems < 1) failures.push("hero items missing");
@@ -327,6 +332,9 @@ try {
     failures.push("next section is not hinted in first viewport");
   }
   if (!result.poster || result.poster.width < 200) failures.push("cinema poster too small or missing");
+  if (!result.posterNatural?.complete || result.posterNatural.width < 1 || result.posterNatural.height < 1) {
+    failures.push("cinema poster image did not decode");
+  }
   if (result.errors.length > 0) failures.push(`page errors: ${result.errors.join(" | ")}`);
   for (const route of personalRoutes) {
     if (route.errorTexts.length > 0) failures.push(`${route.path} errors: ${route.errorTexts.join(" | ")}`);

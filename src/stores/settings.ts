@@ -10,7 +10,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   raceTimeoutMs: 3500,
   requestTimeoutMs: 15000,
   defaultUserAgent: "Emby-Player/0.1 (Tauri; libmpv)",
-  firstRunCompleted: false,
   theme: "dark",
   blurStrength: 24,
   enableWindowVibrancy: true,

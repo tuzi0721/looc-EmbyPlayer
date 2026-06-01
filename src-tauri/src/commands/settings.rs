@@ -26,7 +26,6 @@ pub struct SettingsPatch {
     pub race_timeout_ms: Option<u64>,
     pub request_timeout_ms: Option<u64>,
     pub default_user_agent: Option<String>,
-    pub first_run_completed: Option<bool>,
     pub theme: Option<Theme>,
     pub blur_strength: Option<u32>,
     pub enable_window_vibrancy: Option<bool>,
@@ -148,9 +147,6 @@ pub async fn update_settings(
         }
         if let Some(v) = patch.default_user_agent {
             s.default_user_agent = v;
-        }
-        if let Some(v) = patch.first_run_completed {
-            s.first_run_completed = v;
         }
         if let Some(v) = patch.theme {
             s.theme = v;

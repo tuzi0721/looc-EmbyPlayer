@@ -8,7 +8,6 @@ export const DEFAULT_SETTINGS = {
   raceTimeoutMs: 3500,
   requestTimeoutMs: 15000,
   defaultUserAgent: "Hills Lite/0.1 (Electron)",
-  firstRunCompleted: false,
   theme: "dark",
   blurStrength: 24,
   enableWindowVibrancy: true,
