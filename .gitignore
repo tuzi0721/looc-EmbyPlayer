@@ -4,6 +4,7 @@ dist-ssr
 release-electron
 .electron-user-data
 .electron-builder-cache
+.git_disabled/
 *.local
 
 # Local assistant/tooling memory (keep on this machine, do not publish)
@@ -28,6 +29,7 @@ release-electron
 # Logs
 *.log
 logs/
+runtime-logs/
 
 # OS
 Thumbs.db

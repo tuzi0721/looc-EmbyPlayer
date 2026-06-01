@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（严格本机解码媒体源判定）
+> **更新时间**：2026-06-01（生成物与旧 Git 目录清理）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1830-strict-local-decode-source.md`](./CHANGE_LOG/2026-06-01-1830-strict-local-decode-source.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1834-generated-file-cleanup.md`](./CHANGE_LOG/2026-06-01-1834-generated-file-cleanup.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：生成物与旧 Git 目录完成一轮安全清理：工作目录内旧的 `.git_disabled/` 禁用仓库目录、`.electron-builder-cache/`、`runtime-logs/`、`.codex-vite.*.log` 与历史 `build*.log` 已移除，删除前逐一校验解析路径均位于 `A:\vsc\emby-player` 内；`.gitignore` 补充 `.git_disabled/` 与 `runtime-logs/`，避免后续旧 Git 目录和运行日志再次污染状态判断。`.electron-user-data/` 保留不动，避免清掉当前测试服务器配置或登录态。验证已覆盖 `git status --short --ignored`、`npm.cmd run build` 与 `git diff --check`。
 
 **2026-06-01**：本机解码媒体源判定继续收紧：Electron / Web Preview / Tauri 的播放源选择不再把“未明确否定 Direct Play / Direct Stream”的媒体源当作可用，只有服务端明确返回 `SupportsDirectPlay=true` 或 `SupportsDirectStream=true` 时才允许选中或切换；未确认本机能力的媒体源会在播放器菜单中禁用，并提示已阻止切换以避免服务端解码/转码。详情页版本能力文案同步把未确认本机解码的版本标为不可播放；`check:local-decode` 新增严格判定锚点，防止宽松判断回归。验证已覆盖 `node --check scripts\check-local-decode-guard.mjs`、`node --check electron\backend\emby.mjs`、`npm.cmd run check:local-decode`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run build`、`git diff --check` 与 `npm.cmd run electron:build`。
 
