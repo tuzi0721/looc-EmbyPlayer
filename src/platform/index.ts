@@ -597,6 +597,8 @@ const DIRECT_VIDEO_CONTAINERS = [
   "rmvb",
 ];
 const DIRECT_AUDIO_CONTAINERS = ["mp3", "aac", "flac", "ogg", "opus", "wav", "m4a", "ape", "alac"];
+const PERSONAL_ITEM_FIELDS =
+  "PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks";
 
 function directPlaybackOptions() {
   return {
@@ -1790,7 +1792,16 @@ function invokeWebFallback<T>(
       return webAuthedJson("GET", `Users/${webActivePair().account.userId}/Views`)
         .then(normalizeItemsResponse) as Promise<T>;
     case "resume_items":
-      return webAuthedJson("GET", `Users/${webActivePair().account.userId}/Items/Resume`)
+      return webAuthedJson("GET", `Users/${webActivePair().account.userId}/Items/Resume`, {
+        Recursive: "true",
+        MediaTypes: "Video",
+        Fields: PERSONAL_ITEM_FIELDS,
+        EnableUserData: "true",
+        EnableImages: "true",
+        ImageTypeLimit: "1",
+        EnableImageTypes: "Primary,Backdrop",
+        Limit: "120",
+      })
         .then(normalizeItemsResponse) as Promise<T>;
     case "list_items": {
       const payload = args?.payload as any;

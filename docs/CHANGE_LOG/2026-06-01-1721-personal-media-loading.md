@@ -1,0 +1,21 @@
+# 个人媒体加载兼容性修正
+
+- **时间**：2026-06-01 17:21 (UTC+8)
+- **动机**：用户反馈收藏、聚合视界、历史无法正确加载；真实 Emby/Jellyfin 服务端对收藏和播放历史查询参数兼容性不完全一致，单一路径失败或返回空时不能让页面整体失效。
+- **修改文件**：
+  - `src/utils/personalMedia.ts`：收藏查询增加 `IsFavorite=true`、`Filters=IsFavorite` 与按 Movie/Series/Episode 拆分查询 fallback；历史查询增加 `IsPlayed=true` 与 `Filters=IsPlayed` fallback；历史与继续观看改为独立 settled，避免任一路径失败拖垮整页。
+  - `src/api/index.ts`：播放历史默认使用 `IsPlayed=true`，并补齐用户数据与图片参数。
+  - `electron/backend/emby.mjs`、`src/platform/index.ts`、`src-tauri/src/emby/client.rs`：三端 `resume_items` 补齐递归、视频类型、用户数据、图片和字段参数，保证继续观看卡片有足够海报与简介数据。
+- **风险**：查询会在收藏为空或接口兼容性异常时多试几种只读请求；不会写入服务端，也不改变播放链路。播放相关路径继续保持 Direct Play / Direct Stream only，禁止服务端转码兜底。
+- **回滚**：恢复上述五个文件即可回到单一路径查询。
+- **验证步骤**：
+  - `node --check electron\backend\emby.mjs`
+  - `cargo fmt --manifest-path src-tauri\Cargo.toml --check`
+  - `cargo check --manifest-path src-tauri\Cargo.toml --all-targets`
+  - `npm.cmd exec vue-tsc -- --noEmit`
+  - `npm.cmd run build`
+  - `git diff --check`
+  - `npm.cmd run check:electron-commands`
+  - `npm.cmd run electron:build`
+  - 真实服务器只读 smoke：收藏 flag/filter、历史 flag/filter、继续观看
+- **结果**：构建、类型检查、Rust 检查、Electron unpacked 打包均通过。真实服务器只读 smoke 中服务端识别为 Emby、线路健康；收藏两种查询均 200 且当前账号返回 0 项，历史两种查询均 200 且返回 1 项，继续观看返回 3 项。验证过程未写入密码、token 或完整服务器地址。

@@ -294,7 +294,7 @@ export const api = {
     invoke<ItemsResponse>("list_items", {
       payload: {
         params: [
-          ["Filters", "IsPlayed"],
+          ["IsPlayed", "true"],
           ["Recursive", "true"],
           ["IncludeItemTypes", payload.includeTypes ?? "Movie,Episode"],
           ["Fields", "PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks"],
@@ -302,6 +302,10 @@ export const api = {
           ["SortOrder", "Descending"],
           ["StartIndex", String(Math.max(0, payload.startIndex ?? 0))],
           ["Limit", String(Math.max(1, payload.limit ?? 120))],
+          ["EnableUserData", "true"],
+          ["EnableImages", "true"],
+          ["ImageTypeLimit", "1"],
+          ["EnableImageTypes", "Primary,Backdrop"],
         ],
       },
     }),

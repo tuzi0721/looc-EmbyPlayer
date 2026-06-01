@@ -361,6 +361,8 @@ const DIRECT_VIDEO_CONTAINERS = [
   "rmvb",
 ];
 const DIRECT_AUDIO_CONTAINERS = ["mp3", "aac", "flac", "ogg", "opus", "wav", "m4a", "ape", "alac"];
+const PERSONAL_ITEM_FIELDS =
+  "PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks";
 
 function directPlaybackOptions() {
   return {
@@ -673,6 +675,16 @@ export class EmbyClient {
 
   async resumeItems(server, account) {
     const value = await this.authedJson("GET", `Users/${account.userId}/Items/Resume`, server, account, {
+      query: {
+        Recursive: "true",
+        MediaTypes: "Video",
+        Fields: PERSONAL_ITEM_FIELDS,
+        EnableUserData: "true",
+        EnableImages: "true",
+        ImageTypeLimit: "1",
+        EnableImageTypes: "Primary,Backdrop",
+        Limit: "120",
+      },
       context: "resume_items",
     });
     return normalizeItemsResponse(value);

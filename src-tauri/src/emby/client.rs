@@ -19,6 +19,8 @@ use crate::network::racer::race_first_success;
 const DEVICE_ID: &str = "emby-player-desktop-001";
 const CLIENT_NAME: &str = "EmbyPlayer";
 const CLIENT_VERSION: &str = "0.1.0";
+const PERSONAL_ITEM_FIELDS: &str =
+    "PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks";
 
 #[derive(Clone)]
 pub struct EmbyClient {
@@ -365,7 +367,18 @@ impl EmbyClient {
         account: &Account,
     ) -> AppResult<ItemsResponse> {
         let line = self.pick_active_line(server)?;
-        let url = endpoints::join(&line.base_url, &endpoints::resume_items(&account.user_id))?;
+        let mut url = endpoints::join(&line.base_url, &endpoints::resume_items(&account.user_id))?;
+        {
+            let mut q = url.query_pairs_mut();
+            q.append_pair("Recursive", "true");
+            q.append_pair("MediaTypes", "Video");
+            q.append_pair("Fields", PERSONAL_ITEM_FIELDS);
+            q.append_pair("EnableUserData", "true");
+            q.append_pair("EnableImages", "true");
+            q.append_pair("ImageTypeLimit", "1");
+            q.append_pair("EnableImageTypes", "Primary,Backdrop");
+            q.append_pair("Limit", "120");
+        }
         let resp = self
             .authed_request(Method::GET, url, server, account, &line)?
             .send()

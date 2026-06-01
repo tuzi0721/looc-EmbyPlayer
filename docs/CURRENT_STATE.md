@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（添加服务器登录表单修正）
+> **更新时间**：2026-06-01（个人媒体加载兼容性修正）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1658-add-server-login-ui.md`](./CHANGE_LOG/2026-06-01-1658-add-server-login-ui.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1721-personal-media-loading.md`](./CHANGE_LOG/2026-06-01-1721-personal-media-loading.md)
 
 ---
 
@@ -40,6 +40,8 @@
 **2026-06-01**：Electron 退出清理链路再次加固：`before-quit` 会等待统一 runtime cleanup 完成后再 `app.exit(0)`，mpv shutdown 先发 IPC `quit`，超时后依次 `kill()` 与 Windows `taskkill /T /F` 清理进程树；内嵌 `electron_mpv_host.exe` 同步改为可等待销毁。Tauri IPC 启动 mpv 时在 `Command` 上启用 `kill_on_drop(true)`，避免异常 drop 后子进程脱管。`scripts\smoke-electron-embedded-local.mjs` 已扩展为播放中直接关闭窗口并检查退出前后的子进程 PID；本轮 smoke 在关闭前检测到 `electron_mpv_host.exe` 与随包 `mpv.exe`，关闭后 `electronExited = true` 且 `remaining = []`，同时后退、原生全屏、窗口缩放与彩色视频像素检测均通过。`npm.cmd run electron:build` 已确认 unpacked 产物完整，构建后复查未发现本项目相关播放进程残留。
 
 **2026-06-01**：添加服务器弹窗已重写为清晰登录表单：主流程显示用户名、密码、线路地址和任意端口输入；服务端名称和 Emby/Jellyfin 类型不再由用户填写，而是继续通过 `detect_server` 自动识别；线路名、User-Agent 与 Headers 收进每条线路的“高级设置”，避免 UA 在主流程反复出现。保存逻辑仍追加新服务器记录，不覆盖原有服务器；如果填写账号密码，会在保存后立即登录。`src/utils/serverUrl.ts` 的端口/协议错误提示同步修复为可读中文。验证已覆盖 `npm.cmd run build`、乱码扫描、`git diff --check` 与 `npm.cmd run electron:build`；in-app Browser 本轮仍无可用路由，未完成截图目检。
+
+**2026-06-01**：收藏、历史与聚合视界的数据加载兼容性已加固：收藏查询会依次尝试 `IsFavorite=true`、`Filters=IsFavorite` 和按 Movie/Series/Episode 拆分查询；播放历史会尝试 `IsPlayed=true` 与 `Filters=IsPlayed`；历史与继续观看互不拖累，任一只读接口失败时另一路仍可展示。Electron / Web Preview / Tauri 的继续观看接口补齐递归、视频类型、用户数据、图片和简介字段。真实服务器只读 smoke 显示服务端识别为 Emby、线路健康；收藏两种查询 HTTP 200 当前账号 0 项，历史两种查询 HTTP 200 返回 1 项，继续观看返回 3 项。播放链路继续保持本机解码硬约束：Direct Play / Direct Stream only，不允许服务端转码兜底。
 
 **2026-06-01**：播放器“播放源 / 媒体源”菜单同步本机解码硬约束：候选源会显示“本机直连 / 本机直流 / 本机解码待确认”，当 Emby/Jellyfin 只上报服务端转码能力时，该媒体源在会话内切源菜单中直接禁用并阻止切换，避免用户误点导致 NAS、路由器或 VPS 服务端承担转码解码压力。底层 PlaybackInfo、静态流 URL 与进度上报继续保持 Direct Play / Direct Stream only，不允许服务端转码兜底。验证已覆盖 `npm.cmd run build`、`git diff --check`、主动转码入口扫描与 `npm.cmd run electron:build`。
 
