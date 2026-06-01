@@ -71,7 +71,14 @@ const heroMovie = {
   RunTimeTicks: 7_200_000_000,
   ImageTags: { Primary: "primary-tag" },
   BackdropImageTags: ["backdrop-tag"],
-  UserData: { PlaybackPositionTicks: 0, PlayCount: 0, IsFavorite: false, Played: false },
+  UserData: {
+    PlaybackPositionTicks: 0,
+    PlayCount: 1,
+    IsFavorite: true,
+    Played: true,
+    LastPlayedDate: "2026-06-01T11:30:00.000Z",
+    PlayedPercentage: 100,
+  },
 };
 
 const resumeItem = {
@@ -251,8 +258,11 @@ try {
           enabled: true,
         }],
       });
+      lib.reset();
       await auth.login({ serverId: server.id, username: "home", password: "home" });
       await appRouter.push("/home");
+      await wait(800);
+      lib.reset();
       await lib.refreshHome();
       await wait(1500);
       const hero = document.querySelector(".hero.hero--cinema");
@@ -283,6 +293,26 @@ try {
   const screenshot = await cdpCall(ws, "Page.captureScreenshot", { format: "png" });
   await fsp.writeFile(screenshotPath, Buffer.from(screenshot.data, "base64"));
 
+  const personalRoutes = await cdpEval(ws, `
+    (async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+      const routes = [];
+      for (const path of ["/favorites", "/history", "/aggregate"]) {
+        await appRouter.push(path);
+        await wait(1800);
+        routes.push({
+          path,
+          body: document.body.innerText,
+          posterCount: document.querySelectorAll(".poster").length,
+          historyCardCount: document.querySelectorAll(".history-card").length,
+          errorTexts: Array.from(document.querySelectorAll(".empty--error, .toast--error")).map((node) => node.textContent?.trim()),
+        });
+      }
+      return routes;
+    })()
+  `);
+
   const failures = [];
   if (result.route !== "/home") failures.push(`route ${result.route}`);
   if (!result.hero) failures.push("hero missing");
@@ -298,12 +328,26 @@ try {
   }
   if (!result.poster || result.poster.width < 200) failures.push("cinema poster too small or missing");
   if (result.errors.length > 0) failures.push(`page errors: ${result.errors.join(" | ")}`);
-
-  if (failures.length > 0) {
-    throw new Error(`home hero smoke failed: ${failures.join("; ")}\n${JSON.stringify(result, null, 2)}`);
+  for (const route of personalRoutes) {
+    if (route.errorTexts.length > 0) failures.push(`${route.path} errors: ${route.errorTexts.join(" | ")}`);
+    if (route.path === "/favorites" && (!route.body.includes(heroMovie.Name) || route.posterCount < 1)) {
+      failures.push("/favorites did not render favorite media");
+    }
+    if (route.path === "/history" && (!route.body.includes(heroMovie.Name) || route.historyCardCount < 1)) {
+      failures.push("/history did not render played media");
+    }
+    if (route.path === "/aggregate" && (!route.body.includes(heroMovie.Name) || route.posterCount < 1)) {
+      failures.push("/aggregate did not render aggregate media");
+    }
   }
 
-  console.log(JSON.stringify({ ok: true, screenshotPath, ...result }, null, 2));
+  if (failures.length > 0) {
+    throw new Error(
+      `home hero smoke failed: ${failures.join("; ")}\n${JSON.stringify({ result, personalRoutes }, null, 2)}`,
+    );
+  }
+
+  console.log(JSON.stringify({ ok: true, screenshotPath, ...result, personalRoutes }, null, 2));
 } finally {
   if (ws) ws.close();
   child.kill();
