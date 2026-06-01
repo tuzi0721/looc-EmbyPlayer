@@ -14,6 +14,8 @@ import type {
   PlaybackLineOption,
   PlaybackMediaSource,
   PlaybackSource,
+  AlistEntry,
+  AlistListing,
   WebDavEntry,
   WebDavListing,
 } from "@/api";
@@ -733,6 +735,161 @@ function webDavRootUrl(value: unknown): URL {
   }
   if (!url.pathname.endsWith("/")) url.pathname = `${url.pathname}/`;
   return url;
+}
+
+function alistRootUrl(value: unknown): URL {
+  let url: URL;
+  try {
+    url = new URL(String(value ?? "").trim());
+  } catch {
+    throw new Error("Alist URL 无效");
+  }
+  if (!["http:", "https:"].includes(url.protocol)) {
+    throw new Error("Alist URL 必须使用 http 或 https");
+  }
+  if (!url.pathname.endsWith("/")) url.pathname = `${url.pathname}/`;
+  return url;
+}
+
+function alistApiPath(value: unknown): string {
+  const path = webDavRelativePath(value);
+  return path ? `/${path}` : "/";
+}
+
+function alistJoinPath(parent: string, name: string, isDirectory: boolean): string {
+  const base = webDavRelativePath(parent);
+  const leaf = name.replace(/^\/+|\/+$/g, "");
+  const joined = [base, leaf].filter(Boolean).join("/");
+  return isDirectory && joined ? `${joined}/` : joined;
+}
+
+function alistApiUrl(root: URL, endpoint: "list" | "get"): URL {
+  return new URL(`api/fs/${endpoint}`, root);
+}
+
+function alistDownloadUrl(root: URL, path: string, sign?: string | null): string {
+  const encoded = webDavRelativePath(path)
+    .split("/")
+    .filter(Boolean)
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  const url = new URL(`d/${encoded}`, root);
+  const cleanSign = String(sign ?? "").trim();
+  if (cleanSign) url.searchParams.set("sign", cleanSign);
+  return url.toString();
+}
+
+function alistDirectoryUrl(root: URL, path: string): string {
+  const relative = webDavRelativePath(path);
+  return relative ? new URL(`${relative}/`, root).toString() : root.toString();
+}
+
+function alistAuthorization(token?: string | null): Record<string, string> {
+  const cleanToken = String(token ?? "").trim();
+  return cleanToken ? { Authorization: cleanToken } : {};
+}
+
+function alistAssertData(value: any, action: string): any {
+  if (!value || typeof value !== "object") throw new Error(`Alist ${action} 返回无效 JSON`);
+  const code = Number(value.code);
+  if (Number.isFinite(code) && code !== 200) {
+    throw new Error(`Alist ${action} 失败：${value.message ?? `code ${code}`}`);
+  }
+  return value.data ?? {};
+}
+
+function alistEntryFromItem(root: URL, currentPath: string, item: unknown): AlistEntry | null {
+  const record = item && typeof item === "object" ? item as Record<string, unknown> : {};
+  const name = String(record.name ?? "").replace(/\/+$/g, "");
+  if (!name) return null;
+  const isDirectory = record.is_dir === true;
+  const path = alistJoinPath(currentPath, name, isDirectory);
+  const extension = isDirectory ? "" : (name.split(".").pop() ?? "").toLowerCase();
+  return {
+    name,
+    url: isDirectory ? alistDirectoryUrl(root, path) : alistDownloadUrl(root, path, String(record.sign ?? "")),
+    path,
+    isDirectory,
+    extension,
+    sizeBytes: numberFrom(record.size) ?? 0,
+    modifiedAtMs: record.modified ? Date.parse(String(record.modified)) : null,
+    contentType: record.type == null ? null : String(record.type),
+    thumb: stringFrom(record.thumb) || null,
+    sign: stringFrom(record.sign) || null,
+    playable: !isDirectory && WEB_DAV_VIDEO_EXTENSIONS.has(extension),
+  };
+}
+
+async function webListAlistFolder(payload: any): Promise<AlistListing> {
+  const root = alistRootUrl(payload?.baseUrl);
+  const path = webDavRelativePath(payload?.path);
+  const timeoutMs = webRequestTimeoutMs();
+  const response = await fetchViaWebPreviewProxy(
+    alistApiUrl(root, "list"),
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        ...alistAuthorization(stringFrom(payload?.token)),
+      },
+      body: JSON.stringify({
+        path: alistApiPath(path),
+        password: stringFrom(payload?.pathPassword) ?? "",
+        page: Math.max(1, Number(payload?.page) || 1),
+        per_page: Math.max(0, Number(payload?.perPage) || 0),
+        refresh: payload?.refresh === true,
+      }),
+    },
+    timeoutMs,
+  );
+  if (!response.ok) throw new Error(`Alist list failed: HTTP ${response.status}`);
+  const data = alistAssertData(await response.json(), "list");
+  const content: unknown[] = Array.isArray(data.content) ? data.content : [];
+  const items = content
+    .map((item: unknown) => alistEntryFromItem(root, path, item))
+    .filter((entry): entry is NonNullable<typeof entry> => entry != null)
+    .sort((left: AlistEntry, right: AlistEntry) => {
+      if (left.isDirectory !== right.isDirectory) return left.isDirectory ? -1 : 1;
+      return left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" });
+    });
+  return {
+    rootUrl: root.toString(),
+    path,
+    directoryUrl: alistDirectoryUrl(root, path),
+    total: Number(data.total) || items.length,
+    provider: data.provider == null ? null : String(data.provider),
+    items,
+  };
+}
+
+async function webResolveAlistFile(payload: any) {
+  const root = alistRootUrl(payload?.baseUrl);
+  const path = webDavRelativePath(payload?.path);
+  if (!path) throw new Error("Alist 文件路径不能为空");
+  const response = await fetchViaWebPreviewProxy(
+    alistApiUrl(root, "get"),
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        ...alistAuthorization(stringFrom(payload?.token)),
+      },
+      body: JSON.stringify({
+        path: alistApiPath(path),
+        password: stringFrom(payload?.pathPassword) ?? "",
+      }),
+    },
+    webRequestTimeoutMs(),
+  );
+  if (!response.ok) throw new Error(`Alist get failed: HTTP ${response.status}`);
+  const data = alistAssertData(await response.json(), "get");
+  return {
+    path,
+    name: path.split("/").filter(Boolean).pop() ?? path,
+    url: stringFrom(data.raw_url) || alistDownloadUrl(root, path, data.sign),
+  };
 }
 
 function webDavRelativePath(value: unknown): string {
@@ -1630,7 +1787,22 @@ function invokeWebFallback<T>(
       } as T);
     case "list_webdav_folder":
       return webListDavFolder(args?.payload) as Promise<T>;
+    case "list_alist_folder":
+      return webListAlistFolder(args?.payload) as Promise<T>;
+    case "resolve_alist_file":
+      return webResolveAlistFile(args?.payload) as Promise<T>;
     case "play_webdav_file": {
+      const payload = args?.payload as any;
+      webPlaybackSourceState = null;
+      webPlaybackSnapshot = {
+        ...webDefaultSnapshot(),
+        url: stringFrom(payload?.url),
+        paused: true,
+        positionMs: Math.max(0, Math.floor(numberFrom(payload?.startMs) ?? 0)),
+      };
+      return Promise.resolve(undefined as T);
+    }
+    case "play_alist_file": {
       const payload = args?.payload as any;
       webPlaybackSourceState = null;
       webPlaybackSnapshot = {

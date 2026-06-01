@@ -174,6 +174,35 @@ export interface WebDavListing {
   items: WebDavEntry[];
 }
 
+export interface AlistEntry {
+  name: string;
+  url: string;
+  path: string;
+  isDirectory: boolean;
+  extension: string;
+  sizeBytes: number;
+  modifiedAtMs?: number | null;
+  contentType?: string | null;
+  thumb?: string | null;
+  sign?: string | null;
+  playable: boolean;
+}
+
+export interface AlistListing {
+  rootUrl: string;
+  path: string;
+  directoryUrl: string;
+  total: number;
+  provider?: string | null;
+  items: AlistEntry[];
+}
+
+export interface AlistFileResolution {
+  path: string;
+  name: string;
+  url: string;
+}
+
 export interface ScreenshotResult {
   filePath: string;
 }
@@ -399,6 +428,23 @@ export const api = {
     password?: string | null;
     timeoutMs?: number | null;
   }) => invoke<WebDavListing>("list_webdav_folder", { payload }),
+  listAlistFolder: (payload: {
+    baseUrl: string;
+    path?: string | null;
+    token?: string | null;
+    pathPassword?: string | null;
+    refresh?: boolean;
+    page?: number | null;
+    perPage?: number | null;
+    timeoutMs?: number | null;
+  }) => invoke<AlistListing>("list_alist_folder", { payload }),
+  resolveAlistFile: (payload: {
+    baseUrl: string;
+    path: string;
+    token?: string | null;
+    pathPassword?: string | null;
+    timeoutMs?: number | null;
+  }) => invoke<AlistFileResolution>("resolve_alist_file", { payload }),
   playWebDavFile: (payload: {
     url: string;
     title?: string | null;
@@ -409,6 +455,13 @@ export const api = {
     sidecarDanmaku?: WebDavSidecarDanmaku | null;
     startMs?: number | null;
   }) => invoke<void>("play_webdav_file", { payload }),
+  playAlistFile: (payload: {
+    url: string;
+    title?: string | null;
+    token?: string | null;
+    userAgent?: string | null;
+    startMs?: number | null;
+  }) => invoke<void>("play_alist_file", { payload }),
 
   // Notifications
   listNotifications: () => invoke<AppNotification[]>("list_notifications"),

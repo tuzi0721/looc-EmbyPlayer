@@ -12,6 +12,7 @@ import { DanmakuClient } from "./backend/danmaku.mjs";
 import { DesktopIntegration, extractProtocolUrls } from "./backend/desktop.mjs";
 import { JsonStore, createServer } from "./backend/store.mjs";
 import { WebDavClient } from "./backend/webdav.mjs";
+import { AlistClient } from "./backend/alist.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -119,6 +120,7 @@ const store = new JsonStore(userDataDir);
 const emby = new EmbyClient(store);
 const danmaku = new DanmakuClient(store, emby);
 const webdav = new WebDavClient();
+const alist = new AlistClient();
 const mpv = new MpvController(store, { logDir: userDataDir });
 const downloads = new DownloadManager(store, emby, mpv, {
   userDataDir,
@@ -1179,6 +1181,41 @@ async function playWebDavFile(payload = {}) {
   });
 }
 
+async function playAlistFile(payload = {}) {
+  const url = typeof payload.url === "string" ? payload.url.trim() : "";
+  if (!url) throw new Error("Alist file URL is required");
+  const parsed = new URL(url);
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("Alist file URL must use http or https");
+  }
+  let decodedPath = parsed.pathname;
+  try {
+    decodedPath = decodeURIComponent(parsed.pathname);
+  } catch {
+    decodedPath = parsed.pathname;
+  }
+  const title = typeof payload.title === "string" && payload.title.trim()
+    ? payload.title.trim()
+    : path.basename(decodedPath);
+  const settings = await store.getSettings();
+  await mpv.load({
+    url: parsed.toString(),
+    headers: alist.headersFor(payload),
+    userAgent: payload.userAgent ?? settings.defaultUserAgent ?? null,
+    startMs: payload.startMs ?? null,
+    autoloadSubtitles: false,
+  });
+  await applySubtitleStyle(settings).catch((error) => {
+    console.warn("failed to apply subtitle style", error);
+  });
+  currentPlaySession = null;
+  writePlaybackLog("alist_file_loaded", {
+    title,
+    url: parsed.toString(),
+    startMs: payload.startMs ?? null,
+  });
+}
+
 async function listLocalFolder(payload = {}) {
   const directory = typeof payload.directory === "string" ? payload.directory.trim() : "";
   if (!directory) throw new Error("directory is required");
@@ -2224,8 +2261,14 @@ async function handleInvoke(command, args = {}) {
   }
   if (command === "list_local_folder") return listLocalFolder(args.payload ?? {});
   if (command === "list_webdav_folder") return webdav.list(args.payload ?? {});
+  if (command === "list_alist_folder") return alist.list(args.payload ?? {});
+  if (command === "resolve_alist_file") return alist.resolveFile(args.payload ?? {});
   if (command === "play_webdav_file") {
     await playWebDavFile(args.payload ?? {});
+    return null;
+  }
+  if (command === "play_alist_file") {
+    await playAlistFile(args.payload ?? {});
     return null;
   }
   if (command === "list_notifications") return store.listNotifications();

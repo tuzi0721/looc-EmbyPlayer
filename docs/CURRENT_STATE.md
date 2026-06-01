@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（WebDAV 当前路径操作）
+> **更新时间**：2026-06-01（Alist / OpenList 连接器内核）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1058-webdav-path-actions.md`](./CHANGE_LOG/2026-06-01-1058-webdav-path-actions.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1112-alist-connector-core.md`](./CHANGE_LOG/2026-06-01-1112-alist-connector-core.md)
 
 ---
 
@@ -603,9 +603,11 @@ npm.cmd run electron:build
 
 本轮 WebDAV 当前路径操作已闭环：`/webdav` 顶部工具栏在深层路径时提供“回到根目录”入口，目录加载成功后提供“复制当前路径”入口并复用现有剪贴板工具；复制状态会短暂反馈在按钮可访问名称上，切换目录或卸载页面时清理状态计时器。该阶段不在文档中记录真实远端 URL。
 
+本轮 Alist / OpenList 连接器内核已闭环：Electron 后端新增真实 `/api/fs/list` 目录读取、`/api/fs/get` 文件 raw_url 解析和 `/d/...` 签名直链生成；Web Preview fallback 接入同一组 API；本地 smoke 覆盖 token header、目录排序、视频识别、签名下载 URL 与 raw_url 解析。该阶段尚未接 UI 页面入口，设置页能力仍应保持“待接入”，下一阶段继续做可用页面。
+
 ---
 
 ## 10. Phase 2 待办
 
 - 播放窗口内嵌已通过本地屏幕像素 smoke；后续仍建议用真实媒体人工走一遍控制栏显示/隐藏、全屏和窗口 resize 体验。
-- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层/递归视频浏览、本地文件夹列表搜索/排序/分组与播放队列、同名封面、同名 NFO 元数据、同名字幕自动关联及列表提示、同名 XML 弹幕自动关联及列表提示、最近本地文件入口、最近本地文件夹入口、收藏本地文件、收藏本地文件夹、WebDAV 基础目录浏览/直链播放、WebDAV 播放队列、WebDAV 收藏/最近入口、WebDAV 列表搜索/排序、WebDAV 同名字幕提示/加载、WebDAV 同名 XML 弹幕提示/加载、WebDAV 路径面包屑和 WebDAV 当前路径操作；在线封面/元数据刮削、SMB、Alist/OpenList 和 Plex 仍待后续分阶段接入。
+- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层/递归视频浏览、本地文件夹列表搜索/排序/分组与播放队列、同名封面、同名 NFO 元数据、同名字幕自动关联及列表提示、同名 XML 弹幕自动关联及列表提示、最近本地文件入口、最近本地文件夹入口、收藏本地文件、收藏本地文件夹、WebDAV 基础目录浏览/直链播放、WebDAV 播放队列、WebDAV 收藏/最近入口、WebDAV 列表搜索/排序、WebDAV 同名字幕提示/加载、WebDAV 同名 XML 弹幕提示/加载、WebDAV 路径面包屑和 WebDAV 当前路径操作；Alist/OpenList 连接器内核已落地但页面入口待接入；在线封面/元数据刮削、SMB 和 Plex 仍待后续分阶段接入。
