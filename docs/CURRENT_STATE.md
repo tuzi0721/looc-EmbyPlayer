@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（生成物与旧 Git 目录清理）
+> **更新时间**：2026-06-01（个人媒体页面真实服回归）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1834-generated-file-cleanup.md`](./CHANGE_LOG/2026-06-01-1834-generated-file-cleanup.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1839-personal-media-real-smoke.md`](./CHANGE_LOG/2026-06-01-1839-personal-media-real-smoke.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：收藏 / 历史 / 聚合视界完成真实服只读回归：使用本机保存登录态访问当前保存线路，公开信息接口返回 200，继续观看返回 3 条，历史 `IsPlayed=true` 与 `Filters=IsPlayed` 两种查询均返回 200 / 1 条；收藏 `IsFavorite=true` 与 `Filters=IsFavorite` 两种查询均返回 200 / 0 条，当前判断为测试账号没有收藏，而不是接口加载失败。本地预览 `/favorites`、`/history`、`/aggregate` 均返回 HTTP 200；Codex in-app Browser 通道本轮仍无可用路由，未完成截图目检。
 
 **2026-06-01**：生成物与旧 Git 目录完成一轮安全清理：工作目录内旧的 `.git_disabled/` 禁用仓库目录、`.electron-builder-cache/`、`runtime-logs/`、`.codex-vite.*.log` 与历史 `build*.log` 已移除，删除前逐一校验解析路径均位于 `A:\vsc\emby-player` 内；`.gitignore` 补充 `.git_disabled/` 与 `runtime-logs/`，避免后续旧 Git 目录和运行日志再次污染状态判断。`.electron-user-data/` 保留不动，避免清掉当前测试服务器配置或登录态。验证已覆盖 `git status --short --ignored`、`npm.cmd run build` 与 `git diff --check`。
 
