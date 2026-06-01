@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（WebDAV 路径面包屑）
+> **更新时间**：2026-06-01（Git 远端同步核查）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1048-webdav-breadcrumbs.md`](./CHANGE_LOG/2026-06-01-1048-webdav-breadcrumbs.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1053-git-sync-audit.md`](./CHANGE_LOG/2026-06-01-1053-git-sync-audit.md)
 
 ---
 
@@ -598,6 +598,8 @@ npm.cmd run electron:build
 本轮 WebDAV 同名 XML 弹幕已闭环：WebDAV 目录解析会把同层 `同名.xml`、`同名.danmaku.xml` 或 `同名.comments.xml` 关联到可播放视频；`/webdav` 列表显示“XML 弹幕”并支持搜索“弹幕 xml”，播放器进入 WebDAV direct 播放后会尝试用同一连接凭据读取远程 XML 并复用现有弹幕解析/合并逻辑。Web Preview 当前仍只返回空弹幕结果，桌面 Electron 为实际加载路径。
 
 本轮 WebDAV 路径面包屑已闭环：`/webdav` 在多级目录中会根据当前 `path` 生成可点击面包屑，支持从深层目录直接回到任意上级目录或根 WebDAV；切换路径继续复用已有路由与目录加载逻辑，不改变认证和播放路径。
+
+本轮 Git 远端同步核查已闭环：本地 `main` 当前无未提交变更，`origin` 默认分支为 `main`，且 GitHub 服务端 `refs/heads/main` 指向 `e8e26507c536d1ad1e7d0019265e2b8c48e91d66`。本轮只更新核查日志与状态快照，不改运行时代码；若网页仍显示旧时间，优先检查页面缓存、登录态或当前查看的仓库/分支入口。
 
 ---
 
