@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（详情页媒体信息）
+> **更新时间**：2026-06-01（Web Preview 详情加载超时）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-0724-detail-media-info.md`](./CHANGE_LOG/2026-06-01-0724-detail-media-info.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-0921-web-preview-detail-timeout.md`](./CHANGE_LOG/2026-06-01-0921-web-preview-detail-timeout.md)
 
 ---
 
@@ -146,6 +146,7 @@
 ## 5. 响应兼容性与诊断
 
 - **2026-05-31**：Web Preview 本地代理补齐真实网络代理 fallback：`/__hills_web_proxy` 直连失败后会尝试环境变量代理与常见本机代理端口，解决浏览器预览通过 CORS 代理访问真实 443 线路时 Node `fetch` 不走系统代理导致的 `fetch failed`；当前两条真实线路公开探测均返回 200，测试账号真实登录成功并能拉到 5 个媒体库视图。
+- **2026-06-01**：Web Preview 详情请求补齐超时保护：浏览器直连、`/__hills_web_proxy` fallback 和详情页 `loadItem` 都会按设置中的请求超时结束等待，超时后进入现有错误态，避免真实服务器详情接口或代理层异常时页面永久停留在“加载中”。播放流代理保持无该短超时，避免误伤 HLS 分片。
 - **2026-06-01**：Web Preview 远端播放链路补齐：浏览器预览新增真实 `get_playback_source` / `play` / `get_state` / 播放进度上报 fallback，通过 `PlaybackInfo` 生成 HLS 播放源、线路候选和媒体源候选；Vite 新增 `__hills_web_stream_proxy` 代理 HLS playlist/segment 并重写 URI，播放器在 Web Preview 中启用 HTML/HLS 内嵌播放。真实账号回归确认新增服务器为追加而非覆盖，首页拉到 5 个媒体库，真实剧集播放到 01:30+ 并出现实际视频帧；验证过程未写入账号、密码、token 或完整线路地址。
 - **2026-06-01**：播放器窄屏播放源菜单修复：从设置菜单打开“播放源”时，控制栏弹层不再被隐藏计时器收起；播放源面板打开期间会临时取消自身 `medium` 宽度隐藏规则，避免线路/媒体源条目在窄屏下变成 0×0 不可点击区域。真实账号回归确认两条 443 线路自动识别为 Emby，真实剧集 HTML 视频播放中可切到 Line 2，重新打开菜单显示 Line 2 active，视频继续推进且无错误。
 - **2026-06-01**：播放源菜单新增视口约束：920px 以下播放源弹层改为固定定位并保留左右边距，760px 以下控制栏双行时进一步上移，避免真实播放页里弹层边缘跑出视口或被底栏压住；宽屏仍保持原有按钮相对定位。
@@ -227,6 +228,7 @@
 ## 7. 详情页操作
 
 - **2026-06-01**：详情页类型标签改为可点击导航，优先通过 `GenreItems.Id` 进入 `/genre/:id`，缺少 id 时按类型名称查询；新增类型作品页支持真实 `list_items` 过滤、排序、分页加载和海报卡片进入详情，不再把类型只当静态装饰。Web Preview 真实会话直接打开 `/genre/name:动画` 返回 722 部作品与 48 张首屏卡片；本轮详情接口在浏览器中停留加载态，详情页标签点击待详情加载恢复后补验。
+- **2026-06-01**：详情页主详情加载增加超时兜底；当 `get_item_detail` 在 Web Preview 直连或代理链路中超过当前请求超时时，页面会复用既有加载失败状态展示错误，避免从类型页、人员页或媒体库进入详情后无限停留在加载中。
 - **2026-06-01**：详情页媒体信息在存在多个 `MediaSources` 时新增版本摘要卡片，逐项展示容器、分辨率、视频/音频编码、码率、大小、音轨/字幕数量和播放能力；版本卡不展示 Path、完整 URL 或本地路径，疑似路径的 MediaSource 名称会降级为“版本 N”。真实服务器当前样本为单 MediaSource，确认不会额外显示空版本区，媒体信息区未暴露完整 URL 或 Windows 路径。
 - **2026-06-01**：详情页 `BoxSet` 合集新增“合集内容”横滑区；页面会通过现有 `list_items(parentId)` 拉取 Movie / Series 子项，复用海报卡片进入详情，且在无子项或请求失败时不展示空壳。真实服务器会话扫描 5 个媒体库首屏未发现可目检的 BoxSet 样本，本阶段以构建验证和非伪造逻辑落地为准。
 - **2026-06-01**：详情页演职人员卡片支持点击进入 `/person/:id` 人员作品页；新增人员作品页按 `PersonIds` 或名称筛选真实作品，支持排序、分页加载、空状态/错误状态和海报卡片进入详情。Web Preview 真实服务器回归中，测试条目第一位演职员跳转后返回 `3 部作品` 且无错误。
@@ -568,6 +570,8 @@ npm.cmd run electron:build
 本轮 Web Preview 播放手势兜底已闭环：HTML/HLS 播放按钮在 `video.play()` 被浏览器拒绝为缺少用户手势时，会自动切到静音并重试，避免真实视频对象已加载但时间停在 0 秒；真实测试账号会话直接打开真实播放器页后，点击播放按钮将 HTML video 从 `currentTime = 0` 推进到约 10 秒，`paused = false`，视频尺寸保持 1440×1080 且页面无播放失败提示。验证已覆盖 `npm.cmd run build`、in-app Browser 1420 真实播放页回归、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`；Electron/Tauri 内嵌 mpv 路径不受该 Web Preview fallback 影响。
 
 本轮详情页媒体信息已闭环：Emby/Jellyfin 详情请求三端同步补齐 `MediaSources`，PDP 新增“媒体信息”摘要区，真实条目详情页显示媒体源、MKV 容器、H264 1440×1080、AAC 音频、字幕数量、总码率、大小和直连/直流/转码能力；页面文本检查确认未显示完整 URL、Windows 路径或常见 Unix 媒体路径。验证已覆盖 `node --check electron\backend\emby.mjs`、`cargo fmt --manifest-path src-tauri\Cargo.toml`、`npm.cmd run build`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、in-app Browser 1420 真实详情页目检、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`。
+
+本轮 Web Preview 详情加载超时已闭环：`src/platform` 的浏览器直连请求与 `__hills_web_proxy` fallback 统一使用设置里的请求超时，Vite 本地代理会按前端传入的 `timeoutMs` 取消真实 API 请求，`DetailView` 主详情加载超过超时后进入既有错误态；HLS/播放流代理保持不加短超时，避免影响播放分片。验证已覆盖 `npm.cmd run build`、`git diff --check` 与敏感关键字扫描；未写入测试账号、密码、token 或完整线路地址。
 
 ---
 

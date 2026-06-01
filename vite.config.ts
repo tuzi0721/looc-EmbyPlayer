@@ -53,13 +53,29 @@ async function proxyDispatcher() {
   return null;
 }
 
-async function fetchWithProxyFallback(target: URL, init: RequestInit) {
+async function fetchWithProxyFallback(target: URL, init: RequestInit, timeoutMs?: number) {
+  if (!timeoutMs) {
+    try {
+      return await fetch(target, init);
+    } catch (error) {
+      const dispatcher = await proxyDispatcher();
+      if (!dispatcher) throw error;
+      return fetch(target, { ...init, dispatcher } as RequestInit & { dispatcher: unknown });
+    }
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const requestInit = { ...init, signal: controller.signal };
   try {
-    return await fetch(target, init);
+    return await fetch(target, requestInit);
   } catch (error) {
+    if (controller.signal.aborted) throw error;
     const dispatcher = await proxyDispatcher();
     if (!dispatcher) throw error;
-    return fetch(target, { ...init, dispatcher } as RequestInit & { dispatcher: unknown });
+    return fetch(target, { ...requestInit, dispatcher } as RequestInit & { dispatcher: unknown });
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -146,11 +162,12 @@ function hillsWebProxy(): Plugin {
             throw new Error("unsupported proxy target protocol");
           }
 
+          const timeoutMs = Math.max(1000, Number(payload.timeoutMs) || 15000);
           const response = await fetchWithProxyFallback(target, {
             method: String(payload.method ?? "GET"),
             headers: payload.headers ?? {},
             body: payload.body == null ? undefined : String(payload.body),
-          });
+          }, timeoutMs);
           const body = Buffer.from(await response.arrayBuffer());
           res.statusCode = response.status;
           res.statusMessage = response.statusText;

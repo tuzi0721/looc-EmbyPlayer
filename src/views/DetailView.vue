@@ -123,6 +123,35 @@ let detailLoadSeq = 0;
 let episodeLoadSeq = 0;
 let suppressNextSeasonWatch = false;
 
+function detailRequestTimeoutMs() {
+  const value = Number(settings.settings.requestTimeoutMs);
+  return Math.min(30000, Math.max(1000, Number.isFinite(value) ? value : 15000));
+}
+
+function withDetailTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timer: number | null = null;
+  let settled = false;
+  const timeoutMs = detailRequestTimeoutMs();
+  const deadline = Date.now() + timeoutMs;
+  const timeout = new Promise<never>((_, reject) => {
+    const check = () => {
+      if (settled) return;
+      if (Date.now() >= deadline) {
+        timer = null;
+        reject(new Error(`${label}: timeout after ${timeoutMs}ms`));
+        return;
+      }
+      timer = window.setTimeout(check, 100);
+    };
+    timer = window.setTimeout(check, 0);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    settled = true;
+    if (timer != null) window.clearTimeout(timer);
+  });
+}
+
 const isSeries = computed(() => item.value?.Type === "Series");
 const isEpisode = computed(() => item.value?.Type === "Episode");
 const isCollection = computed(() => item.value?.Type === "BoxSet");
@@ -663,7 +692,7 @@ async function loadDetail() {
   suppressNextSeasonWatch = false;
   activeSeasonId.value = null;
   try {
-    const detail = await lib.loadItem(props.id);
+    const detail = await withDetailTimeout(lib.loadItem(props.id), "get_item_detail");
     if (seq !== detailLoadSeq) return;
     if (seq === detailLoadSeq) void loadSpecialFeatures(props.id, seq);
     if (seq === detailLoadSeq) void loadSimilar(props.id, seq);

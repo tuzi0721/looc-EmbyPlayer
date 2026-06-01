@@ -619,8 +619,9 @@ function webHeaders(server: Server, line: Line, token?: string | null, hasBody =
 async function fetchViaWebPreviewProxy(
   url: URL,
   init: { method?: string; headers?: Record<string, string>; body?: string },
+  timeoutMs: number,
 ) {
-  return fetch("/__hills_web_proxy", {
+  return fetchWithWebTimeout("/__hills_web_proxy", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -628,8 +629,29 @@ async function fetchViaWebPreviewProxy(
       method: init.method ?? "GET",
       headers: init.headers ?? {},
       body: init.body ?? null,
+      timeoutMs,
     }),
-  });
+  }, timeoutMs);
+}
+
+function webRequestTimeoutMs() {
+  const value = Number(webSettings.requestTimeoutMs);
+  return Math.max(1000, Number.isFinite(value) ? value : WEB_DEFAULT_SETTINGS.requestTimeoutMs);
+}
+
+async function fetchWithWebTimeout(input: string, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if ((error as { name?: string })?.name === "AbortError") {
+      throw new Error(`request timeout after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 function browserSafeHeaders(headers: Record<string, string>) {
@@ -644,14 +666,20 @@ async function webJson(
   context: string,
 ) {
   let response: Response;
+  const timeoutMs = webRequestTimeoutMs();
   try {
-    response = await fetch(url.toString(), {
+    response = await fetchWithWebTimeout(url.toString(), {
       method: init.method ?? "GET",
       headers: browserSafeHeaders(init.headers ?? {}),
       body: init.body,
-    });
-  } catch {
-    response = await fetchViaWebPreviewProxy(url, init);
+    }, timeoutMs);
+  } catch (error) {
+    try {
+      response = await fetchViaWebPreviewProxy(url, init, timeoutMs);
+    } catch (proxyError) {
+      const message = proxyError instanceof Error ? proxyError.message : String(proxyError);
+      throw new Error(`${context}: proxy request failed or timed out after ${timeoutMs}ms (${message})`);
+    }
   }
 
   if (!response.ok) {
