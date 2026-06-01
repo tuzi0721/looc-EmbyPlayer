@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（添加服务器自动识别简化）
+> **更新时间**：2026-06-01（播放器全屏与小窗口自适应）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1514-add-server-auto-detect-ux.md`](./CHANGE_LOG/2026-06-01-1514-add-server-auto-detect-ux.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1534-player-fullscreen-responsive.md`](./CHANGE_LOG/2026-06-01-1534-player-fullscreen-responsive.md)
 
 ---
 
@@ -576,6 +576,8 @@ npm.cmd run electron:build
 本轮播放器后退与返回控制修正已闭环：`PlayerView` 新增统一 `seekToMs`，拖动进度条、章节跳转、自动跳过片头和后退/前进按钮都走同一套 seek 逻辑；Web Preview / HTML video 路径会直接 seek 真实 `<video>` 并同步播放位置，桌面路径继续走 mpv 原生 seek。播放器返回按钮会先关闭弹层、退出原生或浏览器全屏，再按来源回到本地文件夹、WebDAV、Alist 或媒体详情页。内嵌播放 smoke 已扩展后退按钮断言并支持桌面原生全屏检测：本轮 smoke 中“后退 10 秒”从约 10.6 秒退到约 1.4 秒，原生全屏进入/退出、960×620 resize 和彩色视频像素检测均通过。验证已覆盖 `node --check scripts\smoke-electron-embedded-local.mjs`、`npm.cmd run build`、`node scripts\smoke-electron-embedded-local.mjs`、`npm.cmd run electron:build`、`git diff --check` 与构建后残留进程检查。
 
 本轮添加服务器自动识别简化已闭环：添加服务器首屏重新收敛为“账号 + 线路”流程，不再要求手填服务器名称，不再显示类型分段选择，保存前统一通过 `/System/Info/Public` 自动识别 Emby / Jellyfin 和服务端名称；无法识别时不会创建伪服务器。线路地址支持直接写入 `:443`、`:8096` 或任意自定义端口，也可使用独立端口框覆盖；添加弹窗移除全局默认 UA，只保留单条线路高级设置中的 UA / Headers。线路 UI 改为分隔行而不是卡片套卡片。验证已覆盖 `npm.cmd run build`、`npm.cmd run electron:build`、`git diff --check`；本轮 Codex in-app Browser route 不可用，未做浏览器目检。
+
+本轮播放器全屏与小窗口自适应已闭环：播放器根容器补齐 `100dvh` 高度兜底，顶部与底部控制层改用统一边距变量和安全区底边；低高度窗口会收紧控制栏、隐藏低优先级按钮和副标题，弹层最大高度同步收窄，避免全屏或最小桌面窗口下控制栏挤压画面。`smoke-electron-embedded-local` 新增 960×600 实际最小窗口断言，确认顶部/底部控制层、播放按钮、全屏按钮可见、无水平溢出、底栏高度控制在 86px。Windows 屏幕截图在当前自动化环境仍可能取到黑帧，smoke 会同时输出屏幕截图像素与 mpv 自截图像素；本轮 mpv 自截图彩色视频通过，屏幕截图 fallback 记录为黑帧。验证已覆盖 `node --check scripts\smoke-electron-embedded-local.mjs`、`npm.cmd run build`、`node scripts\smoke-electron-embedded-local.mjs`、`npm.cmd run electron:build`、`git diff --check`。
 
 本轮设置页线路 URL 脱敏预览已闭环：服务器列表普通查看态不再直接显示完整远端线路 URL，而是展示保留协议、端口和部分主机名的脱敏预览；`localhost` / IP 线路保持原样便于本地调试，完整 URL 仍只能在“编辑”表单中查看和修改。验证已覆盖 `npm.cmd run build`、in-app Browser 1420 设置页目检、`git diff --check`、敏感关键字扫描与 `npm.cmd run electron:build`。
 

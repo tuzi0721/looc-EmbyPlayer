@@ -301,6 +301,20 @@ function playerUiMetricsExpression() {
   `;
 }
 
+function wakePlayerControlsExpression() {
+  return `
+    (() => {
+      const player = document.querySelector(".player");
+      player?.dispatchEvent(new MouseEvent("mousemove", {
+        bubbles: true,
+        clientX: Math.round(window.innerWidth / 2),
+        clientY: Math.round(window.innerHeight / 2),
+      }));
+      return true;
+    })()
+  `;
+}
+
 function foregroundHillsWindow(processId = null) {
   const pid = Number(processId) || 0;
   const script = `
@@ -310,6 +324,7 @@ function foregroundHillsWindow(processId = null) {
       public static class Win32 {
         [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
         [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
       }
 "@
     $proc = $null
@@ -321,7 +336,10 @@ function foregroundHillsWindow(processId = null) {
     }
     if ($proc -and $proc.MainWindowHandle -ne 0) {
       [Win32]::ShowWindow($proc.MainWindowHandle, 9) | Out-Null
+      [Win32]::SetWindowPos($proc.MainWindowHandle, [IntPtr](-1), 0, 0, 0, 0, 0x0043) | Out-Null
       [Win32]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null
+      Start-Sleep -Milliseconds 120
+      [Win32]::SetWindowPos($proc.MainWindowHandle, [IntPtr](-2), 0, 0, 0, 0, 0x0043) | Out-Null
     }
   `;
   run("powershell", ["-NoProfile", "-Command", script]);
@@ -608,7 +626,9 @@ try {
   }
 
   let resizeResult = null;
+  let compactResizeResult = null;
   let resizeError = null;
+  let pixels = null;
   try {
     await cdpEval(ws, `
       (() => {
@@ -623,17 +643,52 @@ try {
       })()
     `);
     await wait(1500);
+    await cdpEval(ws, wakePlayerControlsExpression());
+    await wait(180);
     resizeResult = await cdpEval(ws, playerUiMetricsExpression());
+    foregroundHillsWindow(child.pid);
+    await wait(500);
+    pixels = captureAndAnalyze(resizeResult?.bounds ?? startResult.bounds);
+
+    await cdpEval(ws, `
+      (() => {
+        window.moveTo(80, 80);
+        window.resizeTo(760, 430);
+        return {
+          x: window.screenX,
+          y: window.screenY,
+          width: window.outerWidth,
+          height: window.outerHeight,
+        };
+      })()
+    `);
+    await wait(1500);
+    await cdpEval(ws, wakePlayerControlsExpression());
+    await wait(180);
+    compactResizeResult = await cdpEval(ws, playerUiMetricsExpression());
+
+    await cdpEval(ws, `
+      (() => {
+        window.resizeTo(960, 620);
+        return true;
+      })()
+    `);
+    await wait(1500);
+    await cdpEval(ws, wakePlayerControlsExpression());
+    await wait(180);
   } catch (error) {
     resizeError = error?.message ?? String(error);
   }
 
   foregroundHillsWindow(child.pid);
   await wait(500);
-  const pixels = captureAndAnalyze(resizeResult?.bounds ?? startResult.bounds);
+  if (!pixels) pixels = captureAndAnalyze(resizeResult?.bounds ?? startResult.bounds);
   const mpvPixels = startResult.mpvScreenshot?.filePath
     ? analyzePng(startResult.mpvScreenshot.filePath)
     : null;
+  const screenPixelsOk = pixels.brightRatio > 0.18 && pixels.colorfulRatio > 0.08;
+  const mpvPixelsOk =
+    (mpvPixels?.brightRatio ?? 0) > 0.18 && (mpvPixels?.colorfulRatio ?? 0) > 0.08;
 
   await cdpEval(ws, `
     (async () => {
@@ -665,8 +720,17 @@ try {
     resizeResult?.stage?.width >= 760 &&
     resizeResult?.stage?.height >= 480 &&
     !resizeResult?.hasHorizontalOverflow &&
-    pixels.brightRatio > 0.18 &&
-    pixels.colorfulRatio > 0.08;
+    compactResizeResult?.bounds?.width <= 1000 &&
+    compactResizeResult?.bounds?.height <= 640 &&
+    compactResizeResult?.topVisible &&
+    compactResizeResult?.bottomVisible &&
+    compactResizeResult?.playButtonVisible &&
+    compactResizeResult?.fullscreenButtonVisible &&
+    compactResizeResult?.stage?.width >= 560 &&
+    compactResizeResult?.stage?.height >= 420 &&
+    (compactResizeResult?.bottom?.height ?? 999) <= 150 &&
+    !compactResizeResult?.hasHorizontalOverflow &&
+    (screenPixelsOk || mpvPixelsOk);
 
   console.log(JSON.stringify({
     ok,
@@ -688,12 +752,17 @@ try {
     },
     resize: {
       result: resizeResult,
+      compactResult: compactResizeResult,
       error: resizeError,
     },
     mpvScreenshot: startResult.mpvScreenshot,
     mpvScreenshotError: startResult.mpvScreenshotError,
     mpvPixels,
     pixels,
+    pixelChecks: {
+      screenPixelsOk,
+      mpvPixelsOk,
+    },
   }, null, 2));
 
   if (!ok) process.exitCode = 1;

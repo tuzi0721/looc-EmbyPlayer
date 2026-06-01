@@ -2620,8 +2620,11 @@ onBeforeUnmount(async () => {
 
 <style scoped>
 .player {
+  --player-edge-x: clamp(14px, 2.4vw, 52px);
+  --player-bottom-y: clamp(12px, 2vh, 20px);
   width: 100%;
   height: 100%;
+  min-height: 0;
   position: relative;
   background: #000;
   color: white;
@@ -2916,7 +2919,7 @@ onBeforeUnmount(async () => {
   min-height: 56px;
   display: flex;
   align-items: center;
-  padding: 0 clamp(14px, 2.4vw, 52px);
+  padding: 0 var(--player-edge-x);
   z-index: 5;
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.55), transparent);
 }
@@ -2997,7 +3000,7 @@ onBeforeUnmount(async () => {
   left: 0;
   right: 0;
   bottom: 0;
-  padding: 16px clamp(18px, 2.6vw, 56px) 20px;
+  padding: 16px var(--player-edge-x) calc(var(--player-bottom-y) + env(safe-area-inset-bottom, 0px));
   z-index: 8;
   display: flex;
   flex-direction: column;
@@ -3428,8 +3431,11 @@ onBeforeUnmount(async () => {
 }
 
 @media (max-width: 760px) {
+  .player {
+    --player-edge-x: 12px;
+  }
   .player__top {
-    padding-inline: 10px;
+    min-height: 50px;
   }
   .danmaku-toggle {
     min-width: 36px;
@@ -3443,14 +3449,16 @@ onBeforeUnmount(async () => {
     display: none;
   }
   .player__bottom {
-    padding-inline: 12px;
+    gap: 10px;
   }
   .popup-menu--source {
     bottom: 132px;
   }
   .controls {
-    align-items: stretch;
-    flex-direction: column;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px 10px;
   }
   .controls__left,
   .controls__right {
@@ -3482,9 +3490,62 @@ onBeforeUnmount(async () => {
   }
 }
 
-@media (max-height: 520px) {
+@media (max-height: 620px) {
   .player__poster-card {
     display: none;
+  }
+  .player {
+    --player-edge-x: 12px;
+    --player-bottom-y: 8px;
+  }
+  .player__top {
+    min-height: 44px;
+  }
+  .player__title p,
+  .net-meter {
+    display: none;
+  }
+  .player__bottom {
+    gap: 6px;
+    padding-top: 8px;
+  }
+  .bar {
+    gap: 7px;
+  }
+  .bar__slider,
+  .bar__slider input[type="range"] {
+    height: 22px;
+  }
+  [data-hide-below="small"] {
+    display: none;
+  }
+  .iconbtn {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+  }
+  .iconbtn.xl {
+    width: 42px;
+    height: 42px;
+  }
+  .danmaku-toggle {
+    min-width: 32px;
+    width: 32px;
+    padding: 0;
+  }
+  .danmaku-toggle span {
+    display: none;
+  }
+  .popup-menu,
+  .episode-menu,
+  .popup-menu--source {
+    max-height: min(44vh, 260px);
+  }
+}
+
+@supports (height: 100dvh) {
+  .player {
+    height: 100dvh;
   }
 }
 </style>
