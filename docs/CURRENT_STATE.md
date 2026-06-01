@@ -55,7 +55,7 @@
 
 ## 4. 本机解码硬约束
 
-Hills Lite 的播放策略是本机解码优先且服务端不可承担视频/音频解码压力。当前链路保持：
+Hills Lite 的播放策略是本机解码优先且服务端不可承担视频/音频解码或转码压力。用户的服务端可能只是 NAS、路由器或低核心数 VPS，因此客户端宁可拒绝播放不可本机解码的源，也不能请求服务端解码。当前链路保持：
 
 - `PlaybackInfo` 请求显式发送 `EnableDirectPlay=true`、`EnableDirectStream=true`、`EnableTranscoding=false`。
 - Electron / Web Preview 请求保留 `EnableVideoStreamCopy=true` 与 `EnableAudioStreamCopy=true`。

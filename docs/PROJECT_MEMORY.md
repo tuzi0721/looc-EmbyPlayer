@@ -27,7 +27,7 @@ Hills Lite 是 Emby / Jellyfin 优先的桌面媒体客户端，当前主运行�
 - 当前用户要求阶段完成后提交、推送并确认远端 `main` 指针，然后继续下一轮。
 - 不把测试账号、密码、token、完整真实线路 URL 或完整播放 URL 写进仓库文档。
 - 不伪造成功：浏览器路由不可用、真实服务器为空、接口返回 403、视觉没有目检，都要如实记录。
-- 播放必须坚持本机解码策略；宁可失败提示，也不让 Emby/Jellyfin 服务端承担视频/音频解码。
+- 播放必须坚持本机解码策略；宁可失败提示，也不让 Emby/Jellyfin 服务端承担视频/音频解码或转码压力。
 - mpv 只使用应用随包资源；不要恢复 PATH/system mpv、下载引导、vendor fallback 或用户 mpv 路径选择。
 - 不恢复不能使用的 UI 入口。`npm.cmd run build` 已执行 `check:no-planned-ui`，阻止占位文案回到用户界面。
 
@@ -70,6 +70,8 @@ Hills Lite 是 Emby / Jellyfin 优先的桌面媒体客户端，当前主运行�
 - 进度上报只允许 `DirectPlay` / `DirectStream`
 
 门禁：`npm.cmd run check:local-decode`。
+
+Direct Stream 在本项目中只能表示本机解码前提下的静态流 / stream copy，不得退化成服务端解码、转码或 HLS 转码 playlist。
 
 ---
 
