@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-01（工作区与假入口复扫）
+> 更新时间：2026-06-02（删除旧 portable exe）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-01-2227-workspace-entry-rescan.md`](./CHANGE_LOG/2026-06-01-2227-workspace-entry-rescan.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-0309-remove-stale-portable-exe.md`](./CHANGE_LOG/2026-06-02-0309-remove-stale-portable-exe.md)
 
 ---
 
@@ -17,7 +17,7 @@
 | 主运行壳 | Electron + Vue 3 + TypeScript |
 | Tauri 状态 | 保留可运行路径，`tauri.conf.json` 当前 `bundle.active: false` |
 | Electron unpacked | `release-electron\win-unpacked\Hills Lite.exe` |
-| Electron portable | `release-electron\Hills Lite 0.1.0.exe` |
+| Electron portable | 当前不存在；旧 `release-electron\Hills Lite 0.1.0.exe` 已删除 |
 | Tauri release exe | `src-tauri\target\release\emby-player.exe` |
 | 内置 mpv | `release-electron\win-unpacked\resources\mpv\mpv.exe`；Tauri 为 `src-tauri\target\release\resources\mpv\mpv.exe` |
 
@@ -25,7 +25,7 @@
 
 当前最新 Electron unpacked 产物已刷新：`A:\vsc\emby-player\release-electron\win-unpacked\Hills Lite.exe`，文件时间 2026-06-01 22:02:16。
 
-当前 Electron portable 单文件包尚未刷新成功：`A:\vsc\emby-player\release-electron\Hills Lite 0.1.0.exe` 仍是 2026-05-30 14:51:48 的旧产物。`npm.cmd run electron:dist` 在 `electron-builder --win portable` 阶段因 GitHub NSIS 依赖下载超时失败，不能把该 portable exe 当作最新版本分发。
+当前 Electron portable 单文件包尚未刷新成功，旧 `A:\vsc\emby-player\release-electron\Hills Lite 0.1.0.exe` 已删除。`npm.cmd run electron:dist` 在 `electron-builder --win portable` 阶段因 GitHub NSIS 依赖下载超时失败；如需 portable，需要重新生成新的单文件包。
 
 当前项目指导文档也已同步：`PROJECT_MEMORY.md` 与 `STANDARDS.md` 不再作为旧路线清单，而是指向当前 Electron 主线、随包 mpv、本机解码硬约束、阶段日志/提交/推送节奏和安全边界。
 
