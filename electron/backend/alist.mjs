@@ -107,6 +107,7 @@ function sidecarSubtitlesFor(videoEntry, entries) {
       return {
         name: entry.name,
         url: entry.url,
+        path: entry.path,
         extension: entry.extension,
         rank,
         extRank: subtitleExtensions.get(entry.extension) ?? 99,
@@ -115,7 +116,7 @@ function sidecarSubtitlesFor(videoEntry, entries) {
     .filter(Boolean)
     .sort((left, right) => left.rank - right.rank || left.extRank - right.extRank || left.name.localeCompare(right.name))
     .slice(0, 8)
-    .map(({ name, url, extension }) => ({ name, url, extension }));
+    .map(({ name, url, path, extension }) => ({ name, url, path, extension }));
 }
 
 function sidecarDanmakuFor(videoEntry, entries) {
@@ -129,7 +130,7 @@ function sidecarDanmakuFor(videoEntry, entries) {
   const match = entries.find(
     (entry) => !entry.isDirectory && entry.extension === "xml" && candidates.has(entry.name.toLowerCase()),
   );
-  return match ? { name: match.name, url: match.url } : null;
+  return match ? { name: match.name, url: match.url, path: match.path } : null;
 }
 
 function annotateSidecars(entries) {

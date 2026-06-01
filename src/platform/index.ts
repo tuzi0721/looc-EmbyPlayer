@@ -831,6 +831,7 @@ function alistSidecarSubtitlesFor(videoEntry: AlistEntry, entries: AlistEntry[])
       return {
         name: entry.name,
         url: entry.url,
+        path: entry.path,
         extension: entry.extension,
         rank,
         extRank: WEB_DAV_SUBTITLE_EXTENSIONS.get(entry.extension) ?? 99,
@@ -839,7 +840,7 @@ function alistSidecarSubtitlesFor(videoEntry: AlistEntry, entries: AlistEntry[])
     .filter((entry): entry is NonNullable<typeof entry> => entry != null)
     .sort((left, right) => left.rank - right.rank || left.extRank - right.extRank || left.name.localeCompare(right.name))
     .slice(0, 8)
-    .map(({ name, url, extension }) => ({ name, url, extension }));
+    .map(({ name, url, path, extension }) => ({ name, url, path, extension }));
 }
 
 function alistSidecarDanmakuFor(videoEntry: AlistEntry, entries: AlistEntry[]) {
@@ -853,7 +854,7 @@ function alistSidecarDanmakuFor(videoEntry: AlistEntry, entries: AlistEntry[]) {
   const match = entries.find(
     (entry) => !entry.isDirectory && entry.extension === "xml" && candidates.has(entry.name.toLocaleLowerCase()),
   );
-  return match ? { name: match.name, url: match.url } : null;
+  return match ? { name: match.name, url: match.url, path: match.path } : null;
 }
 
 function alistAnnotateSidecars(entries: AlistEntry[]) {

@@ -99,7 +99,9 @@ try {
   assert(video.url.endsWith("/d/Episode%201.mkv?sign=signed-1"), `unexpected download url: ${video.url}`);
   assert(video.sidecarSubtitleCount === 1, "video should detect one sidecar subtitle");
   assert(video.sidecarSubtitles?.[0]?.name === "Episode 1.zh.srt", "sidecar subtitle should be linked");
+  assert(video.sidecarSubtitles?.[0]?.path === "Episode 1.zh.srt", "sidecar subtitle path should be linked");
   assert(video.sidecarDanmaku?.name === "Episode 1.danmaku.xml", "sidecar danmaku should be linked");
+  assert(video.sidecarDanmaku?.path === "Episode 1.danmaku.xml", "sidecar danmaku path should be linked");
 
   const resolved = await client.resolveFile({ baseUrl, token: expectedAuth, path: "Episode 1.mkv" });
   assert(resolved.url.endsWith("/raw/Episode%201.mkv"), `unexpected raw url: ${resolved.url}`);

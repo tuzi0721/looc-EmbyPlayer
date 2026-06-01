@@ -179,20 +179,59 @@ export const usePlayerStore = defineStore("player", () => {
     );
   }
 
-  async function resolveAlistDirectEntry(entry: DirectQueueEntry) {
+  async function resolveAlistPath(entry: DirectQueueEntry, path: string) {
     const baseUrl = entry.baseUrl?.trim();
-    const path = entry.path?.trim();
-    if (!baseUrl || !path) return entry;
-    const resolved = await api.resolveAlistFile({
+    if (!baseUrl || !path) throw new Error("Alist 队列缺少站点 URL 或文件路径");
+    return api.resolveAlistFile({
       baseUrl,
       path,
       token: entry.token ?? null,
       pathPassword: entry.pathPassword ?? null,
     });
+  }
+
+  async function resolveAlistSidecarSubtitles(entry: DirectQueueEntry) {
+    const subtitles = entry.sidecarSubtitles ?? [];
+    return Promise.all(
+      subtitles.map(async (subtitle) => {
+        const path = subtitle.path?.trim();
+        if (!path) return subtitle;
+        try {
+          const resolved = await resolveAlistPath(entry, path);
+          return { ...subtitle, url: resolved.url };
+        } catch {
+          return subtitle;
+        }
+      }),
+    );
+  }
+
+  async function resolveAlistSidecarDanmaku(entry: DirectQueueEntry) {
+    const danmaku = entry.sidecarDanmaku;
+    const path = danmaku?.path?.trim();
+    if (!danmaku || !path) return danmaku ?? null;
+    try {
+      const resolved = await resolveAlistPath(entry, path);
+      return { ...danmaku, url: resolved.url };
+    } catch {
+      return danmaku;
+    }
+  }
+
+  async function resolveAlistDirectEntry(entry: DirectQueueEntry) {
+    const path = entry.path?.trim();
+    if (!entry.baseUrl?.trim() || !path) return entry;
+    const [resolved, sidecarSubtitles, sidecarDanmaku] = await Promise.all([
+      resolveAlistPath(entry, path),
+      resolveAlistSidecarSubtitles(entry),
+      resolveAlistSidecarDanmaku(entry),
+    ]);
     return {
       ...entry,
       url: resolved.url,
       title: entry.title || resolved.name,
+      sidecarSubtitles,
+      sidecarDanmaku,
     };
   }
 

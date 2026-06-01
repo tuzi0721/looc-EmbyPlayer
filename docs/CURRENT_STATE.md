@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（Alist / OpenList 播放前刷新直链）
+> **更新时间**：2026-06-01（Alist / OpenList 侧挂资源刷新）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1151-alist-resolve-on-play.md`](./CHANGE_LOG/2026-06-01-1151-alist-resolve-on-play.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1157-alist-sidecar-resolve.md`](./CHANGE_LOG/2026-06-01-1157-alist-sidecar-resolve.md)
 
 ---
 
@@ -613,9 +613,11 @@ npm.cmd run electron:build
 
 本轮 Alist / OpenList 播放前刷新直链已闭环：`/alist` 写入 direct queue 时会保留站点 URL、文件路径、路径密码和 token 元数据；播放器每次播放 Alist 队列项前都会重新调用 `/api/fs/get`，优先使用最新 `raw_url`，否则使用最新签名 `/d/...` URL，并同步当前队列 URL，避免下一条/上一条沿用过期签名。播放器侧挂弹幕读取也会按当前 `queueIndex` 找回 Alist 条目，并在远程 XML 导入时携带 token header，私有 Alist/OpenList 站点的同名 XML 弹幕不再只依赖公开直链。
 
+本轮 Alist / OpenList 侧挂资源刷新已闭环：Alist 同名字幕和 XML 弹幕关联结果会保留文件路径，播放器播放 Alist 队列项前会在刷新主视频直链的同时 best-effort 刷新侧挂字幕和 XML 弹幕 URL；侧挂刷新失败时保留目录列表里的原 URL，不阻断主视频播放。这样私有站点或短期签名站点切换上一条/下一条时，不再只刷新视频而让字幕/弹幕沿用旧签名。
+
 ---
 
 ## 10. Phase 2 待办
 
 - 播放窗口内嵌已通过本地屏幕像素 smoke；后续仍建议用真实媒体人工走一遍控制栏显示/隐藏、全屏和窗口 resize 体验。
-- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层/递归视频浏览、本地文件夹列表搜索/排序/分组与播放队列、同名封面、同名 NFO 元数据、同名字幕自动关联及列表提示、同名 XML 弹幕自动关联及列表提示、最近本地文件入口、最近本地文件夹入口、收藏本地文件、收藏本地文件夹、WebDAV 基础目录浏览/直链播放、WebDAV 播放队列、WebDAV 收藏/最近入口、WebDAV 列表搜索/排序、WebDAV 同名字幕提示/加载、WebDAV 同名 XML 弹幕提示/加载、WebDAV 路径面包屑、WebDAV 当前路径操作、Alist/OpenList 基础目录浏览/直链播放、Alist/OpenList 收藏/最近入口、Alist/OpenList 播放前刷新直链和 Alist/OpenList 同名字幕/XML 弹幕提示与加载；在线封面/元数据刮削、SMB 和 Plex 仍待后续分阶段接入。
+- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层/递归视频浏览、本地文件夹列表搜索/排序/分组与播放队列、同名封面、同名 NFO 元数据、同名字幕自动关联及列表提示、同名 XML 弹幕自动关联及列表提示、最近本地文件入口、最近本地文件夹入口、收藏本地文件、收藏本地文件夹、WebDAV 基础目录浏览/直链播放、WebDAV 播放队列、WebDAV 收藏/最近入口、WebDAV 列表搜索/排序、WebDAV 同名字幕提示/加载、WebDAV 同名 XML 弹幕提示/加载、WebDAV 路径面包屑、WebDAV 当前路径操作、Alist/OpenList 基础目录浏览/直链播放、Alist/OpenList 收藏/最近入口、Alist/OpenList 播放前刷新视频和侧挂直链、Alist/OpenList 同名字幕/XML 弹幕提示与加载；在线封面/元数据刮削、SMB 和 Plex 仍待后续分阶段接入。

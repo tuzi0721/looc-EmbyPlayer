@@ -160,11 +160,13 @@ export interface WebDavSidecarSubtitle {
   name: string;
   url: string;
   extension: string;
+  path?: string | null;
 }
 
 export interface WebDavSidecarDanmaku {
   name: string;
   url: string;
+  path?: string | null;
 }
 
 export interface WebDavListing {
