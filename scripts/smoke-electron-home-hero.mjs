@@ -338,6 +338,30 @@ try {
       lightTheme.sidebarAvg = avg(lightTheme.sidebarBg);
       lightTheme.topbarAvg = avg(lightTheme.topbarBg);
       lightTheme.fgAvg = avg(lightTheme.fgPrimary);
+      await appRouter.push({ name: "settings", query: { c: "servers" } });
+      await wait(800);
+      const addButton = Array.from(document.querySelectorAll("button")).find(
+        (button) => button.textContent?.trim() === "添加",
+      );
+      addButton?.click();
+      await wait(300);
+      const dialog = document.querySelector(".modal");
+      const dialogText = dialog?.innerText ?? "";
+      const inputs = Array.from(dialog?.querySelectorAll("input, textarea, select") ?? []);
+      const placeholders = inputs.map((input) => input.getAttribute("placeholder") ?? "").filter(Boolean);
+      const uaInputs = Array.from(dialog?.querySelectorAll('input[placeholder*="User-Agent"]') ?? []);
+      const addServerDialogUi = {
+        visible: Boolean(dialog),
+        usernameField: placeholders.includes("用户名"),
+        passwordField: placeholders.includes("密码"),
+        portField: placeholders.some((placeholder) => placeholder.includes("端口") && placeholder.includes("任意")),
+        lineNameOptional: placeholders.some((placeholder) => placeholder.includes("线路名") && placeholder.includes("可选")),
+        uaInputsInAdvanced: uaInputs.length > 0 && uaInputs.every((input) => input.closest(".line-advanced")),
+        hasKindSelect: Boolean(dialog?.querySelector("select")) || dialogText.includes("类型"),
+        hasServerNameInput: placeholders.some((placeholder) => /服务器.*名|名称/.test(placeholder) && !placeholder.includes("线路")),
+      };
+      dialog?.querySelector('button[aria-label="关闭"]')?.click();
+      await wait(160);
       const existingServer = await serverStore.addServer({
         name: "Existing Smoke Server",
         kind: "emby",
@@ -436,6 +460,7 @@ try {
         posterExists: Boolean(poster),
         heroBg: getComputedStyle(document.querySelector(".hero__bg")).backgroundImage,
         lightTheme,
+        addServerDialogUi,
         errors: Array.from(document.querySelectorAll(".error, .alert, .toast--error")).map((node) => node.textContent),
       };
     })()
@@ -580,6 +605,19 @@ try {
   }
   if ((result.lightTheme?.fgAvg ?? 255) > 80) {
     failures.push(`light theme foreground stayed light: ${JSON.stringify(result.lightTheme)}`);
+  }
+  if (!result.addServerDialogUi?.visible) failures.push("add-server dialog did not open from settings");
+  if (!result.addServerDialogUi?.usernameField || !result.addServerDialogUi?.passwordField) {
+    failures.push(`add-server dialog missing account fields: ${JSON.stringify(result.addServerDialogUi)}`);
+  }
+  if (!result.addServerDialogUi?.portField) {
+    failures.push(`add-server dialog missing arbitrary port field: ${JSON.stringify(result.addServerDialogUi)}`);
+  }
+  if (!result.addServerDialogUi?.lineNameOptional || !result.addServerDialogUi?.uaInputsInAdvanced) {
+    failures.push(`add-server advanced line fields are wrong: ${JSON.stringify(result.addServerDialogUi)}`);
+  }
+  if (result.addServerDialogUi?.hasKindSelect || result.addServerDialogUi?.hasServerNameInput) {
+    failures.push(`add-server dialog still asks for server kind/name: ${JSON.stringify(result.addServerDialogUi)}`);
   }
   if (!result.heroBg.includes("hills-image://media")) failures.push("hero backdrop does not use media image URL");
   if (!sidebarCollapse) failures.push("sidebar collapse controls missing");

@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（Electron unpacked 产物刷新）
+> 更新时间：2026-06-02（添加服务器 UI smoke 覆盖）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-0553-electron-unpacked-refresh.md`](./CHANGE_LOG/2026-06-02-0553-electron-unpacked-refresh.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-0559-add-server-ui-smoke.md`](./CHANGE_LOG/2026-06-02-0559-add-server-ui-smoke.md)
 
 ---
 
@@ -142,7 +142,7 @@ node scripts\check-notification-clear.mjs
 - `node --check electron\backend\emby.mjs`
 - `node --check scripts\smoke-electron-home-hero.mjs`
 - `node scripts\smoke-electron-home-hero.mjs`
-- 当前工作区无意外未跟踪文件；Electron 命令覆盖为 104/104，显式 no-op 命令为 0。首页 smoke 已覆盖双服务器同名同 ID 收藏/历史/聚合/搜索记录不会被合并、收藏/历史/聚合卡片缺 Backdrop 时的图片回退解码、单集只有父级 Thumb 时仍能加载图片、巨幕 Logo 艺术标题图加载、巨幕无右侧海报且点击进入详情、侧边栏汉堡按钮折叠/展开，以及 960×600 compact 窗口下巨幕首屏自适应。
+- 当前工作区无意外未跟踪文件；Electron 命令覆盖为 104/104，显式 no-op 命令为 0。首页 smoke 已覆盖双服务器同名同 ID 收藏/历史/聚合/搜索记录不会被合并、收藏/历史/聚合卡片缺 Backdrop 时的图片回退解码、单集只有父级 Thumb 时仍能加载图片、巨幕 Logo 艺术标题图加载、巨幕无右侧海报且点击进入详情、侧边栏汉堡按钮折叠/展开、添加服务器弹窗账号/密码/任意端口/自动类型与名称、线路高级 UA，以及 960×600 compact 窗口下巨幕首屏自适应。
 
 ---
 
