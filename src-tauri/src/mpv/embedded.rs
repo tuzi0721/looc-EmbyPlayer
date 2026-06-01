@@ -128,6 +128,11 @@ impl MpvBackend for MpvEmbeddedBackend {
                 m.command("seek", &[s.as_str(), "absolute"])
                     .map_err(|e| AppError::Mpv(e.to_string()))
             }
+            MpvCommand::SeekRelative { delta_ms } => {
+                let s = format!("{:.3}", delta_ms as f64 / 1000.0);
+                m.command("seek", &[s.as_str(), "relative+keyframes"])
+                    .map_err(|e| AppError::Mpv(e.to_string()))
+            }
             MpvCommand::SetSpeed(v) => m
                 .set_property("speed", v)
                 .map_err(|e| AppError::Mpv(e.to_string())),

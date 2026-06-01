@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（个人媒体加载兼容性修正）
+> **更新时间**：2026-06-01（播放器后退与紧凑控件修正）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1721-personal-media-loading.md`](./CHANGE_LOG/2026-06-01-1721-personal-media-loading.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1733-player-relative-seek.md`](./CHANGE_LOG/2026-06-01-1733-player-relative-seek.md)
 
 ---
 
@@ -42,6 +42,8 @@
 **2026-06-01**：添加服务器弹窗已重写为清晰登录表单：主流程显示用户名、密码、线路地址和任意端口输入；服务端名称和 Emby/Jellyfin 类型不再由用户填写，而是继续通过 `detect_server` 自动识别；线路名、User-Agent 与 Headers 收进每条线路的“高级设置”，避免 UA 在主流程反复出现。保存逻辑仍追加新服务器记录，不覆盖原有服务器；如果填写账号密码，会在保存后立即登录。`src/utils/serverUrl.ts` 的端口/协议错误提示同步修复为可读中文。验证已覆盖 `npm.cmd run build`、乱码扫描、`git diff --check` 与 `npm.cmd run electron:build`；in-app Browser 本轮仍无可用路由，未完成截图目检。
 
 **2026-06-01**：收藏、历史与聚合视界的数据加载兼容性已加固：收藏查询会依次尝试 `IsFavorite=true`、`Filters=IsFavorite` 和按 Movie/Series/Episode 拆分查询；播放历史会尝试 `IsPlayed=true` 与 `Filters=IsPlayed`；历史与继续观看互不拖累，任一只读接口失败时另一路仍可展示。Electron / Web Preview / Tauri 的继续观看接口补齐递归、视频类型、用户数据、图片和简介字段。真实服务器只读 smoke 显示服务端识别为 Emby、线路健康；收藏两种查询 HTTP 200 当前账号 0 项，历史两种查询 HTTP 200 返回 1 项，继续观看返回 3 项。播放链路继续保持本机解码硬约束：Direct Play / Direct Stream only，不允许服务端转码兜底。
+
+**2026-06-01**：播放器后退修正已闭环：后退/前进按钮和快捷键改用运行时相对 seek，Electron 与 Tauri mpv 后端都新增 `seek_relative` 并使用 `relative+keyframes`，避免 UI 进度回读滞后时把后退误算成原地跳转；进度条、章节、片头跳转仍保留绝对 seek。紧凑布局中后退/前进按钮不再被 `small` 规则隐藏，960x620 与 960x600 窗口 smoke 均确认后退按钮可见、无水平溢出。内嵌播放 smoke 中后退从 10633ms 退到 900ms，全屏、窗口缩放、彩色视频像素与退出清理继续通过；转码入口扫描无 `TranscodingUrl`、`master.m3u8`、`EnableTranscoding.*true` 或 `PlayMethod.*Transcode` 命中，播放链路仍坚持本机解码。
 
 **2026-06-01**：播放器“播放源 / 媒体源”菜单同步本机解码硬约束：候选源会显示“本机直连 / 本机直流 / 本机解码待确认”，当 Emby/Jellyfin 只上报服务端转码能力时，该媒体源在会话内切源菜单中直接禁用并阻止切换，避免用户误点导致 NAS、路由器或 VPS 服务端承担转码解码压力。底层 PlaybackInfo、静态流 URL 与进度上报继续保持 Direct Play / Direct Stream only，不允许服务端转码兜底。验证已覆盖 `npm.cmd run build`、`git diff --check`、主动转码入口扫描与 `npm.cmd run electron:build`。
 

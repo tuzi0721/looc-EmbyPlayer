@@ -2328,6 +2328,13 @@ async function handleInvoke(command, args = {}) {
     );
   }
 
+  if (command === "seek_relative") {
+    const deltaMs = Number(args.payload?.deltaMs ?? 0);
+    return runMpvIfRunning(() =>
+      mpv.command(["seek", deltaMs / 1000, "relative+keyframes"]),
+    );
+  }
+
   if (command === "set_speed") {
     return runMpvIfRunning(() => mpv.setProperty("speed", Number(args.payload?.speed ?? 1)));
   }

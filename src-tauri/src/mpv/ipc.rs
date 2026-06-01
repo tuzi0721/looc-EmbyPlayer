@@ -470,6 +470,15 @@ impl MpvBackend for MpvIpcBackend {
                 .await?;
                 Ok(())
             }
+            MpvCommand::SeekRelative { delta_ms } => {
+                self.send_command(vec![
+                    json!("seek"),
+                    json!(delta_ms as f64 / 1000.0),
+                    json!("relative+keyframes"),
+                ])
+                .await?;
+                Ok(())
+            }
             MpvCommand::SetSpeed(s) => self.set_property("speed", json!(s)).await,
             MpvCommand::SetVolume(v) => self.set_property("volume", json!(v)).await,
             MpvCommand::SetMuted(m) => self.set_property("mute", json!(m)).await,

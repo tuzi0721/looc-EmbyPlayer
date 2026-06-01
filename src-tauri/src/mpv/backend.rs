@@ -132,6 +132,9 @@ pub enum MpvCommand {
     Seek {
         position_ms: i64,
     },
+    SeekRelative {
+        delta_ms: i64,
+    },
     SetSpeed(f64),
     SetVolume(i32),
     SetMuted(bool),

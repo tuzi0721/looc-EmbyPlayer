@@ -110,6 +110,7 @@ pub fn run() {
             commands::player::resume,
             commands::player::stop,
             commands::player::seek,
+            commands::player::seek_relative,
             commands::player::set_speed,
             commands::player::set_audio_track,
             commands::player::set_subtitle_track,

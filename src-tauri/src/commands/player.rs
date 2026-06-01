@@ -1023,6 +1023,12 @@ pub struct SeekPayload {
     pub position_ms: i64,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeekRelativePayload {
+    pub delta_ms: i64,
+}
+
 #[tauri::command]
 pub async fn seek(state: State<'_, Arc<AppState>>, payload: SeekPayload) -> AppResult<()> {
     state
@@ -1030,6 +1036,20 @@ pub async fn seek(state: State<'_, Arc<AppState>>, payload: SeekPayload) -> AppR
         .backend()
         .execute(MpvCommand::Seek {
             position_ms: payload.position_ms,
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn seek_relative(
+    state: State<'_, Arc<AppState>>,
+    payload: SeekRelativePayload,
+) -> AppResult<()> {
+    state
+        .mpv
+        .backend()
+        .execute(MpvCommand::SeekRelative {
+            delta_ms: payload.delta_ms,
         })
         .await
 }

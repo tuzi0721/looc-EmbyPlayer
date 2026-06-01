@@ -1891,6 +1891,16 @@ function invokeWebFallback<T>(
       };
       return Promise.resolve(undefined as T);
     }
+    case "seek_relative": {
+      const deltaMs = numberFrom((args?.payload as any)?.deltaMs) ?? 0;
+      const durationMs = webPlaybackSnapshot.durationMs;
+      const positionMs = Math.max(0, Math.floor(webPlaybackSnapshot.positionMs + deltaMs));
+      webPlaybackSnapshot = {
+        ...webPlaybackSnapshot,
+        positionMs: durationMs > 0 ? Math.min(positionMs, durationMs) : positionMs,
+      };
+      return Promise.resolve(undefined as T);
+    }
     case "set_speed": {
       const speed = numberFrom((args?.payload as any)?.speed) ?? 1;
       webPlaybackSnapshot = { ...webPlaybackSnapshot, speed };

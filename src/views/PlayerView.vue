@@ -1417,7 +1417,11 @@ async function seekToMs(value: number) {
 }
 
 async function nudgeSeek(deltaSec: number) {
-  await seekToMs(positionMs.value + deltaSec * 1000);
+  if (useHtmlVideo) {
+    await seekToMs(positionMs.value + deltaSec * 1000);
+  } else {
+    await player.seekRelative(deltaSec * 1000);
+  }
   bumpControls();
 }
 
@@ -2249,7 +2253,6 @@ onBeforeUnmount(async () => {
             <button
               class="iconbtn"
               data-control="seek-back"
-              data-hide-below="small"
               title="后退 10 秒"
               @click="nudgeSeek(-10)"
             >
@@ -2267,7 +2270,6 @@ onBeforeUnmount(async () => {
             <button
               class="iconbtn"
               data-control="seek-forward"
-              data-hide-below="small"
               title="前进 30 秒"
               @click="nudgeSeek(30)"
             >

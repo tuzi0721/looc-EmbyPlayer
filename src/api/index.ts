@@ -365,6 +365,7 @@ export const api = {
   resume: () => invoke<void>("resume"),
   stop: () => invoke<void>("stop"),
   seek: (positionMs: number) => invoke<void>("seek", { payload: { positionMs } }),
+  seekRelative: (deltaMs: number) => invoke<void>("seek_relative", { payload: { deltaMs } }),
   setSpeed: (speed: number) => invoke<void>("set_speed", { payload: { speed } }),
   setAudioTrack: (trackId: number) => invoke<void>("set_audio_track", { payload: { trackId } }),
   setSubtitleTrack: (trackId: number | null) =>

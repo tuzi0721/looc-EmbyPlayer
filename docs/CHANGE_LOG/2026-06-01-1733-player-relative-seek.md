@@ -1,0 +1,22 @@
+# 播放器后退与紧凑控件修正
+
+- **时间**：2026-06-01 17:33 (UTC+8)
+- **动机**：用户反馈播放无法后退；复测发现底层 mpv 绝对 seek 可用，但 960px 级别窗口高度触发紧凑布局时，后退按钮会被 `data-hide-below="small"` 隐藏，且前端用旧进度计算绝对 seek 容易受状态回读延迟影响。
+- **修改文件**：
+  - `src/api/index.ts`、`electron/main.mjs`、`src/platform/index.ts`：新增 `seek_relative`，用于直接把相对时间交给运行时播放器。
+  - `src/stores/player.ts`、`src/views/PlayerView.vue`：后退/前进按钮和快捷键改用相对 seek；绝对 seek 仍保留给进度条、章节和片头跳转；seek 后做乐观位置更新并延迟刷新一次。
+  - `src-tauri/src/commands/player.rs`、`src-tauri/src/lib.rs`、`src-tauri/src/mpv/backend.rs`、`src-tauri/src/mpv/ipc.rs`、`src-tauri/src/mpv/embedded.rs`：Tauri/mpv 后端同步新增相对 seek 命令，IPC 与 embedded 两条路径都使用 `relative+keyframes`。
+  - `src/views/PlayerView.vue`：后退和前进按钮不再在 `small` 紧凑布局中隐藏，960x600 窗口仍保留后退入口。
+- **风险**：相对 seek 使用 keyframe 定位，远程直连流更稳但可能不是逐帧精确；进度条和章节仍使用绝对 seek，不改变原有精确定位语义。播放链路继续保持本机解码，未开启任何服务端转码入口。
+- **回滚**：恢复上述文件即可回到只支持绝对 seek 的旧实现。
+- **验证步骤**：
+  - `node --check electron\main.mjs`
+  - `cargo fmt --manifest-path src-tauri\Cargo.toml --check`
+  - `cargo check --manifest-path src-tauri\Cargo.toml --all-targets`
+  - `npm.cmd run check:electron-commands`
+  - `npm.cmd run build`
+  - 转码入口扫描：`TranscodingUrl`、`master.m3u8`、`EnableTranscoding.*true`、`PlayMethod.*Transcode`
+  - `node scripts\smoke-electron-embedded-local.mjs`
+  - `git diff --check`
+  - `npm.cmd run electron:build`
+- **结果**：内嵌播放 smoke 中后退按钮点击后从 10633ms 退到 900ms；960x620 与 960x600 窗口下后退按钮均保持可见，且无水平溢出。全屏进入/退出、窗口缩放、mpv 截图彩色像素检测、应用关闭后的 `electron_mpv_host.exe` / `mpv.exe` 清理均通过。Electron unpacked 包完整性检查通过，随包 mpv 与 helper 均已复制。

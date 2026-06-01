@@ -441,7 +441,29 @@ export const usePlayerStore = defineStore("player", () => {
 
   async function seek(positionMs: number) {
     await api.seek(positionMs);
+    if (snapshot.value) {
+      const durationMs = snapshot.value.durationMs;
+      const target = Math.max(0, Math.floor(positionMs));
+      snapshot.value = {
+        ...snapshot.value,
+        positionMs: durationMs > 0 ? Math.min(target, durationMs) : target,
+      };
+    }
     await refresh();
+    window.setTimeout(() => void refresh(), 350);
+  }
+  async function seekRelative(deltaMs: number) {
+    await api.seekRelative(deltaMs);
+    if (snapshot.value) {
+      const durationMs = snapshot.value.durationMs;
+      const target = Math.max(0, Math.floor(snapshot.value.positionMs + deltaMs));
+      snapshot.value = {
+        ...snapshot.value,
+        positionMs: durationMs > 0 ? Math.min(target, durationMs) : target,
+      };
+    }
+    await refresh();
+    window.setTimeout(() => void refresh(), 350);
   }
   async function setSpeed(s: number) {
     await api.setSpeed(s);
@@ -608,6 +630,7 @@ export const usePlayerStore = defineStore("player", () => {
     resume,
     stop,
     seek,
+    seekRelative,
     setSpeed,
     setAudioTrack,
     setSubtitleTrack,
