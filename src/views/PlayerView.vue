@@ -736,7 +736,7 @@ function mediaSourceMeta(source: PlaybackMediaSource): string {
 }
 
 function canUsePlaybackMediaSource(source: PlaybackMediaSource): boolean {
-  return !(source.supportsDirectPlay === false && source.supportsDirectStream === false);
+  return source.supportsDirectPlay === true || source.supportsDirectStream === true;
 }
 
 function mediaSourceCapabilityLabel(source: PlaybackMediaSource): string {
@@ -745,7 +745,7 @@ function mediaSourceCapabilityLabel(source: PlaybackMediaSource): string {
   if (!canUsePlaybackMediaSource(source) && source.supportsTranscoding) {
     return "仅服务端转码";
   }
-  return "本机解码待确认";
+  return "未确认本机解码";
 }
 
 function lineMeta(line: PlaybackLineOption): string {
@@ -1775,7 +1775,7 @@ async function switchPlaybackLine(line: PlaybackLineOption) {
 
 async function switchPlaybackMediaSource(source: PlaybackMediaSource) {
   if (!canUsePlaybackMediaSource(source)) {
-    errorText.value = "该媒体源仅支持服务端转码，已阻止切换。请选择本机直连或本机直流源。";
+    errorText.value = "该媒体源未明确支持本机直连或本机直流，已阻止切换，避免服务端解码/转码。";
     showControls.value = true;
     return;
   }

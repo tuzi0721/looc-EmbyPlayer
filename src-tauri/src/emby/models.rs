@@ -446,7 +446,7 @@ pub struct MediaSource {
 
 impl MediaSource {
     pub fn supports_local_decode(&self) -> bool {
-        self.supports_direct_play != Some(false) || self.supports_direct_stream != Some(false)
+        self.supports_direct_play == Some(true) || self.supports_direct_stream == Some(true)
     }
 }
 

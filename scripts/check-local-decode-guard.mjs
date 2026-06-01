@@ -74,6 +74,7 @@ const requiredAnchors = [
       "EnableTranscoding: false",
       "TranscodingProfiles: []",
       "pickLocalDecodeMediaSource",
+      "supportsDirectPlay === true || supportsDirectStream === true",
       'streamUrl.searchParams.set("Static", "true")',
       "serverTranscodingAllowed: false",
     ],
@@ -84,6 +85,7 @@ const requiredAnchors = [
       "EnableTranscoding: false",
       "TranscodingProfiles: []",
       "pickLocalDecodeMediaSource",
+      "supportsDirectPlay === true || supportsDirectStream === true",
       'streamUrl.searchParams.set("Static", "true")',
       "serverTranscodingAllowed: false",
     ],
@@ -103,6 +105,7 @@ const requiredAnchors = [
       "pub transcoding_profiles: Vec<Value>",
       "pub fn direct_only",
       "pub fn supports_local_decode",
+      "supports_direct_play == Some(true) || self.supports_direct_stream == Some(true)",
     ],
   },
   {

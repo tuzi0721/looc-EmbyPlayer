@@ -301,7 +301,7 @@ function mediaCapabilityText(source: MediaSourceInfo) {
   if (source.SupportsDirectStream) parts.push("本机直流");
   if (parts.length > 0) return parts.join(" / ");
   if (source.SupportsTranscoding) return "仅服务端转码（不可播放）";
-  return "本机解码待确认";
+  return "未确认本机解码（不可播放）";
 }
 
 function pushMediaInfoRow(rows: MediaInfoRow[], row: MediaInfoRow) {

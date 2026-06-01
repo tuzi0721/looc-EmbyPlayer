@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（设置页服务器/线路 UI 收敛）
+> **更新时间**：2026-06-01（严格本机解码媒体源判定）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1821-settings-server-line-ui.md`](./CHANGE_LOG/2026-06-01-1821-settings-server-line-ui.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1830-strict-local-decode-source.md`](./CHANGE_LOG/2026-06-01-1830-strict-local-decode-source.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：本机解码媒体源判定继续收紧：Electron / Web Preview / Tauri 的播放源选择不再把“未明确否定 Direct Play / Direct Stream”的媒体源当作可用，只有服务端明确返回 `SupportsDirectPlay=true` 或 `SupportsDirectStream=true` 时才允许选中或切换；未确认本机能力的媒体源会在播放器菜单中禁用，并提示已阻止切换以避免服务端解码/转码。详情页版本能力文案同步把未确认本机解码的版本标为不可播放；`check:local-decode` 新增严格判定锚点，防止宽松判断回归。验证已覆盖 `node --check scripts\check-local-decode-guard.mjs`、`node --check electron\backend\emby.mjs`、`npm.cmd run check:local-decode`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run build`、`git diff --check` 与 `npm.cmd run electron:build`。
 
 **2026-06-01**：设置页服务器/线路 UI 继续收敛：已保存服务器从嵌套玻璃卡片改为设置面板内的列表行分隔，服务器编辑区的多线路配置也改为轻量分隔线，高级设置不再额外绘制卡片边界，降低“矩形框套矩形框”的杂乱感。现有添加服务器与线路编辑逻辑保持不变：新增服务器仍追加记录，不覆盖原服务器；线路 URL 继续允许任意端口；User-Agent / Headers 仍只在线路高级设置中维护。播放链路继续遵守本机解码硬约束，验证已覆盖 `git diff --check`、`npm.cmd run build` 与 `npm.cmd run electron:build`，其中构建过程已自动执行 `check:local-decode`。
 

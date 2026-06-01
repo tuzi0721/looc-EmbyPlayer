@@ -631,7 +631,7 @@ function directOnlyDeviceProfile(name = "Hills Lite Direct") {
 function isLocalDecodeSource(mediaSource: any): boolean {
   const supportsDirectPlay = boolFrom(mediaSource?.SupportsDirectPlay);
   const supportsDirectStream = boolFrom(mediaSource?.SupportsDirectStream);
-  return supportsDirectPlay !== false || supportsDirectStream !== false;
+  return supportsDirectPlay === true || supportsDirectStream === true;
 }
 
 function localDecodeMode(mediaSource: any): "direct-play" | "direct-stream" {
