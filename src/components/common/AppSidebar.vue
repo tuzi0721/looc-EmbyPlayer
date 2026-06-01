@@ -9,6 +9,7 @@ import { useLocalFilesStore } from "@/stores/localFiles";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useServerStore } from "@/stores/server";
 import { useSettingsStore } from "@/stores/settings";
+import { useWebDavStore } from "@/stores/webdav";
 import { openFileDialog } from "@/platform";
 import LineStatusDot from "@/components/common/LineStatusDot.vue";
 import AddServerDialog from "@/components/login/AddServerDialog.vue";
@@ -22,6 +23,7 @@ const settings = useSettingsStore();
 const downloads = useDownloadsStore();
 const localFiles = useLocalFilesStore();
 const notifications = useNotificationsStore();
+const webdav = useWebDavStore();
 
 const showAdd = ref(false);
 const showVisibility = ref(false);
@@ -58,6 +60,15 @@ const favoriteLocalFolderKeys = computed(
 const recentLocalFolders = computed(() =>
   localFiles.folderItems
     .filter((entry) => !favoriteLocalFolderKeys.value.has(entry.folderPath.toLowerCase()))
+    .slice(0, 2),
+);
+const favoriteWebDavConnections = computed(() => webdav.favoriteConnections.slice(0, 2));
+const favoriteWebDavConnectionIds = computed(
+  () => new Set(webdav.favoriteConnections.map((entry) => entry.id)),
+);
+const recentWebDavConnections = computed(() =>
+  webdav.recentConnections
+    .filter((entry) => !favoriteWebDavConnectionIds.value.has(entry.id))
     .slice(0, 2),
 );
 
@@ -113,6 +124,9 @@ function gotoRemote() {
 }
 function gotoWebDav() {
   router.push("/webdav").catch(() => {});
+}
+function openWebDavConnection(id: string) {
+  router.push({ name: "webdav", query: { connection: id } }).catch(() => {});
 }
 function gotoLocalFolder(folderPath?: string) {
   router
@@ -378,6 +392,41 @@ async function openLocalFolder() {
         <Icon icon="lucide:cloud" width="14" />
         <span>WebDAV</span>
       </button>
+
+      <div v-if="favoriteWebDavConnections.length > 0" class="local-recent">
+        <div class="local-recent__head">
+          <span>收藏 WebDAV</span>
+          <button class="iconbtn" aria-label="清空收藏 WebDAV" @click="webdav.clearFavorites()">
+            <Icon icon="lucide:x" width="13" />
+          </button>
+        </div>
+        <button
+          v-for="entry in favoriteWebDavConnections"
+          :key="entry.id"
+          class="local-recent__item"
+          :title="entry.baseUrl"
+          @click="openWebDavConnection(entry.id)"
+        >
+          <Icon icon="lucide:star" width="14" />
+          <span>{{ entry.name }}</span>
+        </button>
+      </div>
+
+      <div v-if="recentWebDavConnections.length > 0" class="local-recent">
+        <div class="local-recent__head">
+          <span>最近 WebDAV</span>
+        </div>
+        <button
+          v-for="entry in recentWebDavConnections"
+          :key="entry.id"
+          class="local-recent__item"
+          :title="entry.baseUrl"
+          @click="openWebDavConnection(entry.id)"
+        >
+          <Icon icon="lucide:cloud" width="14" />
+          <span>{{ entry.name }}</span>
+        </button>
+      </div>
 
       <div v-if="favoriteLocalFolders.length > 0" class="local-recent">
         <div class="local-recent__head">

@@ -39,6 +39,22 @@ const otherItems = computed(() =>
   (listing.value?.items ?? []).filter((entry) => !entry.isDirectory && !entry.playable),
 );
 const canLoad = computed(() => baseUrlDraft.value.trim().length > 0);
+const selectedConnection = computed(() =>
+  selectedConnectionId.value
+    ? webdav.connections.find((entry) => entry.id === selectedConnectionId.value) ?? null
+    : null,
+);
+const connectionFavorited = computed(() =>
+  selectedConnection.value ? webdav.isFavorite(selectedConnection.value.id) : false,
+);
+const favoriteConnectionIds = computed(
+  () => new Set(webdav.favoriteConnections.map((entry) => entry.id)),
+);
+const recentShortcutConnections = computed(() =>
+  webdav.recentConnections
+    .filter((entry) => !favoriteConnectionIds.value.has(entry.id))
+    .slice(0, 4),
+);
 
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "-";
@@ -86,6 +102,11 @@ function fillConnection(id: string | null) {
 function selectConnection(id: string) {
   fillConnection(id);
   router.replace({ name: "webdav", query: { connection: id, path: "" } }).catch(() => {});
+}
+
+function toggleSelectedConnectionFavorite() {
+  if (!selectedConnectionId.value) return;
+  webdav.toggleFavorite(selectedConnectionId.value);
 }
 
 function newConnection() {
@@ -223,6 +244,17 @@ onMounted(() => {
         <p v-if="listing?.directoryUrl" :title="listing.directoryUrl">{{ listing.directoryUrl }}</p>
       </div>
       <div class="webdav__actions">
+        <button
+          v-if="selectedConnection"
+          class="icon-btn favorite-connection-btn"
+          :class="{ active: connectionFavorited }"
+          type="button"
+          :title="connectionFavorited ? '取消收藏 WebDAV' : '收藏 WebDAV'"
+          :aria-pressed="connectionFavorited"
+          @click="toggleSelectedConnectionFavorite"
+        >
+          <Icon icon="lucide:star" width="16" />
+        </button>
         <button v-if="currentPath" class="icon-btn" type="button" title="上一级" @click="goUp">
           <Icon icon="lucide:corner-up-left" width="16" />
         </button>
@@ -309,6 +341,38 @@ onMounted(() => {
         <div v-else-if="!listing" class="empty glass">
           <Icon icon="lucide:cloud" width="36" />
           <strong>选择或填写 WebDAV 连接</strong>
+          <div v-if="webdav.favoriteConnections.length > 0" class="shortcut-block">
+            <span>收藏 WebDAV</span>
+            <div class="shortcut-list">
+              <button
+                v-for="connection in webdav.favoriteConnections.slice(0, 4)"
+                :key="connection.id"
+                class="shortcut-pill"
+                type="button"
+                :title="connection.baseUrl"
+                @click="selectConnection(connection.id)"
+              >
+                <Icon icon="lucide:star" width="14" />
+                <span>{{ connection.name }}</span>
+              </button>
+            </div>
+          </div>
+          <div v-if="recentShortcutConnections.length > 0" class="shortcut-block">
+            <span>最近 WebDAV</span>
+            <div class="shortcut-list">
+              <button
+                v-for="connection in recentShortcutConnections"
+                :key="connection.id"
+                class="shortcut-pill"
+                type="button"
+                :title="connection.baseUrl"
+                @click="selectConnection(connection.id)"
+              >
+                <Icon icon="lucide:cloud" width="14" />
+                <span>{{ connection.name }}</span>
+              </button>
+            </div>
+          </div>
         </div>
 
         <div v-else-if="listing.items.length === 0" class="empty glass">
@@ -604,6 +668,12 @@ onMounted(() => {
   opacity: 0.55;
   cursor: default;
 }
+.favorite-connection-btn {
+  color: var(--fg-secondary);
+}
+.favorite-connection-btn.active {
+  color: #fbbf24;
+}
 .empty {
   min-height: 260px;
   max-width: 900px;
@@ -623,6 +693,49 @@ onMounted(() => {
 .empty--error {
   color: var(--danger);
 }
+.shortcut-block {
+  width: min(520px, 100%);
+  display: grid;
+  gap: 8px;
+}
+.shortcut-block > span {
+  justify-self: start;
+  color: var(--fg-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+}
+.shortcut-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+.shortcut-pill {
+  appearance: none;
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-secondary);
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  cursor: pointer;
+  text-align: left;
+}
+.shortcut-pill:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.shortcut-pill span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .spin {
   animation: spin 1s linear infinite;
 }
@@ -639,6 +752,9 @@ onMounted(() => {
   .webdav-config,
   .webdav-list {
     overflow: visible;
+  }
+  .shortcut-list {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

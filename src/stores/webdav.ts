@@ -9,6 +9,7 @@ export interface WebDavConnection {
   password?: string | null;
   savedAt: string;
   lastUsedAt?: string | null;
+  favoritedAt?: string | null;
 }
 
 const STORAGE_KEY = "hills-lite:webdav-connections:v1";
@@ -43,6 +44,10 @@ function normalizeConnection(value: unknown): WebDavConnection | null {
     typeof entry.lastUsedAt === "string" && !Number.isNaN(Date.parse(entry.lastUsedAt))
       ? entry.lastUsedAt
       : null;
+  const favoritedAt =
+    typeof entry.favoritedAt === "string" && !Number.isNaN(Date.parse(entry.favoritedAt))
+      ? entry.favoritedAt
+      : null;
   const baseUrl = entry.baseUrl.trim();
   return {
     id: typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : createId(),
@@ -57,6 +62,7 @@ function normalizeConnection(value: unknown): WebDavConnection | null {
       typeof entry.password === "string" && entry.password.length > 0 ? entry.password : null,
     savedAt,
     lastUsedAt,
+    favoritedAt,
   };
 }
 
@@ -69,6 +75,11 @@ export const useWebDavStore = defineStore("webdav", () => {
         Date.parse(right.lastUsedAt ?? right.savedAt) -
         Date.parse(left.lastUsedAt ?? left.savedAt),
     ),
+  );
+  const favoriteConnections = computed(() =>
+    connections.value
+      .filter((entry) => entry.favoritedAt)
+      .sort((left, right) => Date.parse(right.favoritedAt ?? "") - Date.parse(left.favoritedAt ?? "")),
   );
 
   function save() {
@@ -109,6 +120,7 @@ export const useWebDavStore = defineStore("webdav", () => {
       password: payload.rememberPassword ? payload.password ?? null : null,
       savedAt: connections.value.find((entry) => entry.id === id)?.savedAt ?? now,
       lastUsedAt: now,
+      favoritedAt: connections.value.find((entry) => entry.id === id)?.favoritedAt ?? null,
     };
     connections.value = [
       connection,
@@ -131,13 +143,36 @@ export const useWebDavStore = defineStore("webdav", () => {
     save();
   }
 
+  function isFavorite(id: string) {
+    return connections.value.some((entry) => entry.id === id && Boolean(entry.favoritedAt));
+  }
+
+  function toggleFavorite(id: string) {
+    const connection = connections.value.find((entry) => entry.id === id);
+    if (!connection) return;
+    const favoritedAt = connection.favoritedAt ? null : new Date().toISOString();
+    connections.value = connections.value.map((entry) =>
+      entry.id === id ? { ...entry, favoritedAt } : entry,
+    );
+    save();
+  }
+
+  function clearFavorites() {
+    connections.value = connections.value.map((entry) => ({ ...entry, favoritedAt: null }));
+    save();
+  }
+
   load();
 
   return {
     connections,
     recentConnections,
+    favoriteConnections,
     upsert,
     touch,
     remove,
+    isFavorite,
+    toggleFavorite,
+    clearFavorites,
   };
 });

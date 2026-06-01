@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（WebDAV 播放队列）
+> **更新时间**：2026-06-01（WebDAV 收藏入口）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1017-webdav-playback-queue.md`](./CHANGE_LOG/2026-06-01-1017-webdav-playback-queue.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1024-webdav-favorites.md`](./CHANGE_LOG/2026-06-01-1024-webdav-favorites.md)
 
 ---
 
@@ -589,9 +589,11 @@ npm.cmd run electron:build
 
 本轮 WebDAV 播放队列已闭环：播放器队列模型新增 `direct` 类型，`/webdav` 点击视频时会把当前目录内可播放视频写入 WebDAV direct queue；播放器上一条/下一条、选集菜单、标题副标题与返回按钮均能识别 WebDAV 直链播放，不再把远程 WebDAV 文件误当成本地文件或普通 Emby 条目。`scripts\smoke-webdav-connector.mjs` 的 mock WebDAV 数据扩展为 2 个可播放视频，用于覆盖基础队列候选来源。验证已覆盖 `node --check scripts\smoke-webdav-connector.mjs`、`node scripts\smoke-webdav-connector.mjs`、`npm.cmd run build`、`git diff --check` 与敏感关键字扫描；未写入测试账号、密码、token 或完整真实线路地址。
 
+本轮 WebDAV 收藏入口已闭环：WebDAV 连接记录新增本地星标状态，`/webdav` 当前连接可收藏/取消收藏，空状态会展示收藏与最近 WebDAV 快捷入口；侧边栏 WebDAV 入口下方会显示收藏连接和最近连接，可直接回到对应连接配置。收藏状态只是在已有本地连接记录上保存星标时间，不额外复制密码、token 或完整真实线路到文档/代码。
+
 ---
 
 ## 10. Phase 2 待办
 
 - 播放窗口内嵌已通过本地屏幕像素 smoke；后续仍建议用真实媒体人工走一遍控制栏显示/隐藏、全屏和窗口 resize 体验。
-- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层/递归视频浏览、本地文件夹列表搜索/排序/分组与播放队列、同名封面、同名 NFO 元数据、同名字幕自动关联及列表提示、同名 XML 弹幕自动关联及列表提示、最近本地文件入口、最近本地文件夹入口、收藏本地文件、收藏本地文件夹、WebDAV 基础目录浏览/直链播放和 WebDAV 播放队列；在线封面/元数据刮削、SMB、Alist/OpenList 和 Plex 仍待后续分阶段接入。
+- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层/递归视频浏览、本地文件夹列表搜索/排序/分组与播放队列、同名封面、同名 NFO 元数据、同名字幕自动关联及列表提示、同名 XML 弹幕自动关联及列表提示、最近本地文件入口、最近本地文件夹入口、收藏本地文件、收藏本地文件夹、WebDAV 基础目录浏览/直链播放、WebDAV 播放队列和 WebDAV 收藏/最近入口；在线封面/元数据刮削、SMB、Alist/OpenList 和 Plex 仍待后续分阶段接入。
