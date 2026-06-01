@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（本机解码拦截提示统一）
+> **更新时间**：2026-06-01（退出残留回归验证）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1953-local-decode-block-messages.md`](./CHANGE_LOG/2026-06-01-1953-local-decode-block-messages.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1958-exit-runtime-cleanup-regression.md`](./CHANGE_LOG/2026-06-01-1958-exit-runtime-cleanup-regression.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：退出残留完成回归验证：验证前 `Get-Process` 未发现本项目 mpv / `electron_mpv_host` / `Hills Lite` 残留；内嵌播放 smoke 在关闭窗口前检测到 `electron_mpv_host.exe` 与随包 `mpv.exe` 正在播放，关闭后 `electronExited=true`、`remaining=[]`、`runtimeCleanup.ok=true`。同一轮 smoke 还确认后退有效、全屏舞台覆盖完整 viewport、960px 窄窗口无水平溢出，屏幕截图与 mpv 截图均检测到彩色视频像素。
 
 **2026-06-01**：本机解码拦截提示继续统一：Electron、Web Preview、Tauri 播放、外部播放、下载与远程播放入口在服务端未返回可本机直连 / 本机直流媒体源时，现在都返回中文明确拦截提示，说明 Hills Lite 不允许服务端解码/转码，并提示用户换用可本机解码的版本或线路。播放协商仍维持 Direct Play / Direct Stream only、`EnableTranscoding=false`、空 `TranscodingProfiles` 与静态流 URL；本轮验证已覆盖 JS 语法、Rust fmt / check、旧英文提示残留扫描、`check:local-decode`、`npm.cmd run build`、`git diff --check` 与 `npm.cmd run electron:build`。
 
