@@ -6,7 +6,9 @@ import os from "node:os";
 import path from "node:path";
 
 const devServerUrl = process.env.HILLS_SMOKE_DEV_SERVER_URL ?? "http://localhost:1420";
-const remotePort = Number(process.env.HILLS_SMOKE_CDP_PORT ?? 9352);
+const remotePort = process.env.HILLS_SMOKE_CDP_PORT
+  ? Number(process.env.HILLS_SMOKE_CDP_PORT)
+  : 9300 + Math.floor(Math.random() * 500);
 const tmpDir = path.join(os.tmpdir(), `hills-lite-home-hero-${Date.now()}`);
 const userDataDir = path.join(tmpDir, "user-data");
 const screenshotPath = path.join(tmpDir, "home-hero.png");
@@ -243,10 +245,23 @@ try {
       const serverStore = useServerStore();
       const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
       if (!appRouter) throw new Error("mounted Vue router not found");
-      const server = await serverStore.addServer({
-        name: "Home Hero Smoke",
+      await serverStore.addServer({
+        name: "Existing Smoke Server",
         kind: "emby",
-        activeLineId: "home-line",
+        activeLineId: "existing-line",
+        defaultUserAgent: null,
+        lines: [{
+          id: "existing-line",
+          name: "Existing",
+          baseUrl: ${JSON.stringify(fakeBaseUrl)},
+          userAgent: null,
+          headers: [],
+          priority: 0,
+          enabled: true,
+        }],
+      });
+      const beforeServerCount = serverStore.servers.length;
+      const detected = await serverStore.detectServer({
         defaultUserAgent: null,
         lines: [{
           id: "home-line",
@@ -258,6 +273,22 @@ try {
           enabled: true,
         }],
       });
+      const server = await serverStore.addServer({
+        name: detected.serverName || "Home Hero Smoke",
+        kind: detected.kind,
+        activeLineId: detected.winningLineId,
+        defaultUserAgent: null,
+        lines: [{
+          id: "home-line",
+          name: "Local",
+          baseUrl: ${JSON.stringify(fakeBaseUrl)},
+          userAgent: null,
+          headers: [],
+          priority: 0,
+          enabled: true,
+        }],
+      });
+      const afterServerCount = serverStore.servers.length;
       lib.reset();
       await auth.login({ serverId: server.id, username: "home", password: "home" });
       await appRouter.push("/home");
@@ -286,6 +317,18 @@ try {
         heroItems: lib.heroItems.length,
         resumeItems: lib.resume.length,
         views: lib.views.length,
+        detected: {
+          kind: detected.kind,
+          serverName: detected.serverName,
+          winningLineId: detected.winningLineId,
+        },
+        serverCounts: { before: beforeServerCount, after: afterServerCount },
+        savedServer: {
+          name: server.name,
+          kind: server.kind,
+          activeLineId: server.activeLineId,
+          baseUrl: server.lines[0]?.baseUrl ?? null,
+        },
         firstRunVisible: Boolean(firstRun),
         posterNatural: posterImg ? { width: posterImg.naturalWidth, height: posterImg.naturalHeight, complete: posterImg.complete } : null,
         heroBg: getComputedStyle(document.querySelector(".hero__bg")).backgroundImage,
@@ -325,6 +368,19 @@ try {
   if (!result.desc.includes("real media-library candidate")) failures.push("hero overview missing");
   if (result.heroItems < 1) failures.push("hero items missing");
   if (result.views < 1) failures.push("library views missing");
+  if (result.detected?.kind !== "emby") failures.push(`server kind detection failed: ${result.detected?.kind}`);
+  if (result.detected?.serverName !== "Home Hero Smoke") {
+    failures.push(`server name detection failed: ${result.detected?.serverName}`);
+  }
+  if (result.detected?.winningLineId !== "home-line") {
+    failures.push(`winning line detection failed: ${result.detected?.winningLineId}`);
+  }
+  if (result.serverCounts?.after !== result.serverCounts?.before + 1) {
+    failures.push(`server add did not append: ${JSON.stringify(result.serverCounts)}`);
+  }
+  if (result.savedServer?.baseUrl !== fakeBaseUrl) {
+    failures.push(`arbitrary port URL was not preserved: ${result.savedServer?.baseUrl}`);
+  }
   if (!result.heroBg.includes("hills-image://media")) failures.push("hero backdrop does not use media image URL");
   if (result.hero && result.hero.height < result.viewport.height * 0.72) failures.push("hero too short");
   if (result.hero && result.hero.height > result.viewport.height + 4) failures.push("hero taller than viewport");

@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-01（用户问题清单 smoke 复核）
+> 更新时间：2026-06-01（服务器识别登录 smoke 加固）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-01-2137-user-issue-smoke-rerun.md`](./CHANGE_LOG/2026-06-01-2137-user-issue-smoke-rerun.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-01-2143-server-detect-login-smoke-guard.md`](./CHANGE_LOG/2026-06-01-2143-server-detect-login-smoke-guard.md)
 
 ---
 
@@ -42,6 +42,7 @@
 - 主导航保留首页、收藏、历史、聚合视界、服务器状态/切换与设置；下载、通知、遥控、服务器显示/隐藏等管理动作集中到设置页。
 - 添加服务器表单直接提供用户名、密码、线路地址和任意端口输入；服务端名称与 Emby/Jellyfin 类型由公开信息接口自动识别。
 - 保存服务器会追加记录，不覆盖原服务器；已保存服务器的线路编辑同样使用地址 + 端口输入，线路名为高级可选项，线路级高级设置保留 User-Agent 与 headers。
+- 首页 smoke 已覆盖随机端口 fake Emby 的 `detect_server -> add_server -> login -> refreshHome` 链路，并断言新增服务器只追加 1 条。
 - 线路延迟显示不展示 `0ms` / `1ms` 这种误导性精确值，`0-9ms` 统一显示为 `<10ms`。
 - 首页巨幕默认启用 cinema 布局，从当前媒体库候选读取 Backdrop、Primary 海报、简介、年份、播放状态与运行时信息。
 - 收藏、历史、聚合视界已接入真实账号只读接口兼容查询；收藏为空会显示为空态，不再当作加载失败。
@@ -111,8 +112,8 @@ node scripts\smoke-electron-home-hero.mjs
 
 当前最新阶段已验证：
 
+- `node --check scripts\smoke-electron-home-hero.mjs`
 - `node scripts\smoke-electron-home-hero.mjs`
-- `node scripts\smoke-electron-embedded-local.mjs`
 
 ---
 
