@@ -100,6 +100,36 @@ let embedHostParent = null;
 let embedHostProcess = null;
 let embedHostHwnd = null;
 let embedHostStdout = "";
+const embedHostDiagnostics = {
+  attachCount: 0,
+  rectCount: 0,
+  visibleCount: 0,
+  detachCount: 0,
+  helperPath: null,
+  lastRect: null,
+  lastVisible: false,
+  lastError: null,
+  lastEventAt: null,
+};
+
+function markEmbedHostEvent(patch = {}) {
+  Object.assign(embedHostDiagnostics, patch, {
+    lastEventAt: new Date().toISOString(),
+  });
+}
+
+function getEmbeddedMpvState() {
+  return {
+    ...embedHostDiagnostics,
+    hasProcess: Boolean(embedHostProcess && embedHostProcess.exitCode == null),
+    processId: embedHostProcess?.pid ?? null,
+    hasHwnd: Boolean(embedHostHwnd),
+    hwnd: embedHostHwnd,
+    hasRect: Boolean(embedHostRect),
+    mpvRunning: mpv.isRunning(),
+    mpvEmbedWindowHandle: mpv.embedWindowHandle ?? null,
+  };
+}
 
 function queueProtocolUrl(url) {
   if (desktopIntegration) {
@@ -950,8 +980,8 @@ function resolveEmbedHostHelperPath() {
   const name = process.platform === "win32" ? "electron_mpv_host.exe" : "electron_mpv_host";
   const candidates = [
     path.join(process.resourcesPath ?? "", name),
-    path.join(rootDir, "src-tauri", "target", "debug", name),
     path.join(rootDir, "src-tauri", "target", "release", name),
+    path.join(rootDir, "src-tauri", "target", "debug", name),
   ];
   return candidates.find((candidate) => candidate && fs.existsSync(candidate)) ?? null;
 }
@@ -966,8 +996,10 @@ function startEmbedHostProcess(parent) {
 
   const helperPath = resolveEmbedHostHelperPath();
   if (!helperPath) {
+    markEmbedHostEvent({ lastError: "electron mpv host helper not found" });
     throw new Error("electron mpv host helper not found; build src-tauri electron_mpv_host first");
   }
+  markEmbedHostEvent({ helperPath, lastError: null });
 
   detachEmbedHostParentListeners();
   embedHostParent = parent;
@@ -1005,12 +1037,14 @@ function startEmbedHostProcess(parent) {
               clearTimeout(timer);
               embedHostProcess?.stdout?.off("data", onData);
               embedHostHwnd = String(message.hwnd);
+              markEmbedHostEvent({ helperPath, lastError: null });
               applyEmbedHostBounds();
               resolve(embedHostHwnd);
               return;
             }
           } catch (error) {
             clearTimeout(timer);
+            markEmbedHostEvent({ lastError: error?.message ?? String(error) });
             reject(error);
             return;
           }
@@ -1021,6 +1055,7 @@ function startEmbedHostProcess(parent) {
     embedHostProcess?.stdout?.on("data", onData);
     embedHostProcess?.once("error", (error) => {
       clearTimeout(timer);
+      markEmbedHostEvent({ lastError: error?.message ?? String(error) });
       reject(error);
     });
   });
@@ -1048,8 +1083,10 @@ async function destroyEmbedHostWindow() {
 }
 
 async function attachEmbeddedMpvHost() {
+  markEmbedHostEvent({ attachCount: embedHostDiagnostics.attachCount + 1, lastError: null });
   const host = getMainAppWindow();
   if (!host || host.isDestroyed()) {
+    markEmbedHostEvent({ lastError: "main window not ready for embedded mpv" });
     throw new Error("main window not ready for embedded mpv");
   }
   const hwnd = await startEmbedHostProcess(host);
@@ -1065,11 +1102,21 @@ async function setEmbeddedMpvRect(rect = {}) {
     height: Math.max(1, Number(rect.height) || 1),
     scale: Math.max(0.1, Number(rect.scale) || 1),
   };
+  markEmbedHostEvent({
+    rectCount: embedHostDiagnostics.rectCount + 1,
+    lastRect: { ...embedHostRect },
+    lastError: null,
+  });
   applyEmbedHostBounds();
   return null;
 }
 
 async function setEmbeddedMpvVisible(visible) {
+  markEmbedHostEvent({
+    visibleCount: embedHostDiagnostics.visibleCount + 1,
+    lastVisible: Boolean(visible),
+    lastError: null,
+  });
   if (!embedHostProcess) return null;
   sendEmbedHostCommand({ type: "visible", visible: Boolean(visible) });
   if (visible) applyEmbedHostBounds();
@@ -1077,6 +1124,11 @@ async function setEmbeddedMpvVisible(visible) {
 }
 
 async function detachEmbeddedMpvHost() {
+  markEmbedHostEvent({
+    detachCount: embedHostDiagnostics.detachCount + 1,
+    lastVisible: false,
+    lastError: null,
+  });
   await mpv.shutdown().catch(() => {});
   await mpv.clearEmbedWindowHandle();
   await destroyEmbedHostWindow();
@@ -2122,6 +2174,10 @@ async function handleInvoke(command, args = {}) {
 
   if (command === "embed_detach") {
     return detachEmbeddedMpvHost();
+  }
+
+  if (command === "get_embed_state") {
+    return getEmbeddedMpvState();
   }
 
   if (command === "take_screenshot") {

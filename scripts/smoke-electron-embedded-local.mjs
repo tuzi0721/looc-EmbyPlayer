@@ -303,7 +303,6 @@ function playerUiMetricsExpression() {
       const playButton = rectOf('[data-control="play-toggle"]');
       const seekBackButton = rectOf('[data-control="seek-back"]');
       const fullscreenButton = rectOf('[data-control="fullscreen"]');
-      const embedRects = window.__hillsEmbedRects ?? [];
       return {
         bounds: {
           x: window.screenX,
@@ -324,8 +323,6 @@ function playerUiMetricsExpression() {
         playButton,
         seekBackButton,
         fullscreenButton,
-        embedRect: embedRects.length > 0 ? embedRects[embedRects.length - 1] : null,
-        embedRectCount: embedRects.length,
         topVisible: visible(top),
         bottomVisible: visible(bottom),
         playButtonVisible: visible(playButton),
@@ -350,6 +347,39 @@ function wakePlayerControlsExpression() {
       return true;
     })()
   `;
+}
+
+async function readEmbedState(ws) {
+  return cdpEval(ws, `
+    (async () => {
+      if (!window.hillsLite) return null;
+      return window.hillsLite.invoke("get_embed_state");
+    })()
+  `);
+}
+
+function embeddedRectOk(state, metrics) {
+  if (!state || !metrics) return false;
+  const rect = state.lastRect;
+  if (!rect) return false;
+  const sameHandle = state.hwnd && state.mpvEmbedWindowHandle === state.hwnd;
+  const topLimit = (metrics.top?.height ?? 0) - 1;
+  const bottomLimit = (metrics.bottom?.y ?? metrics.viewport?.height ?? rect.y + rect.height) + 1;
+  return (
+    state.attachCount >= 1 &&
+    state.rectCount >= 1 &&
+    state.visibleCount >= 1 &&
+    state.lastVisible === true &&
+    state.hasProcess === true &&
+    state.hasHwnd === true &&
+    state.hasRect === true &&
+    state.mpvRunning === true &&
+    Boolean(sameHandle) &&
+    rect.width >= Math.max(1, (metrics.stage?.width ?? rect.width) - 2) &&
+    rect.height >= 1 &&
+    rect.y >= topLimit &&
+    rect.y + rect.height <= bottomLimit
+  );
 }
 
 function foregroundHillsWindow(processId = null) {
@@ -645,6 +675,16 @@ const child = spawn(electron, [`--remote-debugging-port=${remotePort}`, "electro
   stdio: ["ignore", "pipe", "pipe"],
   windowsHide: true,
 });
+const electronStdout = [];
+const electronStderr = [];
+child.stdout?.on("data", (chunk) => {
+  const text = String(chunk).trim();
+  if (text) electronStdout.push(text);
+});
+child.stderr?.on("data", (chunk) => {
+  const text = String(chunk).trim();
+  if (text) electronStderr.push(text);
+});
 
 let ws;
 try {
@@ -661,28 +701,31 @@ try {
   });
   await cdpCall(ws, "Runtime.enable");
   await cdpCall(ws, "Page.enable");
+  const pageConsole = [];
+  const pageExceptions = [];
+  ws.addEventListener("message", (event) => {
+    const message = JSON.parse(event.data);
+    if (message.method === "Runtime.consoleAPICalled") {
+      pageConsole.push({
+        type: message.params?.type,
+        args: (message.params?.args ?? []).map((arg) => arg.value ?? arg.description ?? arg.type),
+      });
+    } else if (message.method === "Runtime.exceptionThrown") {
+      pageExceptions.push(message.params?.exceptionDetails?.text ?? message.params?.exceptionDetails);
+    }
+  });
   await wait(500);
 
   const startResult = await cdpEval(ws, `
     (async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       await wait(1200);
-      const { api } = await import("/src/api/index.ts");
       const { useAuthStore } = await import("/src/stores/auth.ts");
       const { useServerStore } = await import("/src/stores/server.ts");
       const serverStore = useServerStore();
       const auth = useAuthStore();
       const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
       if (!appRouter) throw new Error("mounted Vue router not found");
-      window.__hillsEmbedRects = [];
-      if (!api.__embedRectRecorder) {
-        const originalEmbedSetRect = api.embedSetRect.bind(api);
-        api.embedSetRect = async (rect) => {
-          window.__hillsEmbedRects.push({ ...rect, at: Date.now() });
-          return originalEmbedSetRect(rect);
-        };
-        api.__embedRectRecorder = true;
-      }
       const server = await serverStore.addServer({
         name: "Local Embedded Smoke",
         kind: "emby",
@@ -702,6 +745,7 @@ try {
       await appRouter.push("/player/${itemId}");
       await wait(9000);
       const state = await window.hillsLite.invoke("get_state");
+      const embedState = await window.hillsLite.invoke("get_embed_state");
       let mpvScreenshot = null;
       let mpvScreenshotError = null;
       try {
@@ -715,11 +759,14 @@ try {
       return {
         route: appRouter.currentRoute.value.fullPath,
         bodyText: document.body.innerText.slice(0, 800),
+        hasHillsLite: Boolean(window.hillsLite),
+        playerClassName: document.querySelector(".player")?.className ?? null,
+        htmlVideoCount: document.querySelectorAll("video").length,
         bounds: { x: window.screenX, y: window.screenY, width: window.outerWidth, height: window.outerHeight },
         stage: stage ? { x: stage.x, y: stage.y, width: stage.width, height: stage.height } : null,
         mpvScreenshot,
         mpvScreenshotError,
-        embedRects: window.__hillsEmbedRects ?? [],
+        embedState,
         state: {
           durationMs: state.durationMs,
           positionMs: state.positionMs,
@@ -811,7 +858,9 @@ try {
   }
 
   const controlsInitial = await cdpEval(ws, playerUiMetricsExpression());
+  const controlsInitialEmbedState = await readEmbedState(ws);
   let fullscreenAfterEnter = null;
+  let fullscreenAfterEnterEmbedState = null;
   let fullscreenAfterExit = null;
   let fullscreenStageCoversViewport = false;
   let fullscreenError = null;
@@ -822,6 +871,7 @@ try {
     await cdpClick(ws, controlsInitial.fullscreenButton.center);
     await wait(1100);
     fullscreenAfterEnter = await cdpEval(ws, playerUiMetricsExpression());
+    fullscreenAfterEnterEmbedState = await readEmbedState(ws);
     fullscreenStageCoversViewport =
       fullscreenAfterEnter?.stage?.width >= fullscreenAfterEnter?.viewport?.width - 4 &&
       fullscreenAfterEnter?.stage?.height >= fullscreenAfterEnter?.viewport?.height - 4;
@@ -863,6 +913,7 @@ try {
     await cdpEval(ws, wakePlayerControlsExpression());
     await wait(180);
     resizeResult = await cdpEval(ws, playerUiMetricsExpression());
+    const resizeEmbedState = await readEmbedState(ws);
     foregroundHillsWindow(child.pid);
     await wait(500);
     pixels = captureAndAnalyze(resizeResult?.bounds ?? startResult.bounds);
@@ -883,16 +934,19 @@ try {
     await cdpEval(ws, wakePlayerControlsExpression());
     await wait(180);
     compactResizeResult = await cdpEval(ws, playerUiMetricsExpression());
+    const compactResizeEmbedState = await readEmbedState(ws);
 
     await cdpEval(ws, `
       (() => {
         window.resizeTo(960, 620);
-        return true;
+      return true;
       })()
     `);
     await wait(1500);
     await cdpEval(ws, wakePlayerControlsExpression());
     await wait(180);
+    resizeResult.embedState = resizeEmbedState;
+    compactResizeResult.embedState = compactResizeEmbedState;
   } catch (error) {
     resizeError = error?.message ?? String(error);
   }
@@ -911,10 +965,7 @@ try {
     startResult.route === `/player/${itemId}` &&
     startResult.state.durationMs > 0 &&
     startResult.state.trackCount >= 1 &&
-    (controlsInitial.embedRectCount ?? 0) > 0 &&
-    controlsInitial.embedRect?.y >= (controlsInitial.top?.height ?? 0) - 1 &&
-    controlsInitial.embedRect?.y + controlsInitial.embedRect?.height <=
-      (controlsInitial.bottom?.y ?? controlsInitial.viewport.height) + 1 &&
+    embeddedRectOk(controlsInitialEmbedState, controlsInitial) &&
     longPressSpeed.active.speed >= 1.95 &&
     Math.abs(longPressSpeed.restored.speed - startResult.state.speed) < 0.05 &&
     !longPressSpeed.restored.badgeVisible &&
@@ -927,11 +978,13 @@ try {
     !controlsInitial.hasHorizontalOverflow &&
     fullscreenAfterEnter?.fullscreenActive === true &&
     fullscreenStageCoversViewport &&
+    embeddedRectOk(fullscreenAfterEnterEmbedState, fullscreenAfterEnter) &&
     fullscreenAfterExit?.fullscreenActive === false &&
     resizeResult?.bounds?.width <= 1100 &&
     resizeResult?.bounds?.height <= 720 &&
     resizeResult?.stage?.width >= 760 &&
     resizeResult?.stage?.height >= 480 &&
+    embeddedRectOk(resizeResult?.embedState, resizeResult) &&
     !resizeResult?.hasHorizontalOverflow &&
     compactResizeResult?.bounds?.width <= 1000 &&
     compactResizeResult?.bounds?.height <= 640 &&
@@ -942,6 +995,7 @@ try {
     compactResizeResult?.stage?.width >= 560 &&
     compactResizeResult?.stage?.height >= 420 &&
     (compactResizeResult?.bottom?.height ?? 999) <= 150 &&
+    embeddedRectOk(compactResizeResult?.embedState, compactResizeResult) &&
     !compactResizeResult?.hasHorizontalOverflow &&
     (screenPixelsOk || mpvPixelsOk);
 
@@ -965,14 +1019,26 @@ try {
     bodyText: startResult.bodyText,
     state: startResult.state,
     stage: startResult.stage,
+    diagnostics: {
+      hasHillsLite: startResult.hasHillsLite,
+      playerClassName: startResult.playerClassName,
+      htmlVideoCount: startResult.htmlVideoCount,
+      embedState: startResult.embedState,
+      electronStdout,
+      electronStderr,
+      pageConsole,
+      pageExceptions,
+    },
     longPressSpeed,
     seekBack: {
       result: seekBackResult,
       error: seekBackError,
     },
     controlsInitial,
+    controlsInitialEmbedState,
     fullscreen: {
       afterEnter: fullscreenAfterEnter,
+      afterEnterEmbedState: fullscreenAfterEnterEmbedState,
       afterExit: fullscreenAfterExit,
       stageCoversViewport: fullscreenStageCoversViewport,
       error: fullscreenError,

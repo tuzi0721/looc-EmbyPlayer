@@ -56,6 +56,7 @@ let screenshotMessageTimer: number | null = null;
 let errorCopyTimer: number | null = null;
 let embedResizeObserver: ResizeObserver | null = null;
 let embedResizeRaf = 0;
+let embedLayoutSyncTimer: number | null = null;
 let lastEmbedRectKey = "";
 let blackoutSyncSeq = 0;
 let introSkipAppliedItemId: string | null = null;
@@ -1216,6 +1217,7 @@ function onPlayerPointerMove(event: PointerEvent) {
 
 function bumpControls() {
   showControls.value = true;
+  scheduleEmbedRectLayoutSync();
   clearControlsHideTimer();
   hideTimer = window.setTimeout(() => {
     if (!hasOpenPlayerPanel()) showControls.value = false;
@@ -1640,6 +1642,26 @@ function nextAnimationFrame() {
   });
 }
 
+async function syncEmbedRectAfterLayout() {
+  if (!embedVideo) return;
+  await nextTick();
+  await nextAnimationFrame();
+  await nextAnimationFrame();
+  await syncEmbedRect();
+}
+
+function scheduleEmbedRectLayoutSync(delayMs = 0) {
+  if (!embedVideo) return;
+  if (embedLayoutSyncTimer != null) {
+    window.clearTimeout(embedLayoutSyncTimer);
+    embedLayoutSyncTimer = null;
+  }
+  embedLayoutSyncTimer = window.setTimeout(() => {
+    embedLayoutSyncTimer = null;
+    void syncEmbedRectAfterLayout().catch((error) => console.warn(error));
+  }, delayMs);
+}
+
 async function prepareScreenshotFrame() {
   clearControlsHideTimer();
   closePlayerPanels();
@@ -1661,6 +1683,7 @@ async function setupEmbeddedVideoHost() {
   scheduleEmbedRectSync();
   await syncEmbedRect();
   await api.embedSetVisible(true);
+  scheduleEmbedRectLayoutSync();
 }
 
 function teardownEmbeddedVideoHost(cleanupTasks: Promise<unknown>[]) {
@@ -1672,11 +1695,15 @@ function teardownEmbeddedVideoHost(cleanupTasks: Promise<unknown>[]) {
     window.cancelAnimationFrame(embedResizeRaf);
     embedResizeRaf = 0;
   }
+  if (embedLayoutSyncTimer != null) {
+    window.clearTimeout(embedLayoutSyncTimer);
+    embedLayoutSyncTimer = null;
+  }
   lastEmbedRectKey = "";
   cleanupTasks.push(api.embedSetVisible(false), api.embedDetach());
 }
 
-watch(showControls, () => scheduleEmbedRectSync());
+watch(showControls, () => scheduleEmbedRectLayoutSync());
 
 const playerShortcutHandlers: Record<PlayerShortcutAction, () => void | Promise<void>> = {
   "toggle-play": togglePlay,

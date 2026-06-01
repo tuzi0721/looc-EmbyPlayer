@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（Electron unpacked 产物再次刷新）
+> 更新时间：2026-06-02（内嵌播放控制层坐标闭环）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-0517-electron-unpacked-refresh.md`](./CHANGE_LOG/2026-06-02-0517-electron-unpacked-refresh.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-0534-embedded-player-rect-sync.md`](./CHANGE_LOG/2026-06-02-0534-embedded-player-rect-sync.md)
 
 ---
 
@@ -67,8 +67,8 @@
 - 默认只使用应用随包 mpv；不扫描系统 PATH、不读取旧 vendor mpv、不提供用户选择 mpv 路径。
 - 全屏阶段视频舞台铺满 viewport，控制层作为覆盖层，不再挤压视频区域。
 - 后退/前进使用运行时相对 seek；后退、全屏、窗口缩放、控制栏可见性和退出清理已进入 Electron smoke。
-- Electron 内嵌 mpv 的 popup 宿主在控制条显示时会避开顶栏/底栏，且宿主窗口鼠标命中测试透明，避免原生视频窗口盖住或吞掉进度条、后退、播放、全屏等 Web 控制件。
-- Electron 内嵌播放 smoke 已覆盖后退、长按倍速、真全屏、自适应、mpv 截图像素和关闭清理；退出后应无 `mpv.exe`、`electron_mpv_host.exe` 或 `Hills Lite` 残留播放进程。
+- Electron 内嵌 mpv 的 popup 宿主在控制条显示时会避开顶栏/底栏，且宿主窗口鼠标命中测试透明，避免原生视频窗口盖住或吞掉进度条、后退、播放、全屏等 Web 控制件；控制条显示/隐藏、鼠标唤醒、全屏和窗口缩放后都会重新同步 native rect。
+- Electron 内嵌播放 smoke 已覆盖后退、长按倍速、真全屏、自适应、mpv 截图像素、后端 embed state 和关闭清理；退出后应无 `mpv.exe`、`electron_mpv_host.exe` 或 `Hills Lite` 残留播放进程。
 - Electron 默认系统菜单已清空；开发工具只在显式环境变量开启时打开。
 
 ---
@@ -131,6 +131,8 @@ node scripts\check-notification-clear.mjs
 - `npm.cmd run check:no-planned-ui`
 - `npm.cmd run check:electron-commands`
 - `node scripts\check-notification-clear.mjs`
+- `node --check electron\main.mjs`
+- `node --check scripts\smoke-electron-embedded-local.mjs`
 - `cargo fmt --manifest-path src-tauri\Cargo.toml`
 - `cargo check --manifest-path src-tauri\Cargo.toml --all-targets`
 - `npm.cmd run build:electron-helper`
