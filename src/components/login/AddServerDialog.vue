@@ -18,8 +18,6 @@ const emit = defineEmits<{
 const auth = useAuthStore();
 const serverStore = useServerStore();
 
-type ServerKindChoice = "auto" | ServerKind;
-
 type LineDraft = {
   id: string;
   name: string;
@@ -58,9 +56,6 @@ function createLineDraft(name: string): LineDraft {
 }
 
 const form = reactive({
-  name: "",
-  kind: "auto" as ServerKindChoice,
-  defaultUserAgent: "",
   username: "",
   password: "",
   showPassword: false,
@@ -105,14 +100,23 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function serverHostLabel(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname.replace(/^\[|\]$/g, "") || parsed.host || null;
+  } catch {
+    return null;
+  }
+}
+
+function fallbackServerName(lines: LinePayload[], activeLineId: string | null): string {
+  const activeLine = lines.find((line) => line.id === activeLineId) ?? lines[0];
+  return (activeLine ? serverHostLabel(activeLine.baseUrl) : null) ?? "媒体服务器";
+}
+
 async function submit() {
   errorText.value = null;
   statusText.value = null;
-  const name = form.name.trim();
-  if (!name) {
-    errorText.value = "请填写服务器名称";
-    return;
-  }
   if (hasCredentials.value && (!form.username.trim() || !form.password)) {
     errorText.value = "登录需要同时填写账号和密码";
     return;
@@ -128,19 +132,14 @@ async function submit() {
 
   submitting.value = true;
   try {
-    let kind: ServerKind = form.kind === "auto" ? "emby" : form.kind;
-    let activeLineId: string | null = null;
-
-    if (form.kind === "auto") {
-      statusText.value = "正在识别服务器类型…";
-      const detected = await serverStore.detectServer({
-        name,
-        lines,
-        defaultUserAgent: normalizeNullableText(form.defaultUserAgent),
-      });
-      kind = detected.kind;
-      activeLineId = detected.winningLineId;
-    }
+    statusText.value = "正在识别 Emby/Jellyfin…";
+    const detected = await serverStore.detectServer({
+      lines,
+      defaultUserAgent: null,
+    });
+    const kind: ServerKind = detected.kind;
+    const activeLineId = detected.winningLineId;
+    const name = detected.serverName?.trim() || fallbackServerName(lines, activeLineId);
 
     statusText.value = hasCredentials.value ? "正在保存并登录…" : "正在保存服务器…";
     const server = await serverStore.addServer({
@@ -148,7 +147,7 @@ async function submit() {
       kind,
       activeLineId,
       lines,
-      defaultUserAgent: normalizeNullableText(form.defaultUserAgent),
+      defaultUserAgent: null,
     });
 
     let loggedIn = false;
@@ -184,37 +183,6 @@ async function submit() {
         </header>
 
         <div class="modal__body">
-          <section class="fields">
-            <label class="field">
-              <span>名称</span>
-              <GlassInput v-model="form.name" placeholder="例如：家庭影院" />
-            </label>
-            <label class="field">
-              <span>类型</span>
-              <div class="seg">
-                <button
-                  type="button"
-                  :class="{ active: form.kind === 'auto' }"
-                  @click="form.kind = 'auto'"
-                >自动</button>
-                <button
-                  type="button"
-                  :class="{ active: form.kind === 'emby' }"
-                  @click="form.kind = 'emby'"
-                >Emby</button>
-                <button
-                  type="button"
-                  :class="{ active: form.kind === 'jellyfin' }"
-                  @click="form.kind = 'jellyfin'"
-                >Jellyfin</button>
-              </div>
-            </label>
-            <label class="field">
-              <span>默认 User-Agent</span>
-              <GlassInput v-model="form.defaultUserAgent" placeholder="留空使用应用默认" />
-            </label>
-          </section>
-
           <section>
             <header class="section-head">
               <h4>账号</h4>
@@ -248,14 +216,14 @@ async function submit() {
             </header>
             <div v-for="(line, idx) in form.lines" :key="line.id" class="line-card">
               <div class="line-card__top">
-                <GlassInput v-model="line.name" placeholder="线路名" />
+                <GlassInput v-model="line.name" placeholder="线路名（可选）" />
                 <button class="iconbtn danger" @click="removeLine(idx)" :disabled="form.lines.length === 1">
                   <Icon icon="lucide:trash-2" width="16" />
                 </button>
               </div>
               <div class="line-url">
-                <GlassInput v-model="line.baseUrl" placeholder="https://example.com 或 192.168.1.2" />
-                <GlassInput v-model="line.port" placeholder="端口：443 / 8096" />
+                <GlassInput v-model="line.baseUrl" placeholder="https://example.com:443 或 192.168.1.2:8096" />
+                <GlassInput v-model="line.port" placeholder="可选端口" />
               </div>
               <details class="line-advanced">
                 <summary>
@@ -307,7 +275,7 @@ async function submit() {
   max-height: 84vh;
   display: flex;
   flex-direction: column;
-  border-radius: 22px;
+  border-radius: 8px;
   overflow: hidden;
 }
 .modal__head {
@@ -343,11 +311,6 @@ async function submit() {
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
 }
-.fields {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
 .field {
   display: flex;
   flex-direction: column;
@@ -378,11 +341,12 @@ async function submit() {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--glass-border);
-  border-radius: 14px;
-  margin-bottom: 10px;
+  padding: 12px 0 14px;
+  border-top: 1px solid var(--separator);
+}
+.line-card:first-of-type {
+  border-top: none;
+  padding-top: 0;
 }
 .line-card__top {
   display: grid;
@@ -422,7 +386,7 @@ textarea {
   resize: vertical;
   outline: none;
   border: 1px solid var(--glass-border);
-  border-radius: 14px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
   color: var(--fg-primary);
   font: inherit;
@@ -435,29 +399,6 @@ textarea:focus {
 textarea::placeholder {
   color: var(--fg-tertiary);
 }
-.seg {
-  display: inline-flex;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 10px;
-  padding: 3px;
-  gap: 2px;
-}
-.seg button {
-  appearance: none;
-  border: none;
-  padding: 6px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  background: transparent;
-  color: var(--fg-secondary);
-  font-size: 13px;
-  font-weight: 600;
-}
-.seg .active {
-  background: rgba(255, 255, 255, 0.14);
-  color: var(--fg-primary);
-}
-
 .iconbtn {
   appearance: none;
   border: none;
