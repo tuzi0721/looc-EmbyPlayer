@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, protocol, screen, shell } from "electron";
+import { app, BrowserWindow, Menu, dialog, globalShortcut, ipcMain, protocol, screen, shell } from "electron";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -66,6 +66,12 @@ const maxLocalNfoBytes = 256 * 1024;
 
 fs.mkdirSync(userDataDir, { recursive: true });
 app.setPath("userData", userDataDir);
+Menu.setApplicationMenu(null);
+app.on("browser-window-created", (_event, win) => {
+  win.setMenu(null);
+  win.setMenuBarVisibility(false);
+  win.setAutoHideMenuBar(true);
+});
 protocol.registerSchemesAsPrivileged([
   {
     scheme: "hills-image",
@@ -2655,7 +2661,7 @@ function createWindow() {
 
   if (devServerUrl) {
     void win.loadURL(devServerUrl);
-    if (process.env.HILLS_ELECTRON_OPEN_DEVTOOLS !== "0") {
+    if (process.env.HILLS_ELECTRON_OPEN_DEVTOOLS === "1") {
       win.webContents.openDevTools({ mode: "detach" });
     }
   } else {
