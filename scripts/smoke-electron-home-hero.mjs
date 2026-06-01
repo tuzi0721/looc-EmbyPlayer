@@ -1,0 +1,317 @@
+import { spawn, spawnSync } from "node:child_process";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import http from "node:http";
+import os from "node:os";
+import path from "node:path";
+
+const devServerUrl = process.env.HILLS_SMOKE_DEV_SERVER_URL ?? "http://localhost:1420";
+const remotePort = Number(process.env.HILLS_SMOKE_CDP_PORT ?? 9352);
+const tmpDir = path.join(os.tmpdir(), `hills-lite-home-hero-${Date.now()}`);
+const userDataDir = path.join(tmpDir, "user-data");
+const screenshotPath = path.join(tmpDir, "home-hero.png");
+
+const png = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAkCAIAAADrrE2jAAAAWElEQVR4nO3PQQ3AMAwEwU3Sf7dONFMiNQFBZlk2zj3sntkF+LYC7AeWDywfWD6wfGD5wPKB5QPLB5YPLB9YPrB8YPnA8oHlA8sHlg8sH1g+sHxg+cDygeUDyweWDywfWD7wAJ+eAksbzo5xAAAAAElFTkSuQmCC",
+  "base64",
+);
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function run(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    windowsHide: true,
+    ...options,
+  });
+  if (result.status !== 0) {
+    throw new Error(`${command} failed: ${result.stderr || result.stdout || result.status}`);
+  }
+  return result;
+}
+
+async function ensureDevServer() {
+  try {
+    const response = await fetch(devServerUrl);
+    if (response.ok) return;
+    throw new Error(`HTTP ${response.status}`);
+  } catch (error) {
+    throw new Error(`Vite dev server is not reachable at ${devServerUrl}: ${error.message}`);
+  }
+}
+
+function json(res, value, status = 200) {
+  const body = Buffer.from(`${JSON.stringify(value)}\n`, "utf8");
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": body.byteLength,
+  });
+  res.end(body);
+}
+
+function image(res) {
+  res.writeHead(200, {
+    "Content-Type": "image/png",
+    "Content-Length": png.byteLength,
+    "Cache-Control": "no-store",
+  });
+  res.end(png);
+}
+
+const heroMovie = {
+  Id: "hero-movie",
+  Name: "Giant Screen Smoke",
+  Type: "Movie",
+  Overview:
+    "A real media-library candidate with backdrop, poster and overview copy used to verify the home hero consumes runtime library data.",
+  ProductionYear: 2026,
+  CommunityRating: 8.7,
+  OfficialRating: "PG-13",
+  RunTimeTicks: 7_200_000_000,
+  ImageTags: { Primary: "primary-tag" },
+  BackdropImageTags: ["backdrop-tag"],
+  UserData: { PlaybackPositionTicks: 0, PlayCount: 0, IsFavorite: false, Played: false },
+};
+
+const resumeItem = {
+  ...heroMovie,
+  Id: "resume-episode",
+  Name: "Resume Smoke",
+  Type: "Episode",
+  SeriesName: "Smoke Series",
+  IndexNumber: 2,
+};
+
+function createFakeEmbyServer() {
+  return http.createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    const pathname = decodeURIComponent(url.pathname);
+
+    if (req.method === "GET" && pathname === "/System/Info/Public") {
+      json(res, { ProductName: "Emby Server", ServerName: "Home Hero Smoke", Version: "4.8.0" });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/Users/AuthenticateByName") {
+      req.resume();
+      json(res, {
+        User: { Id: "home-user", Name: "Home Smoke" },
+        AccessToken: "home-token",
+      });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/Users/home-user/Views") {
+      json(res, {
+        Items: [
+          {
+            Id: "movies",
+            Name: "Movies",
+            Type: "CollectionFolder",
+            CollectionType: "movies",
+            ImageTags: { Primary: "view-tag" },
+          },
+        ],
+        TotalRecordCount: 1,
+      });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/Users/home-user/Items/Resume") {
+      json(res, { Items: [resumeItem], TotalRecordCount: 1 });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/Users/home-user/Items") {
+      json(res, { Items: [heroMovie], TotalRecordCount: 1 });
+      return;
+    }
+
+    if (req.method === "GET" && /^\/Items\/[^/]+\/Images\/(?:Primary|Backdrop)$/.test(pathname)) {
+      image(res);
+      return;
+    }
+
+    json(res, { error: "not found", path: pathname }, 404);
+  });
+}
+
+async function listen(server) {
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("fake server did not bind");
+  return `http://127.0.0.1:${address.port}`;
+}
+
+async function getTargets() {
+  for (let index = 0; index < 80; index += 1) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${remotePort}/json`);
+      if (response.ok) return response.json();
+    } catch {
+      // Electron is still starting.
+    }
+    await wait(250);
+  }
+  throw new Error("CDP target timeout");
+}
+
+async function cdpCall(ws, method, params = {}) {
+  const id = cdpCall.nextId;
+  cdpCall.nextId += 1;
+  ws.send(JSON.stringify({ id, method, params }));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${method} timeout`)), 45_000);
+    const listener = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.id !== id) return;
+      clearTimeout(timer);
+      ws.removeEventListener("message", listener);
+      if (message.error) reject(new Error(`${method}: ${JSON.stringify(message.error)}`));
+      else resolve(message.result);
+    };
+    ws.addEventListener("message", listener);
+  });
+}
+cdpCall.nextId = 1;
+
+async function cdpEval(ws, expression) {
+  const result = await cdpCall(ws, "Runtime.evaluate", {
+    expression,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
+  return result.result?.value ?? null;
+}
+
+await ensureDevServer();
+await fsp.mkdir(userDataDir, { recursive: true });
+
+const fakeServer = createFakeEmbyServer();
+const fakeBaseUrl = await listen(fakeServer);
+const electron = path.resolve("node_modules/electron/dist/electron.exe");
+const child = spawn(electron, [`--remote-debugging-port=${remotePort}`, "electron/main.mjs"], {
+  cwd: process.cwd(),
+  env: {
+    ...process.env,
+    HILLS_ELECTRON_DEV_SERVER_URL: devServerUrl,
+    HILLS_ELECTRON_OPEN_DEVTOOLS: "0",
+    HILLS_ELECTRON_USER_DATA_DIR: userDataDir,
+  },
+  stdio: ["ignore", "pipe", "pipe"],
+  windowsHide: true,
+});
+
+let ws;
+try {
+  const targets = await getTargets();
+  const target =
+    targets.find((item) => item.type === "page" && item.url.startsWith(devServerUrl)) ??
+    targets.find((item) => item.type === "page");
+  if (!target?.webSocketDebuggerUrl) throw new Error("page target not found");
+
+  ws = new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => {
+    ws.onopen = resolve;
+    ws.onerror = () => reject(new Error("websocket error"));
+  });
+  await cdpCall(ws, "Runtime.enable");
+  await cdpCall(ws, "Page.enable");
+  await wait(500);
+
+  const result = await cdpEval(ws, `
+    (async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      await wait(1000);
+      const { useAuthStore } = await import("/src/stores/auth.ts");
+      const { useLibraryStore } = await import("/src/stores/library.ts");
+      const { useServerStore } = await import("/src/stores/server.ts");
+      const auth = useAuthStore();
+      const lib = useLibraryStore();
+      const serverStore = useServerStore();
+      const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+      if (!appRouter) throw new Error("mounted Vue router not found");
+      const server = await serverStore.addServer({
+        name: "Home Hero Smoke",
+        kind: "emby",
+        activeLineId: "home-line",
+        defaultUserAgent: null,
+        lines: [{
+          id: "home-line",
+          name: "Local",
+          baseUrl: ${JSON.stringify(fakeBaseUrl)},
+          userAgent: null,
+          headers: [],
+          priority: 0,
+          enabled: true,
+        }],
+      });
+      await auth.login({ serverId: server.id, username: "home", password: "home" });
+      await appRouter.push("/home");
+      await lib.refreshHome();
+      await wait(1500);
+      const hero = document.querySelector(".hero.hero--cinema");
+      const title = document.querySelector(".hero__title");
+      const desc = document.querySelector(".hero__desc");
+      const poster = document.querySelector(".hero__poster");
+      const nextSection = document.querySelector(".row-section");
+      const heroRect = hero?.getBoundingClientRect();
+      const posterRect = poster?.getBoundingClientRect();
+      const nextRect = nextSection?.getBoundingClientRect();
+      return {
+        route: appRouter.currentRoute.value.fullPath,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        hero: heroRect ? { x: heroRect.x, y: heroRect.y, width: heroRect.width, height: heroRect.height, bottom: heroRect.bottom } : null,
+        poster: posterRect ? { width: posterRect.width, height: posterRect.height } : null,
+        nextSectionTop: nextRect?.top ?? null,
+        title: title?.textContent ?? "",
+        desc: desc?.textContent ?? "",
+        heroItems: lib.heroItems.length,
+        resumeItems: lib.resume.length,
+        views: lib.views.length,
+        heroBg: getComputedStyle(document.querySelector(".hero__bg")).backgroundImage,
+        errors: Array.from(document.querySelectorAll(".error, .alert, .toast--error")).map((node) => node.textContent),
+      };
+    })()
+  `);
+
+  const screenshot = await cdpCall(ws, "Page.captureScreenshot", { format: "png" });
+  await fsp.writeFile(screenshotPath, Buffer.from(screenshot.data, "base64"));
+
+  const failures = [];
+  if (result.route !== "/home") failures.push(`route ${result.route}`);
+  if (!result.hero) failures.push("hero missing");
+  if (!result.title.includes(heroMovie.Name)) failures.push("hero title missing media item");
+  if (!result.desc.includes("real media-library candidate")) failures.push("hero overview missing");
+  if (result.heroItems < 1) failures.push("hero items missing");
+  if (result.views < 1) failures.push("library views missing");
+  if (!result.heroBg.includes("hills-image://media")) failures.push("hero backdrop does not use media image URL");
+  if (result.hero && result.hero.height < result.viewport.height * 0.72) failures.push("hero too short");
+  if (result.hero && result.hero.height > result.viewport.height + 4) failures.push("hero taller than viewport");
+  if (result.nextSectionTop == null || result.nextSectionTop > result.viewport.height + 2) {
+    failures.push("next section is not hinted in first viewport");
+  }
+  if (!result.poster || result.poster.width < 200) failures.push("cinema poster too small or missing");
+  if (result.errors.length > 0) failures.push(`page errors: ${result.errors.join(" | ")}`);
+
+  if (failures.length > 0) {
+    throw new Error(`home hero smoke failed: ${failures.join("; ")}\n${JSON.stringify(result, null, 2)}`);
+  }
+
+  console.log(JSON.stringify({ ok: true, screenshotPath, ...result }, null, 2));
+} finally {
+  if (ws) ws.close();
+  child.kill();
+  fakeServer.close();
+  await wait(500);
+  try {
+    run("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+  } catch {
+    // Already exited.
+  }
+}

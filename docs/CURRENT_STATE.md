@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（浏览器可视路由复核）
+> **更新时间**：2026-06-01（首页巨幕 Electron 回归）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-2008-browser-visual-route-check.md`](./CHANGE_LOG/2026-06-01-2008-browser-visual-route-check.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-2015-home-hero-electron-smoke.md`](./CHANGE_LOG/2026-06-01-2015-home-hero-electron-smoke.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：首页巨幕完成 Electron 桌面回归：新增 `scripts/smoke-electron-home-hero.mjs`，用本地假 Emby 返回媒体库、继续观看、电影 / 剧集候选、Primary 海报与 Backdrop 图；Electron CDP 登录本地假账号并进入 `/home` 后，确认巨幕标题、简介、Backdrop 与海报都来自媒体库候选。当前 smoke 视口 `1266x763`，Hero 为 `1036.8x691.2`，下一段内容顶部位于 `735.2px`，即首屏主体足够大且后续内容仍有露出；海报为 `278.6x417.9`，Backdrop 使用 `hills-image://media/.../Backdrop?width=2200...`。验证已覆盖脚本语法、`check:no-planned-ui`、dev server HTTP 可达、Electron 首页 smoke 与 `git diff --check`，验证后已停止 dev server。
 
 **2026-06-01**：浏览器可视路由复核未记为通过：本轮 `npm.cmd run dev` 成功启动本地预览，`/` 与 `/settings?c=servers` 均返回 HTTP 200；但 Codex in-app Browser 当前会话没有可用路由，因此未完成首页巨幕或设置页截图目检。验证后已停止本轮 dev server，避免后台端口残留；真正视觉通过仍以可用浏览器通道或 Electron smoke 截图为准。
 
