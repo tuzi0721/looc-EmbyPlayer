@@ -132,8 +132,8 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 .hero--cinema {
-  height: clamp(560px, calc(100dvh - 168px), 820px);
-  min-height: 520px;
+  height: clamp(640px, calc(100dvh - 96px), 900px);
+  min-height: 600px;
 }
 .hero__bg {
   position: absolute;
@@ -186,9 +186,9 @@ onUnmounted(() => {
   cursor: pointer;
 }
 .hero--cinema .hero__content {
-  left: clamp(28px, 6vw, 72px);
-  bottom: clamp(40px, 7vh, 78px);
-  max-width: min(780px, 58%);
+  left: clamp(36px, 7vw, 96px);
+  bottom: clamp(56px, 8vh, 96px);
+  max-width: min(860px, 60%);
 }
 .hero__poster {
   appearance: none;
@@ -207,8 +207,8 @@ onUnmounted(() => {
   cursor: pointer;
 }
 .hero--cinema .hero__poster {
-  right: clamp(40px, 8vw, 120px);
-  width: clamp(180px, 18vw, 290px);
+  right: clamp(48px, 8vw, 132px);
+  width: clamp(220px, 20vw, 340px);
 }
 .hero__poster img {
   display: block;
@@ -225,7 +225,7 @@ onUnmounted(() => {
   line-height: 1.08;
 }
 .hero--cinema .hero__title {
-  font-size: 68px;
+  font-size: 76px;
   max-width: 12em;
 }
 .hero__meta {
@@ -244,8 +244,8 @@ onUnmounted(() => {
   overflow: hidden;
 }
 .hero--cinema .hero__desc {
-  max-width: 62ch;
-  font-size: 14px;
+  max-width: 66ch;
+  font-size: 15px;
   -webkit-line-clamp: 4;
 }
 .hero__dots {
@@ -277,8 +277,8 @@ onUnmounted(() => {
     min-height: 340px;
   }
   .hero--cinema {
-    height: min(72dvh, 620px);
-    min-height: 420px;
+    height: min(78dvh, 680px);
+    min-height: 480px;
   }
   .hero--cinema .hero__content {
     left: 18px;

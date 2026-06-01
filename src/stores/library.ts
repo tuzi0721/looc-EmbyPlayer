@@ -17,26 +17,55 @@ export const useLibraryStore = defineStore("library", () => {
   const searching = ref(false);
   const searchResults = ref<MediaItem[]>([]);
 
+  const heroFields = "PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo,RunTimeTicks,CommunityRating,OfficialRating";
+  const heroImageParams: [string, string][] = [
+    ["EnableUserData", "true"],
+    ["EnableImages", "true"],
+    ["ImageTypeLimit", "2"],
+    ["EnableImageTypes", "Primary,Backdrop"],
+  ];
+
+  async function loadHeroCandidates(includeTypes: string, limit = "36") {
+    return api.listItems({
+      params: [
+        ["Recursive", "true"],
+        ["IncludeItemTypes", includeTypes],
+        ["Fields", heroFields],
+        ["SortBy", "DateCreated"],
+        ["SortOrder", "Descending"],
+        ["Limit", limit],
+        ...heroImageParams,
+      ],
+    });
+  }
+
+  function preferVisualHeroItems(items: MediaItem[]) {
+    const visual = items.filter(
+      (item) =>
+        item.BackdropImageTags?.length ||
+        item.ImageTags?.Primary ||
+        item.Overview?.trim(),
+    );
+    return visual.length > 0 ? visual : items;
+  }
+
   async function refreshHome() {
     loading.value = true;
     try {
       const [viewsResp, resumeResp, heroResp] = await Promise.all([
         api.listViews(),
         api.resumeItems(),
-        api.listItems({
-          params: [
-            ["Recursive", "true"],
-            ["IncludeItemTypes", "Movie,Series,Episode"],
-            ["Fields", "PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo,RunTimeTicks"],
-            ["SortBy", "DateCreated"],
-            ["SortOrder", "Descending"],
-            ["Limit", "18"],
-          ],
-        }),
+        loadHeroCandidates("Movie,Series"),
       ]);
+      const heroFallbackResp =
+        heroResp.Items.length > 0
+          ? heroResp
+          : await loadHeroCandidates("Movie,Series,Episode", "18");
       views.value = viewsResp.Items;
       resume.value = filterJavItems(resumeResp.Items, settings.settings.hideJavCodes);
-      const filteredHeroItems = filterJavItems(heroResp.Items, settings.settings.hideJavCodes);
+      const filteredHeroItems = preferVisualHeroItems(
+        filterJavItems(heroFallbackResp.Items, settings.settings.hideJavCodes),
+      );
       heroItems.value = filteredHeroItems.length > 0 ? filteredHeroItems : resume.value;
     } finally {
       loading.value = false;
