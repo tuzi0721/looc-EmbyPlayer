@@ -8,8 +8,9 @@
   "main": "electron/main.mjs",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "npm run check:local-decode && vue-tsc --noEmit && vite build",
     "check:electron-commands": "node scripts/check-electron-command-coverage.mjs",
+    "check:local-decode": "node scripts/check-local-decode-guard.mjs",
     "check:electron-dist": "node scripts/check-electron-dist.mjs",
     "check:electron-package": "node scripts/check-electron-package.mjs",
     "check:tauri-package": "node scripts/check-tauri-package.mjs",

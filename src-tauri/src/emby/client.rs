@@ -417,6 +417,9 @@ impl EmbyClient {
             enable_transcoding: false,
             enable_video_stream_copy: true,
             enable_audio_stream_copy: true,
+            device_profile: Some(PlaybackDeviceProfile::direct_only(
+                "Hills Lite Tauri Local Decode",
+            )),
         };
         let resp = self
             .authed_request(Method::POST, url, server, account, &line)?

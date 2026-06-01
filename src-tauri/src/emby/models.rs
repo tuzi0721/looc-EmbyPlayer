@@ -337,6 +337,79 @@ pub struct PlaybackInfoRequest {
     pub enable_video_stream_copy: bool,
     #[serde(default)]
     pub enable_audio_stream_copy: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_profile: Option<PlaybackDeviceProfile>,
+}
+
+const DIRECT_VIDEO_CONTAINERS: &[&str] = &[
+    "mp4", "m4v", "mov", "mkv", "webm", "avi", "wmv", "flv", "ts", "m2ts", "mpeg", "mpg", "3gp",
+    "ogv", "rmvb",
+];
+const DIRECT_AUDIO_CONTAINERS: &[&str] = &[
+    "mp3", "aac", "flac", "ogg", "opus", "wav", "m4a", "ape", "alac",
+];
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct PlaybackDeviceProfile {
+    pub name: String,
+    pub max_streaming_bitrate: i64,
+    pub direct_play_profiles: Vec<DirectPlayProfile>,
+    pub transcoding_profiles: Vec<Value>,
+    pub subtitle_profiles: Vec<SubtitleProfile>,
+}
+
+impl PlaybackDeviceProfile {
+    pub fn direct_only(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            max_streaming_bitrate: 140_000_000,
+            direct_play_profiles: vec![
+                DirectPlayProfile {
+                    profile_type: "Video".to_string(),
+                    container: DIRECT_VIDEO_CONTAINERS.join(","),
+                },
+                DirectPlayProfile {
+                    profile_type: "Audio".to_string(),
+                    container: DIRECT_AUDIO_CONTAINERS.join(","),
+                },
+            ],
+            transcoding_profiles: Vec::new(),
+            subtitle_profiles: vec![
+                SubtitleProfile {
+                    format: "vtt".to_string(),
+                    method: "External".to_string(),
+                },
+                SubtitleProfile {
+                    format: "srt".to_string(),
+                    method: "External".to_string(),
+                },
+                SubtitleProfile {
+                    format: "ass".to_string(),
+                    method: "External".to_string(),
+                },
+                SubtitleProfile {
+                    format: "ssa".to_string(),
+                    method: "External".to_string(),
+                },
+            ],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct DirectPlayProfile {
+    #[serde(rename = "Type")]
+    pub profile_type: String,
+    pub container: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct SubtitleProfile {
+    pub format: String,
+    pub method: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

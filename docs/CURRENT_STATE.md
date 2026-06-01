@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（首页巨幕真实媒体候选增强）
+> **更新时间**：2026-06-01（本机解码构建门禁）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1753-home-hero-library-candidates.md`](./CHANGE_LOG/2026-06-01-1753-home-hero-library-candidates.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1803-local-decode-build-guard.md`](./CHANGE_LOG/2026-06-01-1803-local-decode-build-guard.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：本机解码硬约束升级为构建门禁：新增 `scripts/check-local-decode-guard.mjs` 与 `npm run check:local-decode`，扫描 Electron、Web Preview、Tauri 和脚本源码，禁止 `TranscodingUrl`、`master.m3u8`、`EnableTranscoding: true` / `enable_transcoding: true`、`PlayMethod=Transcode` 和非空 `TranscodingProfiles` 重新进入播放链路；`npm run build` 已前置执行该门禁，因此 Electron 打包和 Tauri 前端构建都会自动拦截服务端转码回归。Tauri `PlaybackInfo` 请求同步补齐 Direct Play only `DeviceProfile`，明确发送空 `TranscodingProfiles`，与 Electron / Web Preview 的本机解码策略保持一致。验证已覆盖 `node --check scripts\check-local-decode-guard.mjs`、`npm.cmd run check:local-decode`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets`、`npm.cmd run build` 与 `npm.cmd run electron:build`。
 
 **2026-06-01**：首页巨幕真实媒体候选继续增强：刷新首页时优先从当前账号媒体库拉取电影 / 剧集条目，显式请求 `Primary`、`Backdrop`、简介、年份、评分、播放状态和运行时长字段；只有电影 / 剧集完全没有候选时才回退到单集。候选池会优先使用带 Backdrop、Primary 或简介的真实媒体，减少空白数据占据巨幕。`cinema` 模式高度、标题、简介和右侧海报同步放大，内容定位下移但不再留下大片空底，首屏更接近真正的媒体巨幕。验证已覆盖 `npm.cmd run build`、`git diff --check`、`npm.cmd run electron:build` 与本地 1420 首页 HTTP 200；in-app Browser 本轮仍无可用路由，未完成截图目检。
 
