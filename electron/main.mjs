@@ -1208,11 +1208,18 @@ async function playAlistFile(payload = {}) {
   await applySubtitleStyle(settings).catch((error) => {
     console.warn("failed to apply subtitle style", error);
   });
+  const subtitles = normalizeWebDavSidecarSubtitles(payload.sidecarSubtitles);
+  const subtitleResult = await addWebDavSidecarSubtitles(subtitles).catch((error) => {
+    console.warn("failed to load Alist sidecar subtitles", error);
+    return { loaded: 0, loadedFiles: [] };
+  });
   currentPlaySession = null;
   writePlaybackLog("alist_file_loaded", {
     title,
     url: parsed.toString(),
     startMs: payload.startMs ?? null,
+    sidecarSubtitleCount: subtitleResult.loaded,
+    sidecarSubtitleFiles: subtitleResult.loadedFiles,
   });
 }
 

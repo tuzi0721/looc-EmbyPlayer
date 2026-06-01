@@ -820,6 +820,56 @@ function alistEntryFromItem(root: URL, currentPath: string, item: unknown): Alis
   };
 }
 
+function alistSidecarSubtitlesFor(videoEntry: AlistEntry, entries: AlistEntry[]) {
+  if (!videoEntry.playable) return [];
+  const videoStem = webDavStemFromName(videoEntry.name);
+  return entries
+    .filter((entry) => !entry.isDirectory && WEB_DAV_SUBTITLE_EXTENSIONS.has(entry.extension))
+    .map((entry) => {
+      const rank = webDavSidecarSubtitleRank(videoStem, webDavStemFromName(entry.name));
+      if (rank == null) return null;
+      return {
+        name: entry.name,
+        url: entry.url,
+        extension: entry.extension,
+        rank,
+        extRank: WEB_DAV_SUBTITLE_EXTENSIONS.get(entry.extension) ?? 99,
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry != null)
+    .sort((left, right) => left.rank - right.rank || left.extRank - right.extRank || left.name.localeCompare(right.name))
+    .slice(0, 8)
+    .map(({ name, url, extension }) => ({ name, url, extension }));
+}
+
+function alistSidecarDanmakuFor(videoEntry: AlistEntry, entries: AlistEntry[]) {
+  if (!videoEntry.playable) return null;
+  const videoStem = webDavStemFromName(videoEntry.name).toLocaleLowerCase();
+  const candidates = new Set([
+    `${videoStem}.xml`,
+    `${videoStem}.danmaku.xml`,
+    `${videoStem}.comments.xml`,
+  ]);
+  const match = entries.find(
+    (entry) => !entry.isDirectory && entry.extension === "xml" && candidates.has(entry.name.toLocaleLowerCase()),
+  );
+  return match ? { name: match.name, url: match.url } : null;
+}
+
+function alistAnnotateSidecars(entries: AlistEntry[]) {
+  return entries.map((entry) => {
+    if (!entry.playable) return entry;
+    const sidecarSubtitles = alistSidecarSubtitlesFor(entry, entries);
+    const sidecarDanmaku = alistSidecarDanmakuFor(entry, entries);
+    return {
+      ...entry,
+      sidecarSubtitleCount: sidecarSubtitles.length,
+      sidecarSubtitles,
+      sidecarDanmaku,
+    };
+  });
+}
+
 async function webListAlistFolder(payload: any): Promise<AlistListing> {
   const root = alistRootUrl(payload?.baseUrl);
   const path = webDavRelativePath(payload?.path);
@@ -846,9 +896,11 @@ async function webListAlistFolder(payload: any): Promise<AlistListing> {
   if (!response.ok) throw new Error(`Alist list failed: HTTP ${response.status}`);
   const data = alistAssertData(await response.json(), "list");
   const content: unknown[] = Array.isArray(data.content) ? data.content : [];
-  const items = content
-    .map((item: unknown) => alistEntryFromItem(root, path, item))
-    .filter((entry): entry is NonNullable<typeof entry> => entry != null)
+  const items = alistAnnotateSidecars(
+    content
+      .map((item: unknown) => alistEntryFromItem(root, path, item))
+      .filter((entry): entry is NonNullable<typeof entry> => entry != null),
+  )
     .sort((left: AlistEntry, right: AlistEntry) => {
       if (left.isDirectory !== right.isDirectory) return left.isDirectory ? -1 : 1;
       return left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" });

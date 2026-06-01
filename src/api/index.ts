@@ -186,6 +186,9 @@ export interface AlistEntry {
   thumb?: string | null;
   sign?: string | null;
   playable: boolean;
+  sidecarSubtitleCount?: number;
+  sidecarSubtitles?: WebDavSidecarSubtitle[];
+  sidecarDanmaku?: WebDavSidecarDanmaku | null;
 }
 
 export interface AlistListing {
@@ -460,6 +463,8 @@ export const api = {
     title?: string | null;
     token?: string | null;
     userAgent?: string | null;
+    sidecarSubtitles?: WebDavSidecarSubtitle[];
+    sidecarDanmaku?: WebDavSidecarDanmaku | null;
     startMs?: number | null;
   }) => invoke<void>("play_alist_file", { payload }),
 

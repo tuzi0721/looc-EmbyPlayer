@@ -1,0 +1,21 @@
+# Alist / OpenList 同名侧挂资源
+
+- **动机**：Alist / OpenList 页面已经可以浏览和播放视频，但同目录同名字幕与 XML 弹幕还不能像 WebDAV 一样被识别和带入播放器。
+- **改动**：
+  - `electron/backend/alist.mjs` — 列表解析后按同名和语言/版本后缀识别 `.srt/.ass/.ssa/.vtt` 字幕，并识别 `同名.xml`、`同名.danmaku.xml`、`同名.comments.xml` 弹幕。
+  - `electron/main.mjs` — `play_alist_file` 加载内嵌 mpv 后会尝试添加 Alist 侧挂字幕，并在播放日志中记录脱敏后的侧挂加载结果。
+  - `src/platform/index.ts` — Web Preview fallback 同步识别 Alist 侧挂字幕与 XML 弹幕。
+  - `src/api/index.ts` 与 `src/stores/player.ts` — Alist 条目和 direct queue 支持侧挂字幕/弹幕字段。
+  - `src/views/AlistView.vue` — 列表展示“字幕 N”和“XML 弹幕”提示，搜索可匹配字幕/弹幕关键字，播放队列携带侧挂资源。
+  - `scripts/smoke-alist-connector.mjs` — mock Alist 目录新增同名字幕和 XML 弹幕，断言侧挂关联结果。
+  - `docs/CURRENT_STATE.md` — 记录 Alist / OpenList 同名侧挂资源已落地，并更新 Phase 2 文件源能力边界。
+- **验证**：
+  - `node --check electron\backend\alist.mjs`
+  - `node --check electron\main.mjs`
+  - `node --check scripts\smoke-alist-connector.mjs`
+  - `node scripts\smoke-alist-connector.mjs`
+  - `npm.cmd run build`
+  - `git diff --check`
+  - 敏感关键字扫描
+- **结果**：通过；语法检查、mock Alist API smoke、构建、空白检查与敏感扫描均已完成。
+- **风险**：本阶段以签名 `/d/...` URL 作为侧挂资源地址；真实站点如果禁用签名直链或有额外路径密码策略，仍需要后续真实站点回归覆盖。

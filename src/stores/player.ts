@@ -127,6 +127,8 @@ export const usePlayerStore = defineStore("player", () => {
     title?: string | null;
     sourceLabel?: string | null;
     token?: string | null;
+    sidecarSubtitles?: WebDavSidecarSubtitle[];
+    sidecarDanmaku?: WebDavSidecarDanmaku | null;
     startMs?: number | null;
   }) {
     await api.playAlistFile(payload);

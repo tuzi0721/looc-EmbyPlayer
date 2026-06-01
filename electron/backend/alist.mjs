@@ -15,6 +15,12 @@ const videoExtensions = new Set([
   "ogv",
   "rmvb",
 ]);
+const subtitleExtensions = new Map([
+  ["srt", 0],
+  ["ass", 1],
+  ["ssa", 2],
+  ["vtt", 3],
+]);
 
 function stringFrom(value) {
   if (typeof value === "string") return value;
@@ -73,6 +79,71 @@ function joinRelativePath(parent, name, isDirectory) {
 function extensionFromName(name) {
   const index = name.lastIndexOf(".");
   return index >= 0 ? name.slice(index + 1).toLowerCase() : "";
+}
+
+function stemFromName(name) {
+  const index = name.lastIndexOf(".");
+  return index >= 0 ? name.slice(0, index) : name;
+}
+
+function sidecarSubtitleRank(videoStem, subtitleStem) {
+  const video = videoStem.toLowerCase();
+  const subtitle = subtitleStem.toLowerCase();
+  if (subtitle === video) return 0;
+  for (const separator of [".", " ", "_", "-"]) {
+    if (subtitle.startsWith(`${video}${separator}`)) return 1;
+  }
+  return null;
+}
+
+function sidecarSubtitlesFor(videoEntry, entries) {
+  if (!videoEntry.playable) return [];
+  const videoStem = stemFromName(videoEntry.name);
+  return entries
+    .filter((entry) => !entry.isDirectory && subtitleExtensions.has(entry.extension))
+    .map((entry) => {
+      const rank = sidecarSubtitleRank(videoStem, stemFromName(entry.name));
+      if (rank == null) return null;
+      return {
+        name: entry.name,
+        url: entry.url,
+        extension: entry.extension,
+        rank,
+        extRank: subtitleExtensions.get(entry.extension) ?? 99,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.rank - right.rank || left.extRank - right.extRank || left.name.localeCompare(right.name))
+    .slice(0, 8)
+    .map(({ name, url, extension }) => ({ name, url, extension }));
+}
+
+function sidecarDanmakuFor(videoEntry, entries) {
+  if (!videoEntry.playable) return null;
+  const videoStem = stemFromName(videoEntry.name).toLowerCase();
+  const candidates = new Set([
+    `${videoStem}.xml`,
+    `${videoStem}.danmaku.xml`,
+    `${videoStem}.comments.xml`,
+  ]);
+  const match = entries.find(
+    (entry) => !entry.isDirectory && entry.extension === "xml" && candidates.has(entry.name.toLowerCase()),
+  );
+  return match ? { name: match.name, url: match.url } : null;
+}
+
+function annotateSidecars(entries) {
+  return entries.map((entry) => {
+    if (!entry.playable) return entry;
+    const sidecarSubtitles = sidecarSubtitlesFor(entry, entries);
+    const sidecarDanmaku = sidecarDanmakuFor(entry, entries);
+    return {
+      ...entry,
+      sidecarSubtitleCount: sidecarSubtitles.length,
+      sidecarSubtitles,
+      sidecarDanmaku,
+    };
+  });
 }
 
 function modifiedTimeMs(value) {
@@ -191,9 +262,11 @@ export class AlistClient {
         refresh: payload.refresh === true,
       },
     });
-    const items = (Array.isArray(data.content) ? data.content : [])
-      .map((item) => entryFromContent(rootUrl, relativePath, item))
-      .filter(Boolean)
+    const items = annotateSidecars(
+      (Array.isArray(data.content) ? data.content : [])
+        .map((item) => entryFromContent(rootUrl, relativePath, item))
+        .filter(Boolean),
+    )
       .sort((left, right) => {
         if (left.isDirectory !== right.isDirectory) return left.isDirectory ? -1 : 1;
         return left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" });
