@@ -62,6 +62,8 @@ const EMPTY_STATE = {
   accounts: [],
   activeAccountId: null,
   notifications: [],
+  notificationsClearedAt: null,
+  clearedNotificationKeys: [],
   downloads: [],
   globalShortcuts: DEFAULT_GLOBAL_SHORTCUTS,
 };
@@ -101,6 +103,12 @@ function textOrNull(value) {
   if (typeof value !== "string") return null;
   const text = value.trim();
   return text.length > 0 ? text : null;
+}
+
+function isoOrNull(value) {
+  const text = textOrNull(value);
+  if (!text) return null;
+  return Number.isNaN(Date.parse(text)) ? null : text;
 }
 
 function normalizeNotificationAction(value) {
@@ -143,6 +151,36 @@ function normalizeNotifications(value) {
     .filter(Boolean)
     .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
     .slice(0, 100);
+}
+
+function notificationKey(value) {
+  const sourceId = textOrNull(value?.sourceId) ?? textOrNull(value?.source_id);
+  const title = textOrNull(value?.title);
+  if (!sourceId || !title) return null;
+  const actionKind = textOrNull(value?.action?.kind) ?? "";
+  return [
+    oneOf(value.category, ["download", "server", "auth", "system"], "system"),
+    sourceId,
+    oneOf(value.kind, ["info", "success", "warning", "error"], "info"),
+    title,
+    actionKind,
+  ].join("\u0000");
+}
+
+function normalizeNotificationKeys(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map(textOrNull).filter(Boolean))].slice(-250);
+}
+
+function filterClearedNotifications(notifications, clearedAt, clearedKeys) {
+  const clearedTime = clearedAt ? Date.parse(clearedAt) : null;
+  const keys = new Set(clearedKeys);
+  return notifications.filter((notification) => {
+    const key = notificationKey(notification);
+    if (key && keys.has(key)) return false;
+    if (clearedTime != null && Date.parse(notification.createdAt) <= clearedTime) return false;
+    return true;
+  });
 }
 
 function numberOrNull(value) {
@@ -313,6 +351,8 @@ async function readLegacyTauriState() {
         parsed.global_shortcuts ?? parsed.globalShortcuts,
         DEFAULT_GLOBAL_SHORTCUTS,
       ),
+      notificationsClearedAt: null,
+      clearedNotificationKeys: [],
     };
   } catch (error) {
     if (error.code === "ENOENT") return null;
@@ -339,7 +379,13 @@ export class JsonStore {
         settings: normalizeSettings(parsed.settings),
         servers: Array.isArray(parsed.servers) ? parsed.servers : [],
         accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
-        notifications: normalizeNotifications(parsed.notifications),
+        notificationsClearedAt: isoOrNull(parsed.notificationsClearedAt),
+        clearedNotificationKeys: normalizeNotificationKeys(parsed.clearedNotificationKeys),
+        notifications: filterClearedNotifications(
+          normalizeNotifications(parsed.notifications),
+          isoOrNull(parsed.notificationsClearedAt),
+          normalizeNotificationKeys(parsed.clearedNotificationKeys),
+        ),
         downloads: normalizeDownloads(parsed.downloads),
         globalShortcuts: normalizeGlobalShortcuts(parsed.globalShortcuts),
       };
@@ -360,7 +406,18 @@ export class JsonStore {
     if (this.state.servers.length === 0 && this.state.accounts.length === 0) {
       const legacy = await readLegacyTauriState();
       if (legacy && (legacy.servers.length > 0 || legacy.accounts.length > 0)) {
-        this.state = legacy;
+        const notificationsClearedAt = this.state.notificationsClearedAt;
+        const clearedNotificationKeys = this.state.clearedNotificationKeys;
+        this.state = {
+          ...legacy,
+          notificationsClearedAt,
+          clearedNotificationKeys,
+          notifications: filterClearedNotifications(
+            legacy.notifications,
+            notificationsClearedAt,
+            clearedNotificationKeys,
+          ),
+        };
         await this.save();
       }
     }
@@ -494,7 +551,18 @@ export class JsonStore {
       ...spec,
     });
     if (!notification) throw new Error("invalid notification");
-    this.state.notifications.unshift(notification);
+    const key = notificationKey(notification);
+    if (key && this.state.clearedNotificationKeys.includes(key)) return null;
+    const existingIndex = key
+      ? this.state.notifications.findIndex((item) => notificationKey(item) === key)
+      : -1;
+    if (existingIndex >= 0) {
+      notification.id = this.state.notifications[existingIndex].id;
+      notification.read = this.state.notifications[existingIndex].read;
+      this.state.notifications[existingIndex] = notification;
+    } else {
+      this.state.notifications.unshift(notification);
+    }
     this.state.notifications = normalizeNotifications(this.state.notifications);
     await this.save();
     return structuredClone(notification);
@@ -507,6 +575,9 @@ export class JsonStore {
 
   async dismissNotification(id) {
     await this.load();
+    const notification = this.state.notifications.find((item) => item.id === id);
+    const key = notificationKey(notification);
+    if (key) this.state.clearedNotificationKeys = normalizeNotificationKeys([...this.state.clearedNotificationKeys, key]);
     this.state.notifications = this.state.notifications.filter((item) => item.id !== id);
     await this.save();
   }
@@ -526,6 +597,12 @@ export class JsonStore {
 
   async clearNotifications() {
     await this.load();
+    const keys = this.state.notifications.map(notificationKey).filter(Boolean);
+    this.state.notificationsClearedAt = new Date().toISOString();
+    this.state.clearedNotificationKeys = normalizeNotificationKeys([
+      ...this.state.clearedNotificationKeys,
+      ...keys,
+    ]);
     this.state.notifications = [];
     await this.save();
   }

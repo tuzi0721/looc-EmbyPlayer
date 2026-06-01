@@ -1190,6 +1190,7 @@ async function emitNotificationUnread() {
 
 async function pushNotification(spec) {
   const notification = await store.pushNotification(spec);
+  if (!notification) return null;
   emitAppEvent("notification:new", notification);
   await emitNotificationUnread();
   return notification;

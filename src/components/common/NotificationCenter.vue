@@ -428,6 +428,36 @@ function close() {
   color: var(--danger);
 }
 
+:global(:root[data-theme="light"]) .overlay {
+  background: rgba(18, 24, 38, 0.16);
+}
+
+:global(:root[data-theme="light"]) .drawer {
+  background: rgba(255, 255, 255, 0.94);
+}
+
+:global(:root[data-theme="light"]) .title .dim,
+:global(:root[data-theme="light"]) .iconbtn:hover:not(:disabled),
+:global(:root[data-theme="light"]) .ghost:hover {
+  background: rgba(18, 24, 38, 0.07);
+}
+
+:global(:root[data-theme="light"]) .tab {
+  background: rgba(18, 24, 38, 0.04);
+}
+
+:global(:root[data-theme="light"]) .tab .count {
+  background: rgba(18, 24, 38, 0.08);
+}
+
+:global(:root[data-theme="light"]) .item {
+  background: rgba(18, 24, 38, 0.035);
+}
+
+:global(:root[data-theme="light"]) .item__icon {
+  background: rgba(18, 24, 38, 0.06);
+}
+
 .drawer-enter-active,
 .drawer-leave-active {
   transition: transform 260ms var(--easing-glide);

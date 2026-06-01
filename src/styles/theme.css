@@ -32,6 +32,7 @@
   --glass-blur: 24px;
   --glass-saturate: 180%;
   --glass-bg: rgba(28, 28, 32, 0.55);
+  --glass-bg-thin: rgba(28, 28, 32, 0.35);
   --glass-bg-strong: rgba(28, 28, 32, 0.72);
   --glass-border: rgba(255, 255, 255, 0.10);
   --glass-border-strong: rgba(255, 255, 255, 0.18);
@@ -76,9 +77,17 @@
   --separator-strong: rgba(0, 0, 0, 0.14);
 
   --glass-bg: rgba(255, 255, 255, 0.55);
-  --glass-bg-strong: rgba(255, 255, 255, 0.78);
+  --glass-bg-thin: rgba(255, 255, 255, 0.72);
+  --glass-bg-strong: rgba(255, 255, 255, 0.86);
   --glass-border: rgba(0, 0, 0, 0.06);
   --glass-border-strong: rgba(0, 0, 0, 0.10);
+  --glass-shadow: 0 12px 34px rgba(18, 24, 38, 0.12);
+
+  --line-unknown: rgba(0, 0, 0, 0.32);
+
+  --surface-1: #ffffff;
+  --surface-2: #f4f6fa;
+  --surface-3: #e8edf5;
 
   color-scheme: light;
 }
@@ -142,6 +151,9 @@ textarea {
   background: rgba(255, 255, 255, 0.15);
   border-radius: 999px;
 }
+:root[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(18, 24, 38, 0.22);
+}
 ::-webkit-scrollbar-track {
   background: transparent;
 }
@@ -168,6 +180,15 @@ textarea {
   opacity: 0.6;
 }
 
+:root[data-theme="light"] .app-backdrop {
+  background: linear-gradient(180deg, #fbfcff 0%, #eef2f8 100%);
+}
+
+:root[data-theme="light"] .app-backdrop::after {
+  background-image: radial-gradient(rgba(18, 24, 38, 0.035) 1px, transparent 1px);
+  opacity: 0.75;
+}
+
 /* WebView2 on Windows: backdrop-filter + window move causes severe UI freeze. */
 html.platform-windows .app-sidebar,
 html.platform-windows .topbar,
@@ -178,8 +199,8 @@ html.platform-windows .glass-thin {
   backdrop-filter: none !important;
 }
 html.platform-windows .app-sidebar {
-  background: rgba(22, 22, 26, 0.96);
+  background: var(--glass-bg-strong);
 }
 html.platform-windows .topbar {
-  background: rgba(22, 22, 26, 0.92);
+  background: var(--surface-1);
 }

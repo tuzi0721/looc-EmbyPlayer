@@ -13,7 +13,7 @@
 }
 
 .glass-thin {
-  background: rgba(28, 28, 32, 0.35);
+  background: var(--glass-bg-thin);
   -webkit-backdrop-filter: blur(18px) saturate(160%);
   backdrop-filter: blur(18px) saturate(160%);
   border: 1px solid var(--glass-border);

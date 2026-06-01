@@ -4,7 +4,7 @@
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-0410-sidebar-collapse.md`](./CHANGE_LOG/2026-06-02-0410-sidebar-collapse.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-0422-light-theme-notification-clear.md`](./CHANGE_LOG/2026-06-02-0422-light-theme-notification-clear.md)
 
 ---
 
@@ -52,6 +52,8 @@
 - 首页巨幕默认启用 cinema 布局，从当前媒体库候选读取 Backdrop、简介、年份、播放状态与运行时信息；右侧额外海报已移除，巨幕整块可点击进入当前媒体详情，剧集标题优先使用系列名并把单集名放入副标题。
 - 收藏、历史、聚合视界和搜索已支持跨已登录账号聚合；条目保留来源服务器/账号，同名或同 ID 的不同服务器记录不会互相覆盖，点进条目会切到对应账号再进入详情/播放链路。
 - 收藏、历史和聚合视界中的个人媒体卡统一为横向比例；卡片取图会从自身 Backdrop 回退到系列图或 Primary，Electron smoke 已覆盖缺 Backdrop 时仍能成功解码。
+- 亮色主题在 Windows WebView2 无模糊降级下仍使用浅色侧栏/顶栏/薄玻璃层；通知抽屉也有亮色可读背景、悬停态和列表项。
+- 通知清空由后端持久化记录清除时间与来源键；同一下载/来源通知在清空、重启 store 或旧状态导入后不会再次冒出，新来源通知仍可正常进入。
 - 详情页展示媒体信息、版本能力、剧集、演职人员、相似内容、附加内容、类型/人员/工作室跳转和桌面下载入口。
 
 ---
@@ -115,6 +117,7 @@ node --check scripts\smoke-electron-embedded-local.mjs
 node scripts\smoke-electron-embedded-local.mjs
 node --check scripts\smoke-electron-home-hero.mjs
 node scripts\smoke-electron-home-hero.mjs
+node scripts\check-notification-clear.mjs
 ```
 
 当前最新阶段已验证：
@@ -123,6 +126,7 @@ node scripts\smoke-electron-home-hero.mjs
 - `npm.cmd run build`
 - `npm.cmd run check:no-planned-ui`
 - `npm.cmd run check:electron-commands`
+- `node scripts\check-notification-clear.mjs`
 - `node --check electron\main.mjs`
 - `node --check scripts\smoke-electron-home-hero.mjs`
 - `node scripts\smoke-electron-home-hero.mjs`

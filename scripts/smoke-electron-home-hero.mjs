@@ -277,11 +277,32 @@ try {
       const { useAuthStore } = await import("/src/stores/auth.ts");
       const { useLibraryStore } = await import("/src/stores/library.ts");
       const { useServerStore } = await import("/src/stores/server.ts");
+      const { useSettingsStore } = await import("/src/stores/settings.ts");
       const auth = useAuthStore();
       const lib = useLibraryStore();
       const serverStore = useServerStore();
+      const settings = useSettingsStore();
       const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
       if (!appRouter) throw new Error("mounted Vue router not found");
+      await settings.update({ theme: "light" });
+      await wait(120);
+      const rgb = (value) => {
+        const match = String(value).match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
+        return match ? match.slice(1, 4).map(Number) : [];
+      };
+      const avg = (value) => {
+        const parsed = rgb(value);
+        return parsed.length === 3 ? parsed.reduce((sum, item) => sum + item, 0) / 3 : null;
+      };
+      const lightTheme = {
+        rootTheme: document.documentElement.getAttribute("data-theme"),
+        sidebarBg: getComputedStyle(document.querySelector(".app-sidebar")).backgroundColor,
+        topbarBg: getComputedStyle(document.querySelector(".topbar")).backgroundColor,
+        fgPrimary: getComputedStyle(document.documentElement).getPropertyValue("--fg-primary").trim(),
+      };
+      lightTheme.sidebarAvg = avg(lightTheme.sidebarBg);
+      lightTheme.topbarAvg = avg(lightTheme.topbarBg);
+      lightTheme.fgAvg = avg(lightTheme.fgPrimary);
       const existingServer = await serverStore.addServer({
         name: "Existing Smoke Server",
         kind: "emby",
@@ -369,6 +390,7 @@ try {
         firstRunVisible: Boolean(firstRun),
         posterExists: Boolean(poster),
         heroBg: getComputedStyle(document.querySelector(".hero__bg")).backgroundImage,
+        lightTheme,
         errors: Array.from(document.querySelectorAll(".error, .alert, .toast--error")).map((node) => node.textContent),
       };
     })()
@@ -468,6 +490,16 @@ try {
   }
   if (result.savedServer?.baseUrl !== fakeBaseUrl) {
     failures.push(`arbitrary port URL was not preserved: ${result.savedServer?.baseUrl}`);
+  }
+  if (result.lightTheme?.rootTheme !== "light") failures.push("light theme did not apply");
+  if ((result.lightTheme?.sidebarAvg ?? 0) < 180) {
+    failures.push(`light theme sidebar stayed dark: ${JSON.stringify(result.lightTheme)}`);
+  }
+  if ((result.lightTheme?.topbarAvg ?? 0) < 180) {
+    failures.push(`light theme topbar stayed dark: ${JSON.stringify(result.lightTheme)}`);
+  }
+  if ((result.lightTheme?.fgAvg ?? 255) > 80) {
+    failures.push(`light theme foreground stayed light: ${JSON.stringify(result.lightTheme)}`);
   }
   if (!result.heroBg.includes("hills-image://media")) failures.push("hero backdrop does not use media image URL");
   if (!sidebarCollapse) failures.push("sidebar collapse controls missing");
