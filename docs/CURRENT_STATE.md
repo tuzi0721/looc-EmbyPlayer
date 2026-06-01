@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（远程文件源封面代理）
+> **更新时间**：2026-06-01（远程封面代理 smoke）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1253-remote-file-poster-proxy.md`](./CHANGE_LOG/2026-06-01-1253-remote-file-poster-proxy.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1257-remote-poster-proxy-smoke.md`](./CHANGE_LOG/2026-06-01-1257-remote-poster-proxy-smoke.md)
 
 ---
 
@@ -630,6 +630,8 @@ npm.cmd run electron:build
 本轮内嵌播放 smoke 加固已闭环：`scripts/smoke-electron-embedded-local.mjs` 在本地假 Emby + 临时彩色视频链路中继续确认内嵌 mpv 非黑屏、长按倍速和 mpv 截图有效，并新增控制栏关键按钮可见、全屏进入/退出、窗口缩到 960×620 后无横向溢出与彩色视频像素检测，避免后续改动悄悄破坏内嵌窗口同步。
 
 本轮远程文件源封面代理已闭环：Electron 桌面端的 `list_webdav_folder` 与 `list_alist_folder` 会把同源远程封面注册为 `hills-image://file/...`，由主进程使用连接凭据拉取图片并复用缓存；有鉴权 header 时不同源外部 `thumb` 不会被代理，避免把 WebDAV 密码或 Alist Token 发给第三方域名。Web Preview 仍以原始 URL 展示，需鉴权 header 的远程封面加载以桌面端为准。
+
+本轮远程封面代理 smoke 已闭环：新增 `scripts/smoke-electron-remote-poster-proxy.mjs`，启动本地私有 WebDAV mock 后通过 Electron renderer 调用 `list_webdav_folder`，确认同名封面被替换为 `hills-image://file/...`；随后在 renderer 中 fetch 该协议 URL，mock 服务端收到带 Basic Auth 的图片 GET，覆盖了桌面端私有 WebDAV 封面加载链路。
 
 ---
 
