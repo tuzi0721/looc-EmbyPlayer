@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（未接入 UI 文案门禁）
+> **更新时间**：2026-06-01（浏览器可视路由复核）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-2002-no-planned-ui-guard.md`](./CHANGE_LOG/2026-06-01-2002-no-planned-ui-guard.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-2008-browser-visual-route-check.md`](./CHANGE_LOG/2026-06-01-2008-browser-visual-route-check.md)
 
 ---
 
@@ -34,6 +34,8 @@
 **注意**：当前 `tauri.conf.json` 已设置 `bundle.active: false` 与 `targets: []`，发布验证以 `src-tauri\target\release\emby-player.exe` 为准。
 
 **架构方向**：已决定迁移到 Electron + Vue 3 + TypeScript；播放核心坚持 mpv/libmpv-first，HLS 仅作为后备路径。路线见 [`ROADMAP/electron-migration.md`](./ROADMAP/electron-migration.md) 与 [`ROADMAP/product-roadmap-v2.md`](./ROADMAP/product-roadmap-v2.md)。当前阶段保留 Tauri 可运行路径，同时通过 `src/platform` 抽象层解除前端对 Tauri API 的直接绑定。
+
+**2026-06-01**：浏览器可视路由复核未记为通过：本轮 `npm.cmd run dev` 成功启动本地预览，`/` 与 `/settings?c=servers` 均返回 HTTP 200；但 Codex in-app Browser 当前会话没有可用路由，因此未完成首页巨幕或设置页截图目检。验证后已停止本轮 dev server，避免后台端口残留；真正视觉通过仍以可用浏览器通道或 Electron smoke 截图为准。
 
 **2026-06-01**：未接入 UI 文案升级为构建门禁：新增 `scripts/check-no-planned-ui.mjs` 与 `npm.cmd run check:no-planned-ui`，扫描 `src` 与 `electron` 的用户界面源码，禁止 `待接入`、`计划中`、`未接入`、`未实现`、`敬请期待`、`not implemented` 与 `coming soon` 等占位文案重新进入产品界面；`npm.cmd run build` 已接入该门禁，顺序为 `check:local-decode` → `check:no-planned-ui` → 类型检查 → Vite 构建。验证已覆盖脚本语法、门禁单跑、`check:local-decode`、`npm.cmd run build`、`git diff --check` 与 `npm.cmd run electron:build`。
 
