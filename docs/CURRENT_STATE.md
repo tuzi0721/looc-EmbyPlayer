@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-01（Electron portable 构建阻塞）
+> 更新时间：2026-06-01（本机解码合同 smoke）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-01-2202-electron-portable-build-blocked.md`](./CHANGE_LOG/2026-06-01-2202-electron-portable-build-blocked.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-01-2211-local-decode-contract-smoke.md`](./CHANGE_LOG/2026-06-01-2211-local-decode-contract-smoke.md)
 
 ---
 
@@ -78,6 +78,7 @@ Hills Lite 的播放策略是本机解码优先且服务端不可承担视频/�
 - 切换线路或媒体源时，无法确认本机直连/直流能力的源会被禁用或拒绝。
 - 播放进度上报只允许 `DirectPlay` / `DirectStream`，不让 `Transcode` 语义进入会话状态。
 - `npm.cmd run build` 前置执行 `check:local-decode`，禁止转码 URL、服务端 HLS 转码 playlist、启用转码、禁用 stream copy 或非空转码 profile 回归。
+- `scripts\smoke-electron-embedded-local.mjs` 已加入运行时合同断言：假 Emby 服务端会检查实际 `PlaybackInfo`、静态流请求和进度上报，确保没有服务端转码语义进入真实播放链路。
 
 ---
 
@@ -116,7 +117,9 @@ node scripts\smoke-electron-home-hero.mjs
 
 当前最新阶段已验证：
 
-- `node --check scripts\real-server-connectivity-check.mjs`
+- `node --check scripts\smoke-electron-embedded-local.mjs`
+- `npm.cmd run check:local-decode`
+- `node scripts\smoke-electron-embedded-local.mjs`（`localDecodeContract.ok=true`，同时覆盖后退、全屏、自适应、mpv 截图像素与退出清理）
 
 ---
 

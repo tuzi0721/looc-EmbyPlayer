@@ -54,6 +54,21 @@ function empty(res, status = 204) {
   res.end();
 }
 
+function readJsonBody(req, callback) {
+  let raw = "";
+  req.setEncoding("utf8");
+  req.on("data", (chunk) => {
+    raw += chunk;
+  });
+  req.on("end", () => {
+    try {
+      callback(raw.trim() ? JSON.parse(raw) : null, raw);
+    } catch (error) {
+      callback({ parseError: error?.message ?? String(error) }, raw);
+    }
+  });
+}
+
 function serveVideo(req, res) {
   const stat = fs.statSync(videoPath);
   const range = req.headers.range;
@@ -79,6 +94,12 @@ function serveVideo(req, res) {
   });
   fs.createReadStream(videoPath).pipe(res);
 }
+
+const localDecodeContract = {
+  playbackInfoRequests: [],
+  streamRequests: [],
+  playstateReports: [],
+};
 
 function createFakeEmbyServer() {
   const server = http.createServer((req, res) => {
@@ -111,49 +132,62 @@ function createFakeEmbyServer() {
     }
 
     if (req.method === "POST" && pathname === `/Items/${itemId}/PlaybackInfo`) {
-      req.resume();
-      json(res, {
-        PlaySessionId: playSessionId,
-        MediaSources: [
-          {
-            Id: mediaSourceId,
-            Name: "Local MP4",
-            Container: "mp4",
-            SupportsDirectPlay: true,
-            SupportsDirectStream: true,
-            RunTimeTicks: 120_000_000,
-            DefaultAudioStreamIndex: 1,
-            MediaStreams: [
-              {
-                Index: 0,
-                Type: "Video",
-                Codec: "h264",
-                Width: 640,
-                Height: 360,
-                IsDefault: true,
-              },
-              {
-                Index: 1,
-                Type: "Audio",
-                Codec: "aac",
-                Language: "und",
-                IsDefault: true,
-              },
-            ],
-          },
-        ],
+      readJsonBody(req, (body) => {
+        localDecodeContract.playbackInfoRequests.push({
+          query: Object.fromEntries(url.searchParams),
+          body,
+        });
+        json(res, {
+          PlaySessionId: playSessionId,
+          MediaSources: [
+            {
+              Id: mediaSourceId,
+              Name: "Local MP4",
+              Container: "mp4",
+              SupportsDirectPlay: true,
+              SupportsDirectStream: true,
+              RunTimeTicks: 120_000_000,
+              DefaultAudioStreamIndex: 1,
+              MediaStreams: [
+                {
+                  Index: 0,
+                  Type: "Video",
+                  Codec: "h264",
+                  Width: 640,
+                  Height: 360,
+                  IsDefault: true,
+                },
+                {
+                  Index: 1,
+                  Type: "Audio",
+                  Codec: "aac",
+                  Language: "und",
+                  IsDefault: true,
+                },
+              ],
+            },
+          ],
+        });
       });
       return;
     }
 
     if (req.method === "GET" && pathname === `/Videos/${itemId}/stream`) {
+      localDecodeContract.streamRequests.push({
+        query: Object.fromEntries(url.searchParams),
+      });
       serveVideo(req, res);
       return;
     }
 
     if (req.method === "POST" && pathname.startsWith("/Sessions/Playing/")) {
-      req.resume();
-      empty(res);
+      readJsonBody(req, (body) => {
+        localDecodeContract.playstateReports.push({
+          path: pathname,
+          body,
+        });
+        empty(res);
+      });
       return;
     }
 
@@ -478,6 +512,73 @@ function analyzePng(imagePath) {
   `;
   const result = run("powershell", ["-NoProfile", "-Command", script]);
   return JSON.parse(result.stdout);
+}
+
+function booleanField(value, key, expected) {
+  if (value == null || typeof value !== "object") return false;
+  const actual = value[key];
+  if (typeof actual === "boolean") return actual === expected;
+  if (typeof actual === "string") return actual.toLowerCase() === String(expected);
+  return false;
+}
+
+function emptyArrayField(value, key) {
+  if (value == null || typeof value !== "object") return false;
+  const actual = value[key];
+  return Array.isArray(actual) && actual.length === 0;
+}
+
+function verifyLocalDecodeContract(contract) {
+  const failures = [];
+  if (contract.playbackInfoRequests.length < 1) {
+    failures.push("PlaybackInfo was not requested");
+  }
+  for (const [index, request] of contract.playbackInfoRequests.entries()) {
+    const query = request.query ?? {};
+    const body = request.body ?? {};
+    const profile = body.DeviceProfile ?? body.deviceProfile ?? {};
+    for (const [key, expected] of [
+      ["EnableDirectPlay", true],
+      ["EnableDirectStream", true],
+      ["EnableTranscoding", false],
+      ["EnableVideoStreamCopy", true],
+      ["EnableAudioStreamCopy", true],
+    ]) {
+      if (!booleanField(query, key, expected)) {
+        failures.push(`PlaybackInfo query ${index} ${key} was not ${expected}`);
+      }
+      if (!booleanField(body, key, expected)) {
+        failures.push(`PlaybackInfo body ${index} ${key} was not ${expected}`);
+      }
+    }
+    if (!emptyArrayField(profile, "TranscodingProfiles")) {
+      failures.push(`PlaybackInfo body ${index} DeviceProfile.TranscodingProfiles was not empty`);
+    }
+  }
+  if (contract.streamRequests.length < 1) {
+    failures.push("direct stream URL was not requested");
+  }
+  for (const [index, request] of contract.streamRequests.entries()) {
+    if (request.query?.Static !== "true") {
+      failures.push(`stream request ${index} Static was not true`);
+    }
+    if (Object.keys(request.query ?? {}).some((key) => /transcod/i.test(key))) {
+      failures.push(`stream request ${index} contains a transcoding query key`);
+    }
+  }
+  for (const [index, report] of contract.playstateReports.entries()) {
+    const method = report.body?.PlayMethod;
+    if (method != null && method !== "DirectPlay" && method !== "DirectStream") {
+      failures.push(`playstate report ${index} PlayMethod was ${method}`);
+    }
+  }
+  return {
+    ok: failures.length === 0,
+    failures,
+    playbackInfoRequestCount: contract.playbackInfoRequests.length,
+    streamRequestCount: contract.streamRequests.length,
+    playstateReportCount: contract.playstateReports.length,
+  };
 }
 
 function captureAndAnalyze(bounds) {
@@ -834,11 +935,13 @@ try {
     runtimeCleanupError = error?.message ?? String(error);
   }
 
-  const ok = functionalOk && runtimeCleanup?.ok === true;
+  const localDecodeContractResult = verifyLocalDecodeContract(localDecodeContract);
+  const ok = functionalOk && runtimeCleanup?.ok === true && localDecodeContractResult.ok;
 
   console.log(JSON.stringify({
     ok,
     functionalOk,
+    localDecodeContract: localDecodeContractResult,
     screenshotPath,
     route: startResult.route,
     bodyText: startResult.bodyText,
