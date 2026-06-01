@@ -4,7 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
 
 import { api, type WebDavEntry, type WebDavListing } from "@/api";
-import { usePlayerStore } from "@/stores/player";
+import { usePlayerStore, type DirectQueueEntry } from "@/stores/player";
 import { useWebDavStore } from "@/stores/webdav";
 
 const route = useRoute();
@@ -152,13 +152,32 @@ async function playEntry(entry: WebDavEntry) {
   playingUrl.value = entry.url;
   errorText.value = null;
   try {
+    const queue = playableItems.value.map((item): DirectQueueEntry => ({
+      url: item.url,
+      title: item.name,
+      sourceLabel: "WebDAV",
+      username: usernameDraft.value || null,
+      password: passwordDraft.value || null,
+    }));
+    const startIndex = Math.max(0, queue.findIndex((item) => item.url === entry.url));
+    player.setDirectQueue(queue, startIndex);
     await player.playWebDavFile({
       url: entry.url,
       title: entry.name,
+      sourceLabel: "WebDAV",
       username: usernameDraft.value || null,
       password: passwordDraft.value || null,
     });
-    router.push({ name: "player", params: { id: "webdav-file" } }).catch(() => {});
+    router
+      .push({
+        name: "player",
+        params: { id: "webdav-file" },
+        query: {
+          connection: selectedConnectionId.value ?? "",
+          webdavPath: currentPath.value,
+        },
+      })
+      .catch(() => {});
   } catch (error) {
     errorText.value = error instanceof Error ? error.message : String(error);
   } finally {
@@ -186,8 +205,12 @@ watch(currentPath, (path, previous) => {
 });
 
 onMounted(() => {
+  const hasConnectionQuery = typeof route.query.connection === "string" && route.query.connection.length > 0;
   if (!selectedConnectionId.value && webdav.recentConnections.length > 0) {
     fillConnection(webdav.recentConnections[0]!.id);
+  }
+  if (hasConnectionQuery && canLoad.value) {
+    void connectAndLoad(currentPath.value);
   }
 });
 </script>

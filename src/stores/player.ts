@@ -8,7 +8,15 @@ import { useServerStore } from "@/stores/server";
 import type { PlaybackSource } from "@/api";
 import type { MpvSnapshot, PictureMode, SubtitleStyleSettings } from "@/types/models";
 
-type PlaybackQueueKind = "remote" | "local";
+type PlaybackQueueKind = "remote" | "local" | "direct";
+
+export interface DirectQueueEntry {
+  url: string;
+  title: string;
+  sourceLabel?: string | null;
+  username?: string | null;
+  password?: string | null;
+}
 
 export const usePlayerStore = defineStore("player", () => {
   const snapshot = ref<MpvSnapshot | null>(null);
@@ -20,6 +28,7 @@ export const usePlayerStore = defineStore("player", () => {
   const directUrl = ref<string | null>(null);
   const directTitle = ref<string | null>(null);
   const directSourceLabel = ref<string | null>(null);
+  const directQueue = ref<DirectQueueEntry[]>([]);
   const queue = ref<string[]>([]);
   const queueIndex = ref(-1);
   const queueKind = ref<PlaybackQueueKind>("remote");
@@ -42,7 +51,7 @@ export const usePlayerStore = defineStore("player", () => {
     itemId.value = payload.itemId;
     playSessionId.value = sessionId;
     playbackSource.value = source;
-    if (queueKind.value === "local") clearQueue();
+    if (queueKind.value === "local" || queueKind.value === "direct") clearQueue();
     localFilePath.value = null;
     localFileTitle.value = null;
     directUrl.value = null;
@@ -83,20 +92,23 @@ export const usePlayerStore = defineStore("player", () => {
   async function playWebDavFile(payload: {
     url: string;
     title?: string | null;
+    sourceLabel?: string | null;
     username?: string | null;
     password?: string | null;
     startMs?: number | null;
   }) {
     await api.playWebDavFile(payload);
+    const keepsDirectQueue =
+      queueKind.value === "direct" && queue.value[queueIndex.value] === payload.url;
     itemId.value = null;
     playSessionId.value = null;
     playbackSource.value = null;
-    clearQueue();
+    if (!keepsDirectQueue) clearQueue();
     localFilePath.value = null;
     localFileTitle.value = null;
     directUrl.value = payload.url;
     directTitle.value = payload.title?.trim() || fileNameFromPath(new URL(payload.url).pathname);
-    directSourceLabel.value = "WebDAV";
+    directSourceLabel.value = payload.sourceLabel?.trim() || "WebDAV";
     lastEof = false;
     void pushNowPlaying();
     startPolling();
@@ -188,6 +200,7 @@ export const usePlayerStore = defineStore("player", () => {
     queue.value = [...items];
     queueIndex.value = Math.max(0, Math.min(items.length - 1, startIndex));
     queueKind.value = "remote";
+    directQueue.value = [];
     await play({ itemId: queue.value[queueIndex.value]!, preferDirect: true });
   }
 
@@ -195,6 +208,17 @@ export const usePlayerStore = defineStore("player", () => {
     queue.value = [...files];
     queueIndex.value = files.length > 0 ? Math.max(0, Math.min(files.length - 1, startIndex)) : -1;
     queueKind.value = "local";
+    directQueue.value = [];
+  }
+
+  function setDirectQueue(entries: DirectQueueEntry[], startIndex = 0) {
+    directQueue.value = entries.filter((entry) => entry.url.trim().length > 0);
+    queue.value = directQueue.value.map((entry) => entry.url);
+    queueIndex.value =
+      directQueue.value.length > 0
+        ? Math.max(0, Math.min(directQueue.value.length - 1, startIndex))
+        : -1;
+    queueKind.value = "direct";
   }
 
   async function nextTrack() {
@@ -204,6 +228,10 @@ export const usePlayerStore = defineStore("player", () => {
     if (queueKind.value === "local") {
       const filePath = queue.value[queueIndex.value]!;
       await playFile({ filePath, title: fileNameFromPath(filePath) });
+    } else if (queueKind.value === "direct") {
+      const entry = directQueue.value[queueIndex.value];
+      if (!entry) return false;
+      await playWebDavFile(entry);
     } else {
       await play({ itemId: queue.value[queueIndex.value]!, preferDirect: true });
     }
@@ -217,6 +245,10 @@ export const usePlayerStore = defineStore("player", () => {
     if (queueKind.value === "local") {
       const filePath = queue.value[queueIndex.value]!;
       await playFile({ filePath, title: fileNameFromPath(filePath) });
+    } else if (queueKind.value === "direct") {
+      const entry = directQueue.value[queueIndex.value];
+      if (!entry) return false;
+      await playWebDavFile(entry);
     } else {
       await play({ itemId: queue.value[queueIndex.value]!, preferDirect: true });
     }
@@ -227,12 +259,14 @@ export const usePlayerStore = defineStore("player", () => {
     queue.value = [];
     queueIndex.value = -1;
     queueKind.value = "remote";
+    directQueue.value = [];
   }
 
   function setQueue(items: string[], index: number) {
     queue.value = [...items];
     queueIndex.value = items.length > 0 ? Math.max(0, Math.min(items.length - 1, index)) : -1;
     queueKind.value = "remote";
+    directQueue.value = [];
   }
 
   async function pause() {
@@ -422,6 +456,7 @@ export const usePlayerStore = defineStore("player", () => {
     directUrl,
     directTitle,
     directSourceLabel,
+    directQueue,
     queue,
     queueIndex,
     queueKind,
@@ -430,6 +465,7 @@ export const usePlayerStore = defineStore("player", () => {
     playWebDavFile,
     playQueue,
     setLocalQueue,
+    setDirectQueue,
     nextTrack,
     prevTrack,
     clearQueue,

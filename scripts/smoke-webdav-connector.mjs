@@ -30,6 +30,16 @@ function multistatus(baseUrl) {
     </d:prop></d:propstat>
   </d:response>
   <d:response>
+    <d:href>${baseUrl}Episode%202.mp4</d:href>
+    <d:propstat><d:prop>
+      <d:displayname>Episode 2.mp4</d:displayname>
+      <d:resourcetype />
+      <d:getcontentlength>524288000</d:getcontentlength>
+      <d:getlastmodified>Mon, 01 Jun 2026 01:06:00 GMT</d:getlastmodified>
+      <d:getcontenttype>video/mp4</d:getcontenttype>
+    </d:prop></d:propstat>
+  </d:response>
+  <d:response>
     <d:href>/dav/readme.txt</d:href>
     <d:propstat><d:prop>
       <d:displayname>readme.txt</d:displayname>
@@ -65,6 +75,11 @@ await once(server, "listening");
 
 try {
   const baseUrl = `http://127.0.0.1:${server.address().port}/dav/`;
+  if (process.argv.includes("--serve")) {
+    console.log(`MOCK_WEBDAV_URL=${baseUrl}`);
+    await new Promise(() => {});
+  }
+
   const client = new WebDavClient({ timeoutMs: 2_000 });
   const listing = await client.list({
     baseUrl,
@@ -73,7 +88,7 @@ try {
   });
 
   assert(listing.rootUrl === baseUrl, "root URL should be normalized");
-  assert(listing.items.length === 3, `expected 3 entries, got ${listing.items.length}`);
+  assert(listing.items.length === 4, `expected 4 entries, got ${listing.items.length}`);
   assert(listing.items[0].isDirectory && listing.items[0].name === "Movies", "directory should sort first");
 
   const video = listing.items.find((entry) => entry.name === "Episode 1.mkv");
@@ -84,6 +99,9 @@ try {
 
   const text = listing.items.find((entry) => entry.name === "readme.txt");
   assert(text && !text.playable, "non-video file should not be playable");
+
+  const playableCount = listing.items.filter((entry) => entry.playable).length;
+  assert(playableCount === 2, `expected 2 playable videos, got ${playableCount}`);
 
   console.log("WebDAV connector smoke passed");
 } finally {

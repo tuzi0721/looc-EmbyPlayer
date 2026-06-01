@@ -13,7 +13,7 @@ import { useKeyboard } from "@/composables/useKeyboard";
 import { openFileDialog } from "@/platform";
 import { useAuthStore } from "@/stores/auth";
 import { useLibraryStore } from "@/stores/library";
-import { usePlayerStore } from "@/stores/player";
+import { usePlayerStore, type DirectQueueEntry } from "@/stores/player";
 import { useServerStore } from "@/stores/server";
 import { useSettingsStore } from "@/stores/settings";
 import type {
@@ -114,6 +114,13 @@ const pictureModeOptions: Array<{ value: PictureMode; label: string; icon: strin
 type PlayerPanel = "subtitle" | "settings" | "episode" | "chapter" | "danmaku" | "source" | "stats";
 type StatsPage = "summary" | "video" | "audio" | "tracks" | "whisper";
 type StatsRow = { label: string; value: string };
+type PlayerQueueEntry = {
+  id: string;
+  index: number;
+  item: MediaItem | null;
+  direct: DirectQueueEntry | null;
+  active: boolean;
+};
 
 const statsPageOptions: Array<{ value: StatsPage; label: string; nativePage: number }> = [
   { value: "summary", label: "综合", nativePage: 1 },
@@ -301,6 +308,7 @@ const localFileTitle = computed(() =>
 const isLocalFilePlayback = computed(() => Boolean(localFilePath.value));
 const isDirectUrlPlayback = computed(() => Boolean(player.directUrl || player.directTitle));
 const isLocalQueue = computed(() => player.queueKind === "local");
+const isDirectQueue = computed(() => player.queueKind === "direct");
 const displayTitle = computed(
   () =>
     item.value?.SeriesName ??
@@ -526,14 +534,25 @@ const statsRows = computed<StatsRow[]>(() => {
   if (statsPage.value === "whisper") return statsWhisperRows.value;
   return statsSummaryRows.value;
 });
-const queueEntries = computed(() =>
-  player.queue.map((id, index) => ({
+const queueEntries = computed<PlayerQueueEntry[]>(() => {
+  if (isDirectQueue.value) {
+    return player.directQueue.map((entry, index) => ({
+      id: entry.url,
+      index,
+      item: null,
+      direct: entry,
+      active: index === player.queueIndex,
+    }));
+  }
+
+  return player.queue.map((id, index) => ({
     id,
     index,
     item: lib.itemCache[id] ?? null,
+    direct: null,
     active: index === player.queueIndex,
-  })),
-);
+  }));
+});
 
 const progressPct = computed(() => {
   if (!durationMs.value) return 0;
@@ -1004,8 +1023,9 @@ function onVideoEnded() {
   }
 }
 
-function queueTitle(entry: (typeof queueEntries.value)[number]): string {
+function queueTitle(entry: PlayerQueueEntry): string {
   if (isLocalQueue.value) return fileNameFromPath(entry.id);
+  if (entry.direct) return entry.direct.title || fileNameFromPath(entry.direct.url);
   const media = entry.item;
   if (!media) return `第 ${entry.index + 1} 集`;
   const year = media.ProductionYear ? ` (${media.ProductionYear})` : "";
@@ -1017,8 +1037,9 @@ function queueTitle(entry: (typeof queueEntries.value)[number]): string {
   return `${media.Name}${year}`;
 }
 
-function queueSubtitle(entry: (typeof queueEntries.value)[number]): string {
+function queueSubtitle(entry: PlayerQueueEntry): string {
   if (isLocalQueue.value) return entry.active ? "正在播放" : "本地文件";
+  if (entry.direct) return entry.active ? "正在播放" : (entry.direct.sourceLabel ?? "WebDAV");
   const media = entry.item;
   if (!media) return entry.active ? "正在播放" : "";
   const parts = [media.SeriesName].filter(Boolean);
@@ -1176,7 +1197,7 @@ async function playHtmlVideoFromUserAction(video: HTMLVideoElement) {
 }
 
 async function ensureQueueItems() {
-  if (isLocalQueue.value) return;
+  if (isLocalQueue.value || isDirectQueue.value) return;
   const missing = player.queue.filter((id) => !lib.itemCache[id]).slice(0, 30);
   if (missing.length === 0) return;
   queueLoading.value = true;
@@ -1216,6 +1237,12 @@ async function playQueueIndex(index: number) {
     player.queueIndex = index;
     resetDanmakuState();
     await player.playFile({ filePath, title: fileNameFromPath(filePath) });
+  } else if (isDirectQueue.value) {
+    const entry = player.directQueue[index];
+    if (!entry) return;
+    player.queueIndex = index;
+    resetDanmakuState();
+    await player.playWebDavFile(entry);
   } else if (useHtmlVideo) {
     const id = player.queue[index];
     if (!id) return;
@@ -1258,6 +1285,20 @@ function back() {
     } else {
       router.push("/home").catch(() => {});
     }
+    return;
+  }
+  if (isDirectUrlPlayback.value) {
+    const connection = route.query.connection;
+    const webdavPath = route.query.webdavPath;
+    router
+      .push({
+        name: "webdav",
+        query: {
+          ...(typeof connection === "string" && connection ? { connection } : {}),
+          ...(typeof webdavPath === "string" ? { path: webdavPath } : {}),
+        },
+      })
+      .catch(() => {});
     return;
   }
   const from =
