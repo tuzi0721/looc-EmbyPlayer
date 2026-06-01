@@ -272,6 +272,10 @@ async function autoImportLocalDanmakuXml(filePath: string) {
 }
 
 function currentDirectQueueEntry(): DirectQueueEntry | null {
+  if (player.queueKind === "direct" && player.queueIndex >= 0) {
+    const entry = player.directQueue[player.queueIndex];
+    if (entry) return entry;
+  }
   const url = player.directUrl;
   if (!url) return null;
   return player.directQueue.find((entry) => entry.url === url) ?? null;
@@ -288,6 +292,7 @@ async function autoImportWebDavDanmaku(entry: DirectQueueEntry | null) {
       url: entry.sidecarDanmaku.url,
       username: entry.username ?? null,
       password: entry.password ?? null,
+      token: entry.sourceKind === "alist" ? entry.token ?? null : null,
     });
     if ((result.comments ?? []).length > 0) {
       applyDanmakuResult(result);

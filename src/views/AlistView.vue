@@ -299,6 +299,9 @@ function queueEntryFromItem(item: AlistEntry): DirectQueueEntry {
     title: item.name,
     sourceLabel: "Alist",
     token: tokenDraft.value || null,
+    baseUrl: baseUrlDraft.value,
+    path: item.path,
+    pathPassword: pathPasswordDraft.value || null,
     sidecarSubtitles: item.sidecarSubtitles ?? [],
     sidecarDanmaku: item.sidecarDanmaku ?? null,
   };
@@ -309,25 +312,12 @@ async function playEntry(entry: AlistEntry) {
   playingPath.value = entry.path;
   errorText.value = null;
   try {
-    const resolved = await api.resolveAlistFile({
-      baseUrl: baseUrlDraft.value,
-      path: entry.path,
-      token: tokenDraft.value || null,
-      pathPassword: pathPasswordDraft.value || null,
-    });
     const queue = playableItems.value.map(queueEntryFromItem);
-    const startIndex = Math.max(0, queue.findIndex((item) => item.title === entry.name));
-    if (queue[startIndex]) queue[startIndex] = { ...queue[startIndex], url: resolved.url };
+    const startIndex = Math.max(0, queue.findIndex((item) => item.path === entry.path));
     player.setDirectQueue(queue, startIndex);
-    await player.playAlistFile({
-      sourceKind: "alist",
-      url: resolved.url,
-      title: entry.name,
-      sourceLabel: "Alist",
-      token: tokenDraft.value || null,
-      sidecarSubtitles: entry.sidecarSubtitles ?? [],
-      sidecarDanmaku: entry.sidecarDanmaku ?? null,
-    });
+    const selectedEntry = queue[startIndex];
+    if (!selectedEntry) throw new Error("Alist 队列中未找到要播放的文件");
+    await player.playDirectEntry(selectedEntry);
     router
       .push({
         name: "player",

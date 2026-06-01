@@ -1,10 +1,10 @@
 # Hills Lite — 当前项目状态快照
 
-> **更新时间**：2026-06-01（Alist / OpenList 同名侧挂资源）
+> **更新时间**：2026-06-01（Alist / OpenList 播放前刷新直链）
 >
 > **规格**：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> **变更日志**：[`CHANGE_LOG/2026-06-01-1133-alist-sidecars.md`](./CHANGE_LOG/2026-06-01-1133-alist-sidecars.md)
+> **变更日志**：[`CHANGE_LOG/2026-06-01-1151-alist-resolve-on-play.md`](./CHANGE_LOG/2026-06-01-1151-alist-resolve-on-play.md)
 
 ---
 
@@ -611,9 +611,11 @@ npm.cmd run electron:build
 
 本轮 Alist / OpenList 同名侧挂资源已闭环：Alist 目录解析会识别同层 `.srt/.ass/.ssa/.vtt` 字幕和 `同名.xml` / `同名.danmaku.xml` / `同名.comments.xml` 弹幕，`/alist` 列表会显示“字幕 N”和“XML 弹幕”提示并支持搜索字幕/弹幕关键字；播放器 direct queue 会携带这些侧挂资源，Electron 内嵌 mpv 播放 Alist 视频时会尝试加载匹配到的远程字幕，XML 弹幕继续复用播放器现有远程 XML 导入链路。
 
+本轮 Alist / OpenList 播放前刷新直链已闭环：`/alist` 写入 direct queue 时会保留站点 URL、文件路径、路径密码和 token 元数据；播放器每次播放 Alist 队列项前都会重新调用 `/api/fs/get`，优先使用最新 `raw_url`，否则使用最新签名 `/d/...` URL，并同步当前队列 URL，避免下一条/上一条沿用过期签名。播放器侧挂弹幕读取也会按当前 `queueIndex` 找回 Alist 条目，并在远程 XML 导入时携带 token header，私有 Alist/OpenList 站点的同名 XML 弹幕不再只依赖公开直链。
+
 ---
 
 ## 10. Phase 2 待办
 
 - 播放窗口内嵌已通过本地屏幕像素 smoke；后续仍建议用真实媒体人工走一遍控制栏显示/隐藏、全屏和窗口 resize 体验。
-- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层/递归视频浏览、本地文件夹列表搜索/排序/分组与播放队列、同名封面、同名 NFO 元数据、同名字幕自动关联及列表提示、同名 XML 弹幕自动关联及列表提示、最近本地文件入口、最近本地文件夹入口、收藏本地文件、收藏本地文件夹、WebDAV 基础目录浏览/直链播放、WebDAV 播放队列、WebDAV 收藏/最近入口、WebDAV 列表搜索/排序、WebDAV 同名字幕提示/加载、WebDAV 同名 XML 弹幕提示/加载、WebDAV 路径面包屑、WebDAV 当前路径操作、Alist/OpenList 基础目录浏览/直链播放、Alist/OpenList 收藏/最近入口和 Alist/OpenList 同名字幕/XML 弹幕提示与加载；在线封面/元数据刮削、SMB 和 Plex 仍待后续分阶段接入。
+- 文件源能力目前已支持“打开单个本地视频文件”、本地文件夹一层/递归视频浏览、本地文件夹列表搜索/排序/分组与播放队列、同名封面、同名 NFO 元数据、同名字幕自动关联及列表提示、同名 XML 弹幕自动关联及列表提示、最近本地文件入口、最近本地文件夹入口、收藏本地文件、收藏本地文件夹、WebDAV 基础目录浏览/直链播放、WebDAV 播放队列、WebDAV 收藏/最近入口、WebDAV 列表搜索/排序、WebDAV 同名字幕提示/加载、WebDAV 同名 XML 弹幕提示/加载、WebDAV 路径面包屑、WebDAV 当前路径操作、Alist/OpenList 基础目录浏览/直链播放、Alist/OpenList 收藏/最近入口、Alist/OpenList 播放前刷新直链和 Alist/OpenList 同名字幕/XML 弹幕提示与加载；在线封面/元数据刮削、SMB 和 Plex 仍待后续分阶段接入。

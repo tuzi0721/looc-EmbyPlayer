@@ -1,6 +1,7 @@
 import http from "node:http";
 import { once } from "node:events";
 import { AlistClient } from "../electron/backend/alist.mjs";
+import { DanmakuClient } from "../electron/backend/danmaku.mjs";
 
 const expectedAuth = "demo-token";
 
@@ -31,6 +32,11 @@ function assert(condition, message) {
 const server = http.createServer(async (req, res) => {
   if (req.headers.authorization !== expectedAuth) {
     json(res, 401, { code: 401, message: "unauthorized" });
+    return;
+  }
+  if (req.method === "GET" && req.url === "/raw/Episode%201.danmaku.xml") {
+    res.writeHead(200, { "content-type": "application/xml; charset=utf-8" });
+    res.end('<i><d p="1.5,1,25,16777215,0,0,0,0">hello xml</d></i>');
     return;
   }
   if (req.method !== "POST") {
@@ -97,6 +103,15 @@ try {
 
   const resolved = await client.resolveFile({ baseUrl, token: expectedAuth, path: "Episode 1.mkv" });
   assert(resolved.url.endsWith("/raw/Episode%201.mkv"), `unexpected raw url: ${resolved.url}`);
+
+  const danmaku = new DanmakuClient({
+    getSettings: async () => ({ requestTimeoutMs: 2_000 }),
+  });
+  const imported = await danmaku.importXml({
+    url: `http://127.0.0.1:${server.address().port}/raw/Episode%201.danmaku.xml`,
+    token: expectedAuth,
+  });
+  assert(imported.comments.length === 1, "Alist XML danmaku should load with token auth");
 
   console.log("Alist connector smoke passed");
 } finally {

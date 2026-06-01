@@ -405,6 +405,7 @@ export const api = {
     url?: string;
     username?: string | null;
     password?: string | null;
+    token?: string | null;
   }) =>
     invoke<DanmakuResult>("import_danmaku_xml", { payload }),
 

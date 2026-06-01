@@ -87,6 +87,11 @@ function basicAuthorization(username, password) {
   return `Basic ${Buffer.from(`${user}:${pass}`, "utf8").toString("base64")}`;
 }
 
+function tokenAuthorization(token) {
+  const value = typeof token === "string" ? token.trim() : "";
+  return value || null;
+}
+
 function parseComment(raw) {
   const parts = String(raw?.p ?? "").split(",");
   if (parts.length < 3) return null;
@@ -196,10 +201,12 @@ export class DanmakuClient {
       throw new Error("danmaku XML URL must use http or https");
     }
     const authorization = basicAuthorization(payload.username, payload.password);
+    const token = tokenAuthorization(payload.token);
     const headers = {
       Accept: "application/xml,text/xml,*/*",
     };
     if (authorization) headers.Authorization = authorization;
+    else if (token) headers.Authorization = token;
     const settings = await this.store.getSettings();
     const response = await fetch(url, {
       method: "GET",

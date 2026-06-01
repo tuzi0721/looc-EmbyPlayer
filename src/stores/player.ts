@@ -18,6 +18,9 @@ export interface DirectQueueEntry {
   username?: string | null;
   password?: string | null;
   token?: string | null;
+  baseUrl?: string | null;
+  path?: string | null;
+  pathPassword?: string | null;
   sidecarSubtitles?: WebDavSidecarSubtitle[];
   sidecarDanmaku?: WebDavSidecarDanmaku | null;
 }
@@ -148,9 +151,57 @@ export const usePlayerStore = defineStore("player", () => {
     startPolling();
   }
 
+  function currentDirectQueueIndex(entry: DirectQueueEntry) {
+    const currentIndex = queueKind.value === "direct" ? queueIndex.value : -1;
+    const currentEntry = currentIndex >= 0 ? directQueue.value[currentIndex] : null;
+    if (currentEntry === entry) return currentIndex;
+    if (
+      currentEntry &&
+      entry.path &&
+      currentEntry.path === entry.path &&
+      currentEntry.sourceKind === entry.sourceKind
+    ) {
+      return currentIndex;
+    }
+    return directQueue.value.findIndex((item) => {
+      if (entry.path && item.path === entry.path && item.sourceKind === entry.sourceKind) return true;
+      return item.url === entry.url;
+    });
+  }
+
+  function replaceDirectQueueEntry(index: number, entry: DirectQueueEntry) {
+    if (index < 0 || index >= directQueue.value.length) return;
+    directQueue.value = directQueue.value.map((item, itemIndex) =>
+      itemIndex === index ? entry : item,
+    );
+    queue.value = queue.value.map((existingUrl, itemIndex) =>
+      itemIndex === index ? entry.url : existingUrl,
+    );
+  }
+
+  async function resolveAlistDirectEntry(entry: DirectQueueEntry) {
+    const baseUrl = entry.baseUrl?.trim();
+    const path = entry.path?.trim();
+    if (!baseUrl || !path) return entry;
+    const resolved = await api.resolveAlistFile({
+      baseUrl,
+      path,
+      token: entry.token ?? null,
+      pathPassword: entry.pathPassword ?? null,
+    });
+    return {
+      ...entry,
+      url: resolved.url,
+      title: entry.title || resolved.name,
+    };
+  }
+
   async function playDirectEntry(entry: DirectQueueEntry) {
     if (entry.sourceKind === "alist") {
-      await playAlistFile(entry);
+      const index = currentDirectQueueIndex(entry);
+      const resolvedEntry = await resolveAlistDirectEntry(entry);
+      replaceDirectQueueEntry(index, resolvedEntry);
+      await playAlistFile(resolvedEntry);
     } else {
       await playWebDavFile(entry);
     }
