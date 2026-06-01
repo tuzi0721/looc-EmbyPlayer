@@ -1,10 +1,10 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-01（项目记忆与规范同步）
+> 更新时间：2026-06-01（工作区卫生检查）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-01-2037-project-guidance-sync.md`](./CHANGE_LOG/2026-06-01-2037-project-guidance-sync.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-01-2040-workspace-hygiene-check.md`](./CHANGE_LOG/2026-06-01-2040-workspace-hygiene-check.md)
 
 ---
 
@@ -24,6 +24,8 @@
 历史流水和每轮验证保留在 [`CHANGE_LOG`](./CHANGE_LOG/)；本文件只记录当前可执行状态，避免旧阶段描述误导后续判断。
 
 当前项目指导文档也已同步：`PROJECT_MEMORY.md` 与 `STANDARDS.md` 不再作为旧路线清单，而是指向当前 Electron 主线、随包 mpv、本机解码硬约束、阶段日志/提交/推送节奏和安全边界。
+
+工作区卫生检查已接入 `npm.cmd run check:workspace`：该脚本允许当前 6 个运行/构建目录，拦截意外未跟踪文件和意外忽略目录，用来避免旧临时文件、旧 Git 目录或散落构建日志重新污染仓库判断。
 
 ---
 
@@ -82,6 +84,7 @@ Hills Lite 的播放策略是本机解码优先且服务端不可承担视频/�
 ```powershell
 npm.cmd run check:local-decode
 npm.cmd run check:no-planned-ui
+npm.cmd run check:workspace
 npm.cmd run build
 npm.cmd run electron:build
 cargo check --manifest-path src-tauri/Cargo.toml --all-targets
