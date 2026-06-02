@@ -4,11 +4,13 @@
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-0748-electron-unpacked-refresh.md`](./CHANGE_LOG/2026-06-02-0748-electron-unpacked-refresh.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-0836-episode-image-fallback-native-mpv-evidence.md`](./CHANGE_LOG/2026-06-02-0836-episode-image-fallback-native-mpv-evidence.md)
 
 ---
 
 ## 0. 最新视觉修正阶段
+- 2026-06-02 08:36 阶段只保留 `src/utils/mediaImages.ts` 的剧集/父级图片回退修正；Electron 原生 mpv `--wid` 嵌入实验已回滚，因为本地直接解码、seek、全屏、resize 与清理虽然可跑通，但用户可见窗口像素仍为黑屏，不能算播放修复通过。
+- 下一轮必须继续用真实账号、真实服务器和多个窗口尺寸/比例做视检；所有通过结论都必须以用户可见截图/像素和真实功能链路为准，不能只看 mpv 内部截图或本地模拟数据。
 
 - 详情页 `/item/:id` 现在使用 fullscreen app shell，隐藏主侧栏和顶栏并铺满窗口，退出依靠详情页自身返回按钮；这是为了匹配用户参考图中“剧集页打满”的视觉目标。
 - 首页/详情 smoke 现在把详情页壳层也纳入断言：详情页仍显示主侧栏/顶栏，或 hero 未从窗口原点铺满，都会失败。

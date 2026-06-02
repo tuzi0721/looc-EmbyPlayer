@@ -11,6 +11,13 @@ export interface MediaImageOptions {
   format?: string | null;
 }
 
+interface MediaImageCandidate {
+  itemId?: string | null;
+  imageType: MediaImageType;
+  tag?: string | null;
+  allowUntagged?: boolean;
+}
+
 function activeLine(server: Server): Line | null {
   return server.lines.find((line) => line.id === server.activeLineId) ?? server.lines[0] ?? null;
 }
@@ -69,15 +76,56 @@ export function mediaItemImageUrl(
   maxWidth = 1600,
 ): string | null {
   if (!item) return null;
-  const tag =
-    imageType === "Backdrop"
-      ? item.BackdropImageTags?.[0] ?? item.ImageTags?.Primary
-      : item.ImageTags?.Primary;
-  return mediaImageUrl(server, item.Id, imageType, {
+  const allowParent = item.Type === "Episode";
+  const parentBackdropId = item.ParentBackdropItemId ?? item.SeriesId;
+  const parentBackdropTag = item.ParentBackdropImageTags?.[0] ?? item.BackdropImageTags?.[0];
+  const parentThumbId = item.ParentThumbItemId ?? item.SeriesId;
+  const parentThumbTag = item.ParentThumbImageTag ?? item.SeriesThumbImageTag ?? item.ImageTags?.Thumb;
+  const parentPrimaryId = item.ParentPrimaryImageItemId ?? item.SeriesId;
+  const parentPrimaryTag = item.ParentPrimaryImageTag ?? item.SeriesPrimaryImageTag;
+  const parentLogoId = item.ParentLogoItemId ?? item.SeriesId;
+  const parentLogoTag = item.ParentLogoImageTag;
+  const candidates: MediaImageCandidate[] = [];
+  const seen = new Set<string>();
+
+  function add(candidate: MediaImageCandidate) {
+    if (!candidate.itemId || (!candidate.tag && !candidate.allowUntagged)) return;
+    const key = `${candidate.itemId}:${candidate.imageType}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push(candidate);
+  }
+
+  if (imageType === "Backdrop") {
+    add({ itemId: item.Id, imageType: "Backdrop", tag: item.BackdropImageTags?.[0] });
+    add({ itemId: parentBackdropId, imageType: "Backdrop", tag: parentBackdropTag, allowUntagged: allowParent });
+    add({ itemId: parentThumbId, imageType: "Thumb", tag: parentThumbTag, allowUntagged: allowParent });
+    add({ itemId: item.Id, imageType: "Primary", tag: item.ImageTags?.Primary, allowUntagged: true });
+    add({ itemId: parentPrimaryId, imageType: "Primary", tag: parentPrimaryTag, allowUntagged: allowParent });
+  } else if (imageType === "Thumb") {
+    add({ itemId: item.Id, imageType: "Thumb", tag: item.ImageTags?.Thumb });
+    add({ itemId: parentThumbId, imageType: "Thumb", tag: parentThumbTag, allowUntagged: allowParent });
+    add({ itemId: parentBackdropId, imageType: "Backdrop", tag: parentBackdropTag, allowUntagged: allowParent });
+    add({ itemId: item.Id, imageType: "Primary", tag: item.ImageTags?.Primary, allowUntagged: true });
+    add({ itemId: parentPrimaryId, imageType: "Primary", tag: parentPrimaryTag, allowUntagged: allowParent });
+  } else if (imageType === "Logo") {
+    add({ itemId: item.Id, imageType: "Logo", tag: item.ImageTags?.Logo });
+    add({ itemId: parentLogoId, imageType: "Logo", tag: parentLogoTag, allowUntagged: allowParent });
+  } else {
+    add({ itemId: item.Id, imageType: "Primary", tag: item.ImageTags?.Primary, allowUntagged: true });
+    add({ itemId: parentPrimaryId, imageType: "Primary", tag: parentPrimaryTag, allowUntagged: allowParent });
+    add({ itemId: parentThumbId, imageType: "Thumb", tag: parentThumbTag, allowUntagged: allowParent });
+    add({ itemId: parentBackdropId, imageType: "Backdrop", tag: parentBackdropTag, allowUntagged: allowParent });
+  }
+
+  const candidate = candidates[0];
+  if (!candidate) return null;
+
+  return mediaImageUrl(server, candidate.itemId, candidate.imageType, {
     accountId: item._source?.accountId,
     maxWidth,
     quality: 82,
     format: "webp",
-    tag,
+    tag: candidate.tag,
   });
 }
