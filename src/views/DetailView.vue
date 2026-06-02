@@ -26,6 +26,7 @@ const settings = useSettingsStore();
 
 const item = computed(() => lib.itemCache[props.id] ?? null);
 const loading = ref(false);
+const loadStage = ref("");
 const loadError = ref<string | null>(null);
 const actionError = ref<string | null>(null);
 const shareStatus = ref<string | null>(null);
@@ -130,34 +131,60 @@ const loadingCollection = ref(false);
 let detailLoadSeq = 0;
 let episodeLoadSeq = 0;
 let suppressNextSeasonWatch = false;
+let detailOpenTimer: ReturnType<typeof setTimeout> | null = null;
 
 function detailRequestTimeoutMs() {
   const value = Number(settings.settings.requestTimeoutMs);
   return Math.min(30000, Math.max(1000, Number.isFinite(value) ? value : 15000));
 }
 
-function withDetailTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
-  let timer: number | null = null;
+function withDetailTimeout<T>(
+  promise: Promise<T>,
+  label: string,
+  timeoutMs = detailRequestTimeoutMs(),
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
   let settled = false;
-  const timeoutMs = detailRequestTimeoutMs();
   const deadline = Date.now() + timeoutMs;
   const timeout = new Promise<never>((_, reject) => {
     const check = () => {
       if (settled) return;
       if (Date.now() >= deadline) {
-        timer = null;
-        reject(new Error(`${label}: timeout after ${timeoutMs}ms`));
-        return;
-      }
-      timer = window.setTimeout(check, 100);
-    };
-    timer = window.setTimeout(check, 0);
-  });
+          timer = null;
+          reject(new Error(`${label}: timeout after ${timeoutMs}ms`));
+          return;
+        }
+          timer = setTimeout(check, 100);
+      };
+      timer = setTimeout(check, 0);
+    });
 
   return Promise.race([promise, timeout]).finally(() => {
     settled = true;
-    if (timer != null) window.clearTimeout(timer);
+    if (timer != null) clearTimeout(timer);
   });
+}
+
+function detailBootstrapTimeoutMs() {
+  return Math.min(5000, Math.max(1200, detailRequestTimeoutMs()));
+}
+
+function clearDetailOpenTimer() {
+  if (detailOpenTimer == null) return;
+  clearTimeout(detailOpenTimer);
+  detailOpenTimer = null;
+}
+
+function armDetailOpenTimer(seq: number) {
+  clearDetailOpenTimer();
+  const timeoutMs = Math.min(16000, Math.max(6000, detailRequestTimeoutMs() + 1000));
+  detailOpenTimer = setTimeout(() => {
+    detailOpenTimer = null;
+    if (seq !== detailLoadSeq || !loading.value) return;
+    loadError.value = "详情加载超时，请检查当前服务器账号、线路或网络状态后重试。";
+    loading.value = false;
+    detailLoadSeq += 1;
+  }, timeoutMs);
 }
 
 const isSeries = computed(() => item.value?.Type === "Series");
@@ -171,6 +198,13 @@ const activeServer = computed(() => {
   const a = auth.activeAccount;
   return a ? serverStore.byId(a.serverId) ?? null : null;
 });
+
+const hasPlaybackContext = computed(() => Boolean(auth.activeAccount && activeServer.value));
+
+function missingPlaybackContextError() {
+  if (!auth.activeAccount) return "当前没有已登录账号，请先在服务器设置中登录 Emby/Jellyfin。";
+  return "当前账号对应的服务器不存在，请重新登录或切换服务器。";
+}
 
 function itemImageUrl(
   itemId: string,
@@ -772,7 +806,10 @@ const activeSeasonName = computed(() => {
 });
 
 onMounted(() => void loadDetail());
-onBeforeUnmount(() => clearShareStatus());
+onBeforeUnmount(() => {
+  clearShareStatus();
+  clearDetailOpenTimer();
+});
 watch(() => props.id, () => void loadDetail());
 watch(studioEntries, () => {
   showStudioPopover.value = false;
@@ -781,6 +818,12 @@ watch(studioEntries, () => {
 async function loadDetail() {
   const seq = ++detailLoadSeq;
   loading.value = true;
+  loadStage.value = "正在准备详情页…";
+  try {
+    armDetailOpenTimer(seq);
+  } catch {
+    clearDetailOpenTimer();
+  }
   loadError.value = null;
   seasons.value = [];
   episodes.value = [];
@@ -795,41 +838,87 @@ async function loadDetail() {
   suppressNextSeasonWatch = false;
   activeSeasonId.value = null;
   try {
+    if (!hasPlaybackContext.value) {
+      loadError.value = missingPlaybackContextError();
+      void refreshPlaybackContextAndReload(seq);
+      return;
+    }
+    loadStage.value = "正在读取媒体详情…";
     const detail = await withDetailTimeout(lib.loadItem(props.id), "get_item_detail");
     if (seq !== detailLoadSeq) return;
     if (seq === detailLoadSeq) void loadSpecialFeatures(props.id, seq);
     if (seq === detailLoadSeq) void loadSimilar(props.id, seq);
     if (detail.Type === "BoxSet" && seq === detailLoadSeq) void loadCollectionItems(props.id, seq);
     if (isSeries.value) {
-      const sresp = await api.listSeasons(props.id);
-      if (seq !== detailLoadSeq) return;
-      seasons.value = sresp.Items;
-      if (sresp.Items[0]) activeSeasonId.value = sresp.Items[0].Id;
+      void loadSeriesSeasons(props.id, seq);
     } else if (detail.Type === "Episode" && detail.SeasonId && detail.SeriesId) {
-      const requestSeasonId = detail.SeasonId;
-      const requestSeriesId = detail.SeriesId;
-      const episodesSeq = ++episodeLoadSeq;
-      loadingEpisodes.value = true;
-      try {
-        const [sresp, eresp] = await Promise.all([
-          api.listSeasons(requestSeriesId),
-          api.listEpisodes({ seriesId: requestSeriesId, seasonId: requestSeasonId }),
-        ]);
-        if (seq !== detailLoadSeq || episodesSeq !== episodeLoadSeq) return;
-        seasons.value = sresp.Items;
-        episodes.value = eresp.Items;
-        suppressNextSeasonWatch = true;
-        activeSeasonId.value = requestSeasonId;
-      } finally {
-        if (seq === detailLoadSeq && episodesSeq === episodeLoadSeq) {
-          loadingEpisodes.value = false;
-        }
-      }
+      void loadEpisodeSeasonContext(detail, seq);
     }
   } catch (e) {
     if (seq === detailLoadSeq) loadError.value = String(e);
   } finally {
-    if (seq === detailLoadSeq) loading.value = false;
+    if (seq === detailLoadSeq) {
+      clearDetailOpenTimer();
+      loading.value = false;
+      loadStage.value = "";
+    }
+  }
+}
+
+async function refreshPlaybackContextAndReload(seq: number) {
+  const bootstrapTimeoutMs = detailBootstrapTimeoutMs();
+  loadStage.value = "正在同步账号与服务器…";
+  await Promise.all([
+    withDetailTimeout(serverStore.refresh(), "list_servers", bootstrapTimeoutMs).catch(() => {}),
+    withDetailTimeout(auth.refresh(), "list_accounts", bootstrapTimeoutMs).catch(() => {}),
+  ]);
+  if (seq !== detailLoadSeq || !hasPlaybackContext.value) return;
+  void loadDetail();
+}
+
+async function loadSeriesSeasons(seriesItemId: string, seq: number) {
+  const episodesSeq = ++episodeLoadSeq;
+  loadingEpisodes.value = true;
+  try {
+    const resp = await withDetailTimeout(api.listSeasons(seriesItemId), "list_seasons");
+    if (seq !== detailLoadSeq || episodesSeq !== episodeLoadSeq) return;
+    seasons.value = resp.Items;
+    if (resp.Items[0]) activeSeasonId.value = resp.Items[0].Id;
+  } catch (error) {
+    if (seq === detailLoadSeq && episodesSeq === episodeLoadSeq) seasons.value = [];
+    console.warn(error);
+  } finally {
+    if (seq === detailLoadSeq && episodesSeq === episodeLoadSeq) loadingEpisodes.value = false;
+  }
+}
+
+async function loadEpisodeSeasonContext(detail: MediaItem, seq: number) {
+  const requestSeasonId = detail.SeasonId;
+  const requestSeriesId = detail.SeriesId;
+  if (!requestSeasonId || !requestSeriesId) return;
+
+  const episodesSeq = ++episodeLoadSeq;
+  loadingEpisodes.value = true;
+  try {
+    const [sresp, eresp] = await Promise.all([
+      withDetailTimeout(api.listSeasons(requestSeriesId), "list_seasons"),
+      withDetailTimeout(api.listEpisodes({ seriesId: requestSeriesId, seasonId: requestSeasonId }), "list_episodes"),
+    ]);
+    if (seq !== detailLoadSeq || episodesSeq !== episodeLoadSeq) return;
+    seasons.value = sresp.Items;
+    episodes.value = eresp.Items;
+    suppressNextSeasonWatch = true;
+    activeSeasonId.value = requestSeasonId;
+  } catch (error) {
+    if (seq === detailLoadSeq && episodesSeq === episodeLoadSeq) {
+      seasons.value = [];
+      episodes.value = [];
+    }
+    console.warn(error);
+  } finally {
+    if (seq === detailLoadSeq && episodesSeq === episodeLoadSeq) {
+      loadingEpisodes.value = false;
+    }
   }
 }
 
@@ -904,7 +993,10 @@ watch(activeSeasonId, async (sid) => {
   const episodesSeq = ++episodeLoadSeq;
   loadingEpisodes.value = true;
   try {
-    const resp = await api.listEpisodes({ seriesId: requestSeriesId, seasonId: sid });
+    const resp = await withDetailTimeout(
+      api.listEpisodes({ seriesId: requestSeriesId, seasonId: sid }),
+      "list_episodes",
+    );
     if (seq !== detailLoadSeq || episodesSeq !== episodeLoadSeq || requestSeriesId !== seriesId.value) {
       return;
     }
@@ -991,6 +1083,10 @@ async function startDownload() {
 function goBack() {
   if (window.history.length > 1) router.back();
   else router.push("/home").catch(() => {});
+}
+
+function goServerSettings() {
+  router.push({ name: "settings", query: { c: "servers" } }).catch(() => {});
 }
 
 function openStudio(studio: StudioEntry) {
@@ -1219,7 +1315,7 @@ async function togglePlayed() {
   <main class="detail">
     <div v-if="loading && !item" class="detail__loading">
       <Icon icon="lucide:loader" width="24" class="spin" />
-      <span>加载中…</span>
+      <span>{{ loadStage || "加载中…" }}</span>
     </div>
 
     <div v-else-if="loadError && !item" class="detail__loading detail__loading--error">
@@ -1232,6 +1328,7 @@ async function togglePlayed() {
       </details>
       <div class="detail__error-actions">
         <button class="detail__retry" @click="loadDetail">重试</button>
+        <button class="detail__retry" @click="goServerSettings">服务器设置</button>
         <button class="detail__retry" @click="goBack">返回</button>
       </div>
     </div>

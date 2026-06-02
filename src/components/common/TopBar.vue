@@ -211,4 +211,13 @@ function back() {
     max-width: 100%;
   }
 }
+
+@media (max-height: 480px) {
+  .topbar {
+    height: 38px;
+  }
+  .search {
+    height: 28px;
+  }
+}
 </style>

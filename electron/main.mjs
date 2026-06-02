@@ -84,11 +84,13 @@ protocol.registerSchemesAsPrivileged([
     },
   },
 ]);
-app.disableHardwareAcceleration();
-app.commandLine.appendSwitch("disable-gpu");
-app.commandLine.appendSwitch("disable-gpu-compositing");
-app.commandLine.appendSwitch("disable-software-rasterizer");
-app.commandLine.appendSwitch("in-process-gpu");
+if (process.env.HILLS_ELECTRON_DISABLE_GPU === "1") {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch("disable-gpu");
+  app.commandLine.appendSwitch("disable-gpu-compositing");
+  app.commandLine.appendSwitch("disable-software-rasterizer");
+  app.commandLine.appendSwitch("in-process-gpu");
+}
 
 let desktopIntegration = null;
 const pendingProtocolUrls = [];
@@ -97,6 +99,7 @@ let secondaryBlackoutEnabled = false;
 let secondaryBlackoutWindows = [];
 let embedHostRect = null;
 let embedHostParent = null;
+let embedHostWindow = null;
 let embedHostProcess = null;
 let embedHostHwnd = null;
 let embedHostStdout = "";
@@ -119,9 +122,29 @@ function markEmbedHostEvent(patch = {}) {
 }
 
 function getEmbeddedMpvState() {
+  const host = getMainAppWindow();
+  const hostBounds = host && !host.isDestroyed() ? host.getBounds() : null;
+  const hostContentBounds = host && !host.isDestroyed() ? host.getContentBounds() : null;
+  const mpvHostBounds =
+    embedHostWindow && !embedHostWindow.isDestroyed() ? embedHostWindow.getBounds() : null;
   return {
     ...embedHostDiagnostics,
-    hasProcess: Boolean(embedHostProcess && embedHostProcess.exitCode == null),
+    mode: useWidEmbedHost() ? "wid" : "overlay",
+    hostKind: useBrowserWindowEmbedHost()
+      ? "browser-window"
+      : useNativeChildEmbedHost()
+      ? "native-child"
+      : "overlay",
+    hostWindowHandle: host && !host.isDestroyed() ? nativeWindowHandleDecimal(host) : null,
+    hostBounds,
+    hostContentBounds,
+    mpvHostWindowHandle:
+      embedHostWindow && !embedHostWindow.isDestroyed() ? nativeWindowHandleDecimal(embedHostWindow) : null,
+    mpvHostBounds,
+    hasProcess: Boolean(
+      (embedHostProcess && embedHostProcess.exitCode == null) ||
+        (embedHostWindow && !embedHostWindow.isDestroyed()),
+    ),
     processId: embedHostProcess?.pid ?? null,
     hasHwnd: Boolean(embedHostHwnd),
     hwnd: embedHostHwnd,
@@ -129,6 +152,18 @@ function getEmbeddedMpvState() {
     mpvRunning: mpv.isRunning(),
     mpvEmbedWindowHandle: mpv.embedWindowHandle ?? null,
   };
+}
+
+function useWidEmbedHost() {
+  return process.env.HILLS_ELECTRON_MPV_WID === "1";
+}
+
+function useNativeChildEmbedHost() {
+  return useWidEmbedHost() && process.env.HILLS_ELECTRON_MPV_NATIVE_CHILD === "1";
+}
+
+function useBrowserWindowEmbedHost() {
+  return useWidEmbedHost() && !useNativeChildEmbedHost();
 }
 
 function queueProtocolUrl(url) {
@@ -216,6 +251,24 @@ function waitForChildExit(child, timeoutMs) {
     }, timeoutMs);
     child.once("exit", done);
     child.once("error", done);
+  });
+}
+
+function waitForWindowFullscreenState(win, enabled, timeoutMs = 1500) {
+  if (!win || win.isDestroyed() || win.isFullScreen() === enabled) {
+    return Promise.resolve(Boolean(win && !win.isDestroyed() && win.isFullScreen()));
+  }
+  const eventName = enabled ? "enter-full-screen" : "leave-full-screen";
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      win.off(eventName, done);
+      win.off("closed", done);
+      resolve(!win.isDestroyed() && win.isFullScreen());
+    };
+    const timer = setTimeout(done, timeoutMs);
+    win.once(eventName, done);
+    win.once("closed", done);
   });
 }
 
@@ -956,19 +1009,79 @@ function detachEmbedHostParentListeners() {
   }
   embedHostParent.off("move", applyEmbedHostBounds);
   embedHostParent.off("resize", applyEmbedHostBounds);
+  embedHostParent.off("minimize", syncBrowserWindowEmbedVisibility);
+  embedHostParent.off("restore", syncBrowserWindowEmbedVisibility);
+  embedHostParent.off("show", syncBrowserWindowEmbedVisibility);
+  embedHostParent.off("hide", syncBrowserWindowEmbedVisibility);
   embedHostParent.off("closed", destroyEmbedHostWindow);
   embedHostParent = null;
 }
 
-function applyEmbedHostBounds() {
-  if (!embedHostProcess || !embedHostRect) return;
+function browserWindowEmbedBounds(parent) {
+  if (!embedHostRect) return null;
+  const parentBounds = parent.getContentBounds();
+  return {
+    x: Math.round(parentBounds.x + embedHostRect.x),
+    y: Math.round(parentBounds.y + embedHostRect.y),
+    width: Math.max(1, Math.round(embedHostRect.width)),
+    height: Math.max(1, Math.round(embedHostRect.height)),
+  };
+}
+
+function applyBrowserWindowEmbedBounds() {
+  if (!embedHostWindow || embedHostWindow.isDestroyed()) return;
   const parent = getMainAppWindow();
   if (!parent || parent.isDestroyed()) return;
-  const parentBounds = parent.getContentBounds();
+  const bounds = browserWindowEmbedBounds(parent);
+  if (!bounds) return;
+  embedHostWindow.setBounds(bounds, false);
+  if (typeof embedHostWindow.moveTop === "function") embedHostWindow.moveTop();
+}
+
+function syncBrowserWindowEmbedVisibility() {
+  if (!embedHostWindow || embedHostWindow.isDestroyed()) return;
+  const parent = getMainAppWindow();
+  const shouldShow = Boolean(
+    embedHostDiagnostics.lastVisible &&
+      parent &&
+      !parent.isDestroyed() &&
+      parent.isVisible() &&
+      !parent.isMinimized(),
+  );
+  if (!shouldShow) {
+    embedHostWindow.hide();
+    return;
+  }
+  applyBrowserWindowEmbedBounds();
+  embedHostWindow.showInactive();
+}
+
+function applyEmbedHostBounds() {
+  if (!embedHostRect) return;
+  const parent = getMainAppWindow();
+  if (!parent || parent.isDestroyed()) return;
+  if (!useWidEmbedHost()) {
+    const parentBounds = parent.getContentBounds();
+    const screenRect = {
+      x: parentBounds.x + embedHostRect.x,
+      y: parentBounds.y + embedHostRect.y,
+      width: embedHostRect.width,
+      height: embedHostRect.height,
+    };
+    void mpv.setOverlayWindowRect(screenRect).catch((error) => {
+      markEmbedHostEvent({ lastError: error?.message ?? String(error) });
+    });
+    return;
+  }
+  if (useBrowserWindowEmbedHost()) {
+    applyBrowserWindowEmbedBounds();
+    return;
+  }
+  if (!embedHostProcess) return;
   sendEmbedHostCommand({
     type: "rect",
-    x: parentBounds.x + embedHostRect.x,
-    y: parentBounds.y + embedHostRect.y,
+    x: embedHostRect.x,
+    y: embedHostRect.y,
     width: embedHostRect.width,
     height: embedHostRect.height,
     scale: embedHostRect.scale ?? 1,
@@ -989,6 +1102,60 @@ function resolveEmbedHostHelperPath() {
 function sendEmbedHostCommand(command) {
   if (!embedHostProcess?.stdin?.writable) return;
   embedHostProcess.stdin.write(`${JSON.stringify(command)}\n`);
+}
+
+async function startBrowserWindowEmbedHost(parent) {
+  if (embedHostWindow && !embedHostWindow.isDestroyed() && embedHostHwnd) {
+    applyBrowserWindowEmbedBounds();
+    return embedHostHwnd;
+  }
+
+  detachEmbedHostParentListeners();
+  embedHostParent = parent;
+  markEmbedHostEvent({ helperPath: "electron BrowserWindow mpv host", lastError: null });
+
+  const win = new BrowserWindow({
+    parent,
+    frame: false,
+    show: false,
+    skipTaskbar: true,
+    focusable: false,
+    transparent: false,
+    backgroundColor: "#000000",
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  embedHostWindow = win;
+  embedHostHwnd = nativeWindowHandleDecimal(win);
+  win.setMenu(null);
+  win.setMenuBarVisibility(false);
+  win.setAutoHideMenuBar(true);
+  win.setIgnoreMouseEvents(true, { forward: true });
+  win.once("closed", () => {
+    if (embedHostWindow === win) {
+      embedHostWindow = null;
+      embedHostHwnd = null;
+    }
+  });
+
+  parent.on("move", applyEmbedHostBounds);
+  parent.on("resize", applyEmbedHostBounds);
+  parent.on("minimize", syncBrowserWindowEmbedVisibility);
+  parent.on("restore", syncBrowserWindowEmbedVisibility);
+  parent.on("show", syncBrowserWindowEmbedVisibility);
+  parent.on("hide", syncBrowserWindowEmbedVisibility);
+  parent.once("closed", destroyEmbedHostWindow);
+
+  applyBrowserWindowEmbedBounds();
+  syncBrowserWindowEmbedVisibility();
+  return embedHostHwnd;
 }
 
 function startEmbedHostProcess(parent) {
@@ -1064,9 +1231,14 @@ function startEmbedHostProcess(parent) {
 async function destroyEmbedHostWindow() {
   detachEmbedHostParentListeners();
   const child = embedHostProcess;
+  const hostWindow = embedHostWindow;
   embedHostProcess = null;
+  embedHostWindow = null;
   embedHostHwnd = null;
   embedHostRect = null;
+  if (hostWindow && !hostWindow.isDestroyed()) {
+    hostWindow.destroy();
+  }
   if (child) {
     const pid = child.pid;
     if (child.stdin?.writable) child.stdin.write(`${JSON.stringify({ type: "destroy" })}\n`);
@@ -1089,7 +1261,15 @@ async function attachEmbeddedMpvHost() {
     markEmbedHostEvent({ lastError: "main window not ready for embedded mpv" });
     throw new Error("main window not ready for embedded mpv");
   }
-  const hwnd = await startEmbedHostProcess(host);
+  if (!useWidEmbedHost()) {
+    await mpv.clearEmbedWindowHandle();
+    applyEmbedHostBounds();
+    return null;
+  }
+  await mpv.setOverlayWindowRect(null).catch(() => {});
+  const hwnd = useBrowserWindowEmbedHost()
+    ? await startBrowserWindowEmbedHost(host)
+    : await startEmbedHostProcess(host);
   await mpv.setEmbedWindowHandle(hwnd);
   return null;
 }
@@ -1117,6 +1297,14 @@ async function setEmbeddedMpvVisible(visible) {
     lastVisible: Boolean(visible),
     lastError: null,
   });
+  if (!useWidEmbedHost()) {
+    if (visible) applyEmbedHostBounds();
+    return null;
+  }
+  if (useBrowserWindowEmbedHost()) {
+    syncBrowserWindowEmbedVisibility();
+    return null;
+  }
   if (!embedHostProcess) return null;
   sendEmbedHostCommand({ type: "visible", visible: Boolean(visible) });
   if (visible) applyEmbedHostBounds();
@@ -1129,6 +1317,13 @@ async function detachEmbeddedMpvHost() {
     lastVisible: false,
     lastError: null,
   });
+  if (!useWidEmbedHost()) {
+    await mpv.shutdown().catch(() => {});
+    await mpv.clearEmbedWindowHandle();
+    await mpv.setOverlayWindowRect(null).catch(() => {});
+    embedHostRect = null;
+    return null;
+  }
   await mpv.shutdown().catch(() => {});
   await mpv.clearEmbedWindowHandle();
   await destroyEmbedHostWindow();
@@ -2152,8 +2347,9 @@ async function handleInvoke(command, args = {}) {
   if (command === "set_fullscreen") {
     const target = BrowserWindow.getFocusedWindow() ?? getMainAppWindow();
     if (!target || target.isDestroyed()) return false;
-    target.setFullScreen(Boolean(args.enabled));
-    return target.isFullScreen();
+    const enabled = Boolean(args.enabled);
+    target.setFullScreen(enabled);
+    return waitForWindowFullscreenState(target, enabled);
   }
 
   if (command === "set_secondary_display_blackout") {
@@ -2477,7 +2673,7 @@ async function handleInvoke(command, args = {}) {
   if (command === "seek_relative") {
     const deltaMs = Number(args.payload?.deltaMs ?? 0);
     return runMpvIfRunning(() =>
-      mpv.command(["seek", deltaMs / 1000, "relative+keyframes"]),
+      mpv.command(["seek", deltaMs / 1000, "relative+exact"]),
     );
   }
 
@@ -2770,8 +2966,8 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
-    minWidth: 960,
-    minHeight: 600,
+    minWidth: 720,
+    minHeight: 420,
     title: "Hills Lite",
     backgroundColor: "#000000",
     autoHideMenuBar: true,

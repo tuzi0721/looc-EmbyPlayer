@@ -117,11 +117,11 @@ body {
   overflow: hidden;
 }
 
-/* When the embedded mpv child window is active we punch through the webview
-   so the native video shows through. */
+/* The native mpv child window is an actual child of the app window. Keep the
+   webview opaque so Windows composition cannot leak desktop pixels through it. */
 html.embedded-player,
 html.embedded-player body {
-  background: transparent !important;
+  background: #000 !important;
 }
 html.embedded-player .app-backdrop {
   display: none;

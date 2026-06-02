@@ -38,9 +38,16 @@ const lib = useLibraryStore();
 const serverStore = useServerStore();
 const settings = useSettingsStore();
 
+const desktopBridge =
+  typeof window !== "undefined" && Boolean((window as Window & { hillsLite?: unknown }).hillsLite);
+const tauriBridge =
+  typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
+const nativeMpvDebug =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("nativeMpv") === "1";
 const embedVideo =
   typeof window !== "undefined" &&
-  Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
+  (tauriBridge || desktopBridge || nativeMpvDebug);
 const useHtmlVideo = !embedVideo;
 
 const errorText = ref<string | null>(null);
@@ -1218,6 +1225,7 @@ function onPlayerPointerMove(event: PointerEvent) {
 function bumpControls() {
   showControls.value = true;
   scheduleEmbedRectLayoutSync();
+  if (embedVideo) return;
   clearControlsHideTimer();
   hideTimer = window.setTimeout(() => {
     if (!hasOpenPlayerPanel()) showControls.value = false;
@@ -1424,11 +1432,12 @@ async function seekToMs(value: number) {
 }
 
 async function nudgeSeek(deltaSec: number) {
-  if (useHtmlVideo) {
-    await seekToMs(positionMs.value + deltaSec * 1000);
-  } else {
+  if (!useHtmlVideo) {
     await player.seekRelative(deltaSec * 1000);
+    bumpControls();
+    return;
   }
+  await seekToMs(positionMs.value + deltaSec * 1000);
   bumpControls();
 }
 
@@ -2697,10 +2706,10 @@ onBeforeUnmount(async () => {
   color: white;
   overflow: hidden;
 }
-/* When embedded, the video area is rendered by a native child window; we
-   leave the area fully transparent so the child shows through. */
+/* Embedded playback uses a native child window above the webview. Keep the
+   app surface opaque so Windows composition cannot leak desktop pixels. */
 .player--embedded {
-  background: transparent;
+  background: #000;
 }
 .player__stage {
   position: absolute;
@@ -2768,6 +2777,9 @@ onBeforeUnmount(async () => {
 }
 .player--embedded .player__video {
   background: transparent;
+}
+.player--embedded .player__stage {
+  background: #000;
 }
 .player__danmaku {
   position: absolute;

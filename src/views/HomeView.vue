@@ -292,6 +292,10 @@ function gotoAddServer() {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.resume-card :deep(.poster__meta),
+.lib-thumb :deep(.poster__meta) {
+  display: none;
+}
 .lib-thumb {
   flex: 0 0 120px;
   appearance: none;
@@ -307,6 +311,28 @@ function gotoAddServer() {
   margin-top: 6px;
   font-size: 12px;
   font-weight: 500;
+}
+
+@media (max-height: 820px) and (min-width: 1101px) {
+  .content__pad {
+    padding-bottom: 8px;
+  }
+  .row-section {
+    margin-bottom: 2px;
+  }
+  .row-head {
+    margin-bottom: 8px;
+  }
+  .resume-card {
+    flex-basis: 184px;
+  }
+  .resume-card__title,
+  .resume-card__sub {
+    display: none;
+  }
+  .lib-thumb {
+    flex-basis: 96px;
+  }
 }
 
 @media (max-height: 700px) and (max-width: 1100px) {
@@ -340,6 +366,34 @@ function gotoAddServer() {
   .lib-thumb__name {
     margin-top: 4px;
     font-size: 11px;
+  }
+}
+
+@media (max-height: 480px) and (max-width: 760px) {
+  .content__pad {
+    padding-bottom: 4px;
+  }
+  .row-section {
+    margin-bottom: 0;
+  }
+  .row-head {
+    margin-bottom: 4px;
+  }
+  .row-head h2 {
+    font-size: 15px;
+  }
+  .hscroll {
+    gap: 8px;
+    padding-bottom: 0;
+  }
+  .resume-card {
+    flex-basis: 120px;
+  }
+  .lib-thumb {
+    flex-basis: 64px;
+  }
+  .lib-thumb__name {
+    display: none;
   }
 }
 

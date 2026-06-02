@@ -155,6 +155,7 @@ export class MpvController {
     this.pending = new Map();
     this.starting = null;
     this.embedWindowHandle = null;
+    this.overlayWindowRect = null;
   }
 
   isRunning() {
@@ -184,6 +185,31 @@ export class MpvController {
     await this.setEmbedWindowHandle(null);
   }
 
+  async setOverlayWindowRect(rect) {
+    if (!rect) {
+      this.overlayWindowRect = null;
+      return;
+    }
+    this.overlayWindowRect = {
+      x: Math.round(Number(rect.x) || 0),
+      y: Math.round(Number(rect.y) || 0),
+      width: Math.max(1, Math.round(Number(rect.width) || 1)),
+      height: Math.max(1, Math.round(Number(rect.height) || 1)),
+    };
+    if (this.isRunning() && !this.embedWindowHandle) {
+      await this.applyOverlayWindowRect();
+    }
+  }
+
+  async applyOverlayWindowRect() {
+    const rect = this.overlayWindowRect;
+    if (!rect || this.embedWindowHandle || !this.isRunning()) return;
+    const geometry = `${rect.width}x${rect.height}+${rect.x}+${rect.y}`;
+    await this.setProperty("border", false, { start: false }).catch(() => {});
+    await this.setProperty("ontop", true, { start: false }).catch(() => {});
+    await this.setProperty("geometry", geometry, { start: false }).catch(() => {});
+  }
+
   async startProcess() {
     if (this.isRunning()) return;
     await this.shutdown();
@@ -195,6 +221,7 @@ export class MpvController {
     }
     const pipePath = `\\\\.\\pipe\\hills-lite-mpv-${randomUUID()}`;
     const args = [
+      "--no-config",
       "--idle=yes",
       "--keep-open=yes",
       "--title=Hills Lite",
@@ -205,9 +232,29 @@ export class MpvController {
     if (this.embedWindowHandle) {
       args.push(`--wid=${this.embedWindowHandle}`);
       args.push("--force-window=no");
+      if (process.env.HILLS_ELECTRON_MPV_NATIVE_CHILD === "1") {
+        args.push("--vo=direct3d");
+      } else {
+        args.push("--vo=gpu-next,gpu,direct3d");
+        args.push("--gpu-api=d3d11");
+        args.push("--gpu-context=d3d11");
+        args.push("--d3d11-output-mode=window");
+      }
+      args.push("--background=color");
+      args.push("--background-color=#FF000000");
       args.push("--d3d11-flip=no");
     } else {
       args.push("--force-window=yes");
+      args.push("--no-border");
+      args.push("--ontop=yes");
+      args.push("--d3d11-flip=no");
+      args.push("--no-osc");
+      args.push("--cursor-autohide=always");
+      args.push("--keepaspect-window=no");
+      if (this.overlayWindowRect) {
+        const rect = this.overlayWindowRect;
+        args.push(`--geometry=${rect.width}x${rect.height}+${rect.x}+${rect.y}`);
+      }
     }
     if (this.logDir) {
       fs.mkdirSync(this.logDir, { recursive: true });
@@ -320,6 +367,7 @@ export class MpvController {
     await this.ensureStarted();
     await this.setProperty("sub-auto", autoloadSubtitles ? "fuzzy" : "no");
     if (userAgent) await this.setProperty("user-agent", userAgent);
+    await this.applyOverlayWindowRect().catch(() => {});
     const headerFields = (Array.isArray(headers) ? headers : [])
       .filter(([key, value]) => key && value != null && value !== "")
       .map(([key, value]) => `${key}: ${String(value).replace(/[\r\n]+/g, " ")}`);

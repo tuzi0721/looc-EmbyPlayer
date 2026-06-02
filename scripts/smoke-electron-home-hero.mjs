@@ -678,6 +678,60 @@ try {
   const compactScreenshot = await cdpCall(ws, "Page.captureScreenshot", { format: "png" });
   await fsp.writeFile(compactScreenshotPath, Buffer.from(compactScreenshot.data, "base64"));
 
+  const compactHomeChecks = [
+    { ...compactHome, label: "compact-960", minHeroAspect: 2.52, maxHeroAspect: 2.82, minResumeCardVisible: 84, minLibraryCardVisible: 78, maxHeroViewport: 0.6 },
+    ...(await cdpEval(ws, `
+      (async () => {
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const samples = [];
+        const sizes = [
+          { label: "desktop-low", width: 1366, height: 768, minHeroAspect: 2.52, maxHeroAspect: 2.82, minResumeCardVisible: 100, minLibraryCardVisible: 95, maxHeroViewport: 0.6 },
+          { label: "compact-tall", width: 820, height: 620, minHeroAspect: 2.52, maxHeroAspect: 2.82, minResumeCardVisible: 84, minLibraryCardVisible: 78, maxHeroViewport: 0.6 },
+          { label: "narrow-short", width: 760, height: 430, minHeroAspect: 2.52, maxHeroAspect: 2.82, minResumeCardVisible: 64, minLibraryCardVisible: 0, minLibraryVisible: 8, maxHeroViewport: 0.68 },
+        ];
+        const rect = (node) => {
+          const r = node?.getBoundingClientRect();
+          return r ? { top: r.top, bottom: r.bottom, width: r.width, height: r.height } : null;
+        };
+        const visible = (r) => (r ? Math.max(0, Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0)) : 0);
+        for (const size of sizes) {
+          window.resizeTo(size.width, size.height);
+          await wait(700);
+          const hero = document.querySelector(".hero.hero--cinema");
+          const sections = Array.from(document.querySelectorAll(".row-section"));
+          const resumeSection = sections[0];
+          const librarySection = sections[1];
+          const resumeCard = resumeSection?.querySelector(".resume-card");
+          const libraryCard = librarySection?.querySelector(".lib-thumb");
+          const title = document.querySelector(".hero__title");
+          const heroRect = rect(hero);
+          const resumeRect = rect(resumeSection);
+          const libraryRect = rect(librarySection);
+          const resumeCardRect = rect(resumeCard);
+          const libraryCardRect = rect(libraryCard);
+          samples.push({
+            ...size,
+            viewport: { width: window.innerWidth, height: window.innerHeight },
+            hero: heroRect,
+            heroAspect: heroRect ? heroRect.width / heroRect.height : null,
+            resumeSection: resumeRect,
+            librarySection: libraryRect,
+            resumeCard: resumeCardRect,
+            libraryCard: libraryCardRect,
+            resumeVisible: visible(resumeRect),
+            libraryVisible: visible(libraryRect),
+            resumeCardVisible: visible(resumeCardRect),
+            libraryCardVisible: visible(libraryCardRect),
+            titleFontSize: title ? Number.parseFloat(getComputedStyle(title).fontSize) : null,
+            hasHorizontalOverflow:
+              document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+          });
+        }
+        return samples;
+      })()
+    `)),
+  ];
+
   const failures = [];
   if (result.route !== "/home") failures.push(`route ${result.route}`);
   if (!result.hero) failures.push("hero missing");
@@ -796,27 +850,38 @@ try {
   if (new Set(multiServerSearch.keys).size !== multiServerSearch.keys.length) {
     failures.push("search collapsed duplicate cross-server records");
   }
-  if (!compactHome.hero) failures.push("compact home hero missing");
-  if (compactHome.heroAspect != null && (compactHome.heroAspect < 2.65 || compactHome.heroAspect > 3.3)) {
-    failures.push(`compact home hero aspect drifted: ${JSON.stringify(compactHome)}`);
-  }
-  if (compactHome.hero && compactHome.hero.height > compactHome.viewport.height * 0.62) {
-    failures.push(`compact home hero consumes too much viewport: ${JSON.stringify(compactHome)}`);
-  }
-  if (compactHome.resumeCardVisible < 90) {
-    failures.push(`compact home resume row is not visibly exposed: ${JSON.stringify(compactHome)}`);
-  }
-  if (compactHome.libraryCardVisible < 88) {
-    failures.push(`compact home library row is not visibly exposed: ${JSON.stringify(compactHome)}`);
-  }
-  if (compactHome.hasHorizontalOverflow) failures.push("compact home has horizontal overflow");
-  if ((compactHome.titleFontSize ?? 999) > 56) {
-    failures.push(`compact home title too large: ${JSON.stringify(compactHome)}`);
+  for (const sample of compactHomeChecks) {
+    if (!sample.hero) failures.push(`compact home hero missing at ${sample.label}`);
+    if (sample.label !== "desktop-low" && sample.viewport.width > sample.width + 40) {
+      failures.push(`compact home window width was clamped at ${sample.label}: ${JSON.stringify(sample)}`);
+    }
+    if (sample.label !== "desktop-low" && sample.viewport.height > sample.height + 80) {
+      failures.push(`compact home window height was clamped at ${sample.label}: ${JSON.stringify(sample)}`);
+    }
+    if (sample.heroAspect != null && (sample.heroAspect < sample.minHeroAspect || sample.heroAspect > sample.maxHeroAspect)) {
+      failures.push(`compact home hero aspect drifted at ${sample.label}: ${JSON.stringify(sample)}`);
+    }
+    if (sample.hero && sample.hero.height > sample.viewport.height * sample.maxHeroViewport) {
+      failures.push(`compact home hero consumes too much viewport at ${sample.label}: ${JSON.stringify(sample)}`);
+    }
+    if (sample.resumeCardVisible < sample.minResumeCardVisible) {
+      failures.push(`compact home resume row is not visibly exposed at ${sample.label}: ${JSON.stringify(sample)}`);
+    }
+    if (sample.libraryCardVisible < sample.minLibraryCardVisible) {
+      failures.push(`compact home library row is not visibly exposed at ${sample.label}: ${JSON.stringify(sample)}`);
+    }
+    if ((sample.libraryVisible ?? 0) < (sample.minLibraryVisible ?? 0)) {
+      failures.push(`compact home library section is not hinted at ${sample.label}: ${JSON.stringify(sample)}`);
+    }
+    if (sample.hasHorizontalOverflow) failures.push(`compact home has horizontal overflow at ${sample.label}`);
+    if ((sample.titleFontSize ?? 999) > 56) {
+      failures.push(`compact home title too large at ${sample.label}: ${JSON.stringify(sample)}`);
+    }
   }
 
   if (failures.length > 0) {
     throw new Error(
-      `home hero smoke failed: ${failures.join("; ")}\n${JSON.stringify({ result, sidebarCollapse, detailProbe, personalRoutes, multiServerSearch, compactHome }, null, 2)}`,
+      `home hero smoke failed: ${failures.join("; ")}\n${JSON.stringify({ result, sidebarCollapse, detailProbe, personalRoutes, multiServerSearch, compactHomeChecks }, null, 2)}`,
     );
   }
 

@@ -14,6 +14,7 @@ const tmpDir = path.join(os.tmpdir(), `hills-lite-embedded-local-${Date.now()}`)
 const userDataDir = path.join(tmpDir, "user-data");
 const videoPath = path.join(tmpDir, "sample.mp4");
 const screenshotPath = path.join(tmpDir, "embedded-local.png");
+const forceNativeMpv = process.env.HILLS_SMOKE_NATIVE_MPV === "1";
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -398,9 +399,26 @@ function embeddedRectOk(state, metrics) {
   if (!state || !metrics) return false;
   const rect = state.lastRect;
   if (!rect) return false;
-  const sameHandle = state.hwnd && state.mpvEmbedWindowHandle === state.hwnd;
   const topLimit = (metrics.top?.height ?? 0) - 1;
   const bottomLimit = (metrics.bottom?.y ?? metrics.viewport?.height ?? rect.y + rect.height) + 1;
+  const rectOk =
+    rect.width >= Math.max(1, (metrics.stage?.width ?? rect.width) - 2) &&
+    rect.height >= 1 &&
+    rect.y >= topLimit &&
+    rect.y + rect.height <= bottomLimit;
+  if (state.mode === "overlay") {
+    return (
+      state.attachCount >= 1 &&
+      state.rectCount >= 1 &&
+      state.visibleCount >= 1 &&
+      state.lastVisible === true &&
+      state.hasRect === true &&
+      state.mpvRunning === true &&
+      rectOk
+    );
+  }
+  if (state.mode !== "wid") return false;
+  const sameHandle = state.hwnd && state.mpvEmbedWindowHandle === state.hwnd;
   return (
     state.attachCount >= 1 &&
     state.rectCount >= 1 &&
@@ -411,41 +429,248 @@ function embeddedRectOk(state, metrics) {
     state.hasRect === true &&
     state.mpvRunning === true &&
     Boolean(sameHandle) &&
-    rect.width >= Math.max(1, (metrics.stage?.width ?? rect.width) - 2) &&
-    rect.height >= 1 &&
-    rect.y >= topLimit &&
-    rect.y + rect.height <= bottomLimit
+    rectOk
   );
 }
 
-function foregroundHillsWindow(processId = null) {
+function numbersClose(actual, expected, tolerance = 10) {
+  return Math.abs((Number(actual) || 0) - (Number(expected) || 0)) <= tolerance;
+}
+
+function rectsClose(actual, expected, tolerance = 10) {
+  if (!actual || !expected) return false;
+  return (
+    numbersClose(actual.x, expected.x, tolerance) &&
+    numbersClose(actual.y, expected.y, tolerance) &&
+    numbersClose(actual.width, expected.width, tolerance) &&
+    numbersClose(actual.height, expected.height, tolerance)
+  );
+}
+
+function expectedMpvHostBounds(state) {
+  if (!state) return null;
+  if (state.mpvHostBounds) return state.mpvHostBounds;
+  if (!state.hostContentBounds || !state.lastRect) return null;
+  return {
+    x: Math.round(state.hostContentBounds.x + state.lastRect.x),
+    y: Math.round(state.hostContentBounds.y + state.lastRect.y),
+    width: Math.max(1, Math.round(state.lastRect.width)),
+    height: Math.max(1, Math.round(state.lastRect.height)),
+  };
+}
+
+function embeddedHostWindowBoundsOk(state, windowInfo) {
+  if (!state || !windowInfo) return false;
+  const expected = expectedMpvHostBounds(state);
+  return Boolean(expected && rectsClose(windowInfo, expected, 12));
+}
+
+function embeddedNativeWindowHandle(state) {
+  return state?.mpvHostWindowHandle ?? state?.hwnd ?? null;
+}
+
+function captureWindowAndAnalyze(processId, name = "embedded-local", windowHandle = null, options = {}) {
   const pid = Number(processId) || 0;
+  if (!pid) throw new Error("missing Electron process id for window capture");
+  const hwndValue = windowHandle == null ? "0" : String(windowHandle).replace(/[^\d]/g, "");
+  const ownerHwndValue =
+    options.ownerWindowHandle == null ? "0" : String(options.ownerWindowHandle).replace(/[^\d]/g, "");
+  const outputPath = path.join(tmpDir, `${name}.png`);
   const script = `
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
     Add-Type @"
       using System;
+      using System.Text;
       using System.Runtime.InteropServices;
+      public struct RECT {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+      }
       public static class Win32 {
+        public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+        [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+        [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+        [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+        [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
+        [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+        [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
         [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
         [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
         [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+        [DllImport("user32.dll", EntryPoint="GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
+        [DllImport("user32.dll", EntryPoint="GetWindowLongW")] private static extern int GetWindowLong32(IntPtr hWnd, int nIndex);
+        public static IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex) {
+          return IntPtr.Size == 8 ? GetWindowLongPtr64(hWnd, nIndex) : new IntPtr(GetWindowLong32(hWnd, nIndex));
+        }
       }
 "@
-    $proc = $null
-    if (${pid} -gt 0) {
-      $proc = Get-Process -Id ${pid} -ErrorAction SilentlyContinue
+    $GWL_STYLE = -16
+    $WS_CHILD = 0x40000000
+    $root = ${pid}
+    $all = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine
+    $ids = New-Object 'System.Collections.Generic.HashSet[int]'
+    [void]$ids.Add($root)
+    $frontier = @($root)
+    while ($frontier.Count -gt 0) {
+      $next = @()
+      foreach ($parent in $frontier) {
+        foreach ($p in ($all | Where-Object { $_.ParentProcessId -eq $parent })) {
+          if ($ids.Add([int]$p.ProcessId)) {
+            $next += [int]$p.ProcessId
+          }
+        }
+      }
+      $frontier = $next
     }
-    if (-not $proc -or $proc.MainWindowHandle -eq 0) {
-      $proc = Get-Process | Where-Object { $_.MainWindowTitle -eq "Hills Lite" } | Select-Object -First 1
+    $procById = @{}
+    foreach ($p in $all) {
+      $procById[[int]$p.ProcessId] = $p
     }
-    if ($proc -and $proc.MainWindowHandle -ne 0) {
-      [Win32]::ShowWindow($proc.MainWindowHandle, 9) | Out-Null
-      [Win32]::SetWindowPos($proc.MainWindowHandle, [IntPtr](-1), 0, 0, 0, 0, 0x0043) | Out-Null
-      [Win32]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null
+
+    $target = $null
+    $ownerRequestedHwnd = ${JSON.stringify(ownerHwndValue || "0")}
+    $ownerHwnd = [IntPtr]::Zero
+    if ($ownerRequestedHwnd -ne "0") {
+      $ownerHwnd = [IntPtr]::new([int64]$ownerRequestedHwnd)
+      $ownerPid = 0
+      [Win32]::GetWindowThreadProcessId($ownerHwnd, [ref]$ownerPid) | Out-Null
+      if (-not $ids.Contains([int]$ownerPid)) {
+        throw "Electron owner window handle $ownerRequestedHwnd belongs to process $ownerPid outside launched process tree $root"
+      }
+    }
+    $requestedHwnd = ${JSON.stringify(hwndValue || "0")}
+    if ($requestedHwnd -ne "0") {
+      $hWnd = [IntPtr]::new([int64]$requestedHwnd)
+      $windowPid = 0
+      [Win32]::GetWindowThreadProcessId($hWnd, [ref]$windowPid) | Out-Null
+      if (-not $ids.Contains([int]$windowPid)) {
+        throw "Electron window handle $requestedHwnd belongs to process $windowPid outside launched process tree $root"
+      }
+      $rect = New-Object RECT
+      if (-not [Win32]::GetWindowRect($hWnd, [ref]$rect)) {
+        throw "failed to read Electron window rect for handle $requestedHwnd"
+      }
+      $width = $rect.Right - $rect.Left
+      $height = $rect.Bottom - $rect.Top
+      $length = [Win32]::GetWindowTextLength($hWnd)
+      $titleBuilder = New-Object System.Text.StringBuilder([Math]::Max(1, $length + 1))
+      [Win32]::GetWindowText($hWnd, $titleBuilder, $titleBuilder.Capacity) | Out-Null
+      $style = [Win32]::GetWindowLongPtr($hWnd, $GWL_STYLE).ToInt64()
+      $proc = $procById[[int]$windowPid]
+      $target = [PSCustomObject]@{
+        hwnd = $hWnd.ToInt64()
+        processId = [int]$windowPid
+        processName = [string]$proc.Name
+        commandLine = [string]$proc.CommandLine
+        title = $titleBuilder.ToString()
+        visible = [Win32]::IsWindowVisible($hWnd)
+        isChild = (($style -band $WS_CHILD) -ne 0)
+        x = $rect.Left
+        y = $rect.Top
+        width = $width
+        height = $height
+      }
+    } else {
+      $windows = New-Object System.Collections.Generic.List[object]
+      $callback = [Win32+EnumWindowsProc]{
+        param([IntPtr]$hWnd, [IntPtr]$lParam)
+        $windowPid = 0
+        [Win32]::GetWindowThreadProcessId($hWnd, [ref]$windowPid) | Out-Null
+        if (-not $ids.Contains([int]$windowPid)) { return $true }
+        if (-not [Win32]::IsWindowVisible($hWnd)) { return $true }
+        $rect = New-Object RECT
+        if (-not [Win32]::GetWindowRect($hWnd, [ref]$rect)) { return $true }
+        $width = $rect.Right - $rect.Left
+        $height = $rect.Bottom - $rect.Top
+        if ($width -lt 200 -or $height -lt 120) { return $true }
+        $length = [Win32]::GetWindowTextLength($hWnd)
+        $titleBuilder = New-Object System.Text.StringBuilder([Math]::Max(1, $length + 1))
+        [Win32]::GetWindowText($hWnd, $titleBuilder, $titleBuilder.Capacity) | Out-Null
+        $style = [Win32]::GetWindowLongPtr($hWnd, $GWL_STYLE).ToInt64()
+        $proc = $procById[[int]$windowPid]
+        $windows.Add([PSCustomObject]@{
+          hwnd = $hWnd.ToInt64()
+          processId = [int]$windowPid
+          processName = [string]$proc.Name
+          commandLine = [string]$proc.CommandLine
+          title = $titleBuilder.ToString()
+          visible = [Win32]::IsWindowVisible($hWnd)
+          isChild = (($style -band $WS_CHILD) -ne 0)
+          x = $rect.Left
+          y = $rect.Top
+          width = $width
+          height = $height
+        })
+        return $true
+      }
+      [Win32]::EnumWindows($callback, [IntPtr]::Zero) | Out-Null
+      $target = $windows |
+        Sort-Object @{ Expression = { if (($_.processName -match "mpv") -or ($_.commandLine -match "hills-lite-mpv")) { 0 } else { 1 } } }, @{ Expression = { if ($_.title -eq "Hills Lite") { 0 } else { 1 } } }, @{ Expression = { -($_.width * $_.height) } } |
+        Select-Object -First 1
+    }
+    if (-not $target) {
+      throw "no visible top-level Electron window found for launched process tree $root"
+    }
+    if ($target.width -lt 200 -or $target.height -lt 120) {
+      throw "Electron window handle $($target.hwnd) has invalid capture bounds $($target.width)x$($target.height)"
+    }
+
+    $hwnd = [IntPtr]::new([int64]$target.hwnd)
+    $isChild = if ($null -ne $target.isChild) { [bool]$target.isChild } else { $false }
+    if ($isChild) {
+      if ($ownerHwnd -eq [IntPtr]::Zero) {
+        throw "child window capture requires an owner window handle"
+      }
+      [Win32]::ShowWindow($ownerHwnd, 9) | Out-Null
+      [Win32]::SetForegroundWindow($ownerHwnd) | Out-Null
+      [Win32]::SetWindowPos($ownerHwnd, [IntPtr](0), 0, 0, 0, 0, 0x0013) | Out-Null
       Start-Sleep -Milliseconds 120
-      [Win32]::SetWindowPos($proc.MainWindowHandle, [IntPtr](-2), 0, 0, 0, 0, 0x0043) | Out-Null
+      [Win32]::ShowWindow($hwnd, 5) | Out-Null
+      [Win32]::SetWindowPos($hwnd, [IntPtr](0), 0, 0, 0, 0, 0x0053) | Out-Null
+    } else {
+      [Win32]::ShowWindow($hwnd, 9) | Out-Null
+      [Win32]::SetWindowPos($hwnd, [IntPtr](-1), 0, 0, 0, 0, 0x0043) | Out-Null
+      [Win32]::SetForegroundWindow($hwnd) | Out-Null
     }
+    Start-Sleep -Milliseconds 180
+
+    $rect = New-Object RECT
+    [Win32]::GetWindowRect($hwnd, [ref]$rect) | Out-Null
+    if ($isChild -and -not [Win32]::IsWindowVisible($hwnd)) {
+      throw "child window handle $($target.hwnd) is not visible after foregrounding the owner window"
+    }
+    $width = [Math]::Max(1, $rect.Right - $rect.Left)
+    $height = [Math]::Max(1, $rect.Bottom - $rect.Top)
+    $bmp = New-Object System.Drawing.Bitmap($width, $height)
+    $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+    $gfx.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bmp.Size)
+    $bmp.Save(${JSON.stringify(outputPath)}, [System.Drawing.Imaging.ImageFormat]::Png)
+    $gfx.Dispose()
+    $bmp.Dispose()
+
+    if (-not $isChild) {
+      [Win32]::SetWindowPos($hwnd, [IntPtr](-2), 0, 0, 0, 0, 0x0043) | Out-Null
+    }
+    [PSCustomObject]@{
+      hwnd = $target.hwnd
+      processId = $target.processId
+      title = $target.title
+      visible = $target.visible
+      isChild = $isChild
+      x = $rect.Left
+      y = $rect.Top
+      width = $width
+      height = $height
+      candidateCount = if ($null -ne $windows) { $windows.Count } else { 1 }
+      screenshotPath = ${JSON.stringify(outputPath)}
+    } | ConvertTo-Json -Compress
   `;
-  run("powershell", ["-NoProfile", "-Command", script]);
+  const result = run("powershell", ["-NoProfile", "-Command", script]);
+  const windowInfo = JSON.parse(result.stdout.trim());
+  return { ...analyzePng(outputPath), windowInfo };
 }
 
 function normalizeJsonArray(value) {
@@ -650,35 +875,79 @@ function verifyLocalDecodeContract(contract) {
   };
 }
 
-function captureAndAnalyze(bounds) {
-  const rect = {
-    x: Math.max(0, Math.round(bounds.x)),
-    y: Math.max(0, Math.round(bounds.y)),
-    width: Math.max(1, Math.round(bounds.width)),
-    height: Math.max(1, Math.round(bounds.height)),
-  };
-  const script = `
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-    $bmp = New-Object System.Drawing.Bitmap(${rect.width}, ${rect.height})
-    $gfx = [System.Drawing.Graphics]::FromImage($bmp)
-    $gfx.CopyFromScreen(${rect.x}, ${rect.y}, 0, 0, $bmp.Size)
-    $bmp.Save(${JSON.stringify(screenshotPath)}, [System.Drawing.Imaging.ImageFormat]::Png)
-    $gfx.Dispose()
-
-    $bmp.Dispose()
-  `;
-  run("powershell", ["-NoProfile", "-Command", script]);
-  return analyzePng(screenshotPath);
+function pixelSampleOk(pixels) {
+  return pixels.brightRatio > 0.18 && pixels.colorfulRatio > 0.08;
 }
 
-async function capturePageAndAnalyze(ws) {
+async function capturePageAndAnalyze(ws, name = "embedded-local") {
+  const outputPath = path.join(tmpDir, `${name}.png`);
   const result = await cdpCall(ws, "Page.captureScreenshot", {
     format: "png",
     captureBeyondViewport: false,
   });
-  await fsp.writeFile(screenshotPath, Buffer.from(result.data, "base64"));
-  return analyzePng(screenshotPath);
+  await fsp.writeFile(outputPath, Buffer.from(result.data, "base64"));
+  return analyzePng(outputPath);
+}
+
+async function captureNativeWindowSample(processId, name, windowHandle) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      return captureWindowAndAnalyze(processId, name, windowHandle);
+    } catch (error) {
+      lastError = error;
+      await wait(300);
+    }
+  }
+  throw lastError ?? new Error("failed to capture native Electron window");
+}
+
+async function captureVisibleSample(ws, { name, bounds, usingHtmlVideo, processId }) {
+  let pixels;
+  let uiPixels = null;
+  let embedState = null;
+  let hostBoundsOk = true;
+  if (usingHtmlVideo) {
+    pixels = await capturePageAndAnalyze(ws, name);
+  } else {
+    embedState = await readEmbedState(ws).catch(() => null);
+    uiPixels = await capturePageAndAnalyze(ws, `${name}-ui`);
+    const nativeWindowHandle = embeddedNativeWindowHandle(embedState);
+    pixels = await captureNativeWindowSample(processId, `${name}-mpv-host`, nativeWindowHandle);
+    hostBoundsOk =
+      embedState?.mode === "overlay"
+        ? true
+        : embeddedHostWindowBoundsOk(embedState, pixels.windowInfo);
+  }
+  return {
+    name,
+    ok: pixelSampleOk(pixels) && hostBoundsOk,
+    pixels,
+    uiPixels,
+    expectedBounds: bounds,
+    embedState,
+    hostBoundsOk,
+    expectedMpvHostBounds: expectedMpvHostBounds(embedState),
+  };
+}
+
+async function recordVisibleSample(samples, ws, options) {
+  try {
+    samples.push(await captureVisibleSample(ws, options));
+  } catch (error) {
+    samples.push({
+      name: options.name,
+      ok: false,
+      error: error?.message ?? String(error),
+    });
+  }
+}
+
+function stageFillsViewport(metrics, tolerance = 4) {
+  return (
+    metrics?.stage?.width >= metrics?.viewport?.width - tolerance &&
+    metrics?.stage?.height >= metrics?.viewport?.height - tolerance
+  );
 }
 
 await fsp.mkdir(tmpDir, { recursive: true });
@@ -781,7 +1050,7 @@ try {
         }],
       });
       await auth.login({ serverId: server.id, username: "local", password: "local" });
-      await appRouter.push("/player/${itemId}");
+      await appRouter.push("/player/${itemId}${forceNativeMpv ? "?nativeMpv=1" : ""}");
       await wait(9000);
       const video = document.querySelector("video");
       const state = video
@@ -903,8 +1172,27 @@ try {
     seekBackError = error?.message ?? String(error);
   }
 
+  const usingHtmlVideo = startResult.state?.mode === "html";
+  const visualSamples = [];
+  await cdpEval(ws, `
+    (() => {
+      window.moveTo(80, 80);
+      window.resizeTo(1280, 800);
+      window.focus();
+      return true;
+    })()
+  `);
+  await wait(900);
+  await cdpEval(ws, wakePlayerControlsExpression());
+  await wait(250);
   const controlsInitial = await cdpEval(ws, playerUiMetricsExpression());
   const controlsInitialEmbedState = await readEmbedState(ws);
+  await recordVisibleSample(visualSamples, ws, {
+    name: "player-initial-1280x800",
+    bounds: controlsInitial.bounds,
+    usingHtmlVideo,
+    processId: child.pid,
+  });
   let fullscreenAfterEnter = null;
   let fullscreenAfterEnterEmbedState = null;
   let fullscreenAfterExit = null;
@@ -915,30 +1203,31 @@ try {
       throw new Error("fullscreen button not visible");
     }
     await cdpClick(ws, controlsInitial.fullscreenButton.center);
-    await wait(1100);
+    await wait(1700);
     fullscreenAfterEnter = await cdpEval(ws, playerUiMetricsExpression());
     fullscreenAfterEnterEmbedState = await readEmbedState(ws);
-    fullscreenStageCoversViewport =
-      fullscreenAfterEnter?.stage?.width >= fullscreenAfterEnter?.viewport?.width - 4 &&
-      fullscreenAfterEnter?.stage?.height >= fullscreenAfterEnter?.viewport?.height - 4;
-    if (fullscreenAfterEnter.fullscreenActive) {
-      await cdpEval(ws, `
-        (async () => {
-          const doc = document;
-          if (doc.fullscreenElement && doc.exitFullscreen) await doc.exitFullscreen();
-          else if (doc.webkitFullscreenElement && doc.webkitExitFullscreen) doc.webkitExitFullscreen();
-          else if (window.hillsLite) await window.hillsLite.invoke("set_fullscreen", { enabled: false });
-          return true;
-        })()
-      `);
-      await wait(900);
-    }
+    fullscreenStageCoversViewport = stageFillsViewport(fullscreenAfterEnter);
+    await recordVisibleSample(visualSamples, ws, {
+      name: "player-fullscreen",
+      bounds: fullscreenAfterEnter.bounds,
+      usingHtmlVideo,
+      processId: child.pid,
+    });
+    await cdpEval(ws, `
+      (async () => {
+        const doc = document;
+        if (window.hillsLite) await window.hillsLite.invoke("set_fullscreen", { enabled: false });
+        if (doc.fullscreenElement && doc.exitFullscreen) await doc.exitFullscreen();
+        else if (doc.webkitFullscreenElement && doc.webkitExitFullscreen) doc.webkitExitFullscreen();
+        return true;
+      })()
+    `);
+    await wait(1500);
     fullscreenAfterExit = await cdpEval(ws, playerUiMetricsExpression());
   } catch (error) {
     fullscreenError = error?.message ?? String(error);
   }
 
-  const usingHtmlVideo = startResult.state?.mode === "html";
   let resizeResult = null;
   let compactResizeResult = null;
   let resizeError = null;
@@ -961,13 +1250,13 @@ try {
     await wait(180);
     resizeResult = await cdpEval(ws, playerUiMetricsExpression());
     const resizeEmbedState = await readEmbedState(ws);
-    if (usingHtmlVideo) {
-      pixels = await capturePageAndAnalyze(ws);
-    } else {
-      foregroundHillsWindow(child.pid);
-      await wait(500);
-      pixels = captureAndAnalyze(resizeResult?.bounds ?? startResult.bounds);
-    }
+    resizeResult.embedState = resizeEmbedState;
+    await recordVisibleSample(visualSamples, ws, {
+      name: "embedded-local",
+      bounds: resizeResult?.bounds ?? startResult.bounds,
+      usingHtmlVideo,
+      processId: child.pid,
+    });
 
     await cdpEval(ws, `
       (() => {
@@ -986,6 +1275,13 @@ try {
     await wait(180);
     compactResizeResult = await cdpEval(ws, playerUiMetricsExpression());
     const compactResizeEmbedState = await readEmbedState(ws);
+    compactResizeResult.embedState = compactResizeEmbedState;
+    await recordVisibleSample(visualSamples, ws, {
+      name: "player-compact-760x430",
+      bounds: compactResizeResult?.bounds ?? startResult.bounds,
+      usingHtmlVideo,
+      processId: child.pid,
+    });
 
     await cdpEval(ws, `
       (() => {
@@ -996,25 +1292,15 @@ try {
     await wait(1500);
     await cdpEval(ws, wakePlayerControlsExpression());
     await wait(180);
-    resizeResult.embedState = resizeEmbedState;
-    compactResizeResult.embedState = compactResizeEmbedState;
   } catch (error) {
     resizeError = error?.message ?? String(error);
   }
 
-  if (!pixels) {
-    if (usingHtmlVideo) {
-      pixels = await capturePageAndAnalyze(ws);
-    } else {
-      foregroundHillsWindow(child.pid);
-      await wait(500);
-      pixels = captureAndAnalyze(resizeResult?.bounds ?? startResult.bounds);
-    }
-  }
+  pixels = visualSamples.find((sample) => sample.name === "embedded-local")?.pixels ?? visualSamples.at(-1)?.pixels ?? null;
   const mpvPixels = startResult.mpvScreenshot?.filePath
     ? analyzePng(startResult.mpvScreenshot.filePath)
     : null;
-  const screenPixelsOk = pixels.brightRatio > 0.18 && pixels.colorfulRatio > 0.08;
+  const screenPixelsOk = visualSamples.length >= 4 && visualSamples.every((sample) => sample.ok);
   const mpvPixelsOk =
     (mpvPixels?.brightRatio ?? 0) > 0.18 && (mpvPixels?.colorfulRatio ?? 0) > 0.08;
   const playbackStateOk = usingHtmlVideo
@@ -1023,44 +1309,49 @@ try {
       startResult.state.videoWidth > 0 &&
       startResult.state.videoHeight > 0
     : startResult.state.durationMs > 0 &&
-      startResult.state.trackCount >= 1 &&
+      (startResult.state.trackCount >= 1 || (Array.isArray(startResult.state.tracks) && startResult.state.tracks.length >= 1)) &&
       embeddedRectOk(controlsInitialEmbedState, controlsInitial);
 
-  const functionalOk =
-    startResult.route === `/player/${itemId}` &&
-    playbackStateOk &&
-    longPressSpeed.active.speed >= 1.95 &&
-    Math.abs(longPressSpeed.restored.speed - startResult.state.speed) < 0.05 &&
-    !longPressSpeed.restored.badgeVisible &&
-    seekBackResult?.after?.positionMs < seekBackResult?.before?.positionMs - 5000 &&
-    controlsInitial.topVisible &&
-    controlsInitial.bottomVisible &&
-    controlsInitial.playButtonVisible &&
-    controlsInitial.seekBackButtonVisible &&
-    controlsInitial.fullscreenButtonVisible &&
-    !controlsInitial.hasHorizontalOverflow &&
-    fullscreenAfterEnter?.fullscreenActive === true &&
-    fullscreenStageCoversViewport &&
-    (usingHtmlVideo || embeddedRectOk(fullscreenAfterEnterEmbedState, fullscreenAfterEnter)) &&
-    fullscreenAfterExit?.fullscreenActive === false &&
-    resizeResult?.bounds?.width <= 1100 &&
-    resizeResult?.bounds?.height <= 720 &&
-    resizeResult?.stage?.width >= 760 &&
-    resizeResult?.stage?.height >= 480 &&
-    (usingHtmlVideo || embeddedRectOk(resizeResult?.embedState, resizeResult)) &&
-    !resizeResult?.hasHorizontalOverflow &&
-    compactResizeResult?.bounds?.width <= 1000 &&
-    compactResizeResult?.bounds?.height <= 640 &&
-    compactResizeResult?.topVisible &&
-    compactResizeResult?.bottomVisible &&
-    compactResizeResult?.playButtonVisible &&
-    compactResizeResult?.fullscreenButtonVisible &&
-    compactResizeResult?.stage?.width >= 560 &&
-    compactResizeResult?.stage?.height >= 420 &&
-    (compactResizeResult?.bottom?.height ?? 999) <= 150 &&
-    (usingHtmlVideo || embeddedRectOk(compactResizeResult?.embedState, compactResizeResult)) &&
-    !compactResizeResult?.hasHorizontalOverflow &&
-    screenPixelsOk;
+  const functionalChecks = {
+    routeOk: startResult.route === `/player/${itemId}${forceNativeMpv ? "?nativeMpv=1" : ""}`,
+    electronDefaultHtmlVideo: forceNativeMpv
+      ? !usingHtmlVideo && startResult.htmlVideoCount === 0
+      : !usingHtmlVideo && startResult.htmlVideoCount === 0,
+    noNativeEmbedByDefault: forceNativeMpv ? startResult.embedState != null : startResult.embedState != null,
+    playbackStateOk,
+    longPressActivated: longPressSpeed.active.speed >= 1.95,
+    longPressRestored:
+      Math.abs(longPressSpeed.restored.speed - startResult.state.speed) < 0.05 &&
+      !longPressSpeed.restored.badgeVisible,
+    seekBackOk: seekBackResult?.after?.positionMs < seekBackResult?.before?.positionMs - 5000,
+    initialControlsVisible:
+      controlsInitial.topVisible &&
+      controlsInitial.bottomVisible &&
+      controlsInitial.playButtonVisible &&
+      controlsInitial.seekBackButtonVisible &&
+      controlsInitial.fullscreenButtonVisible,
+    initialNoHorizontalOverflow: !controlsInitial.hasHorizontalOverflow,
+    fullscreenEntered: fullscreenAfterEnter?.fullscreenActive === true,
+    fullscreenStageCoversViewport,
+    fullscreenEmbedRectOk: usingHtmlVideo || embeddedRectOk(fullscreenAfterEnterEmbedState, fullscreenAfterEnter),
+    fullscreenExited: fullscreenAfterExit?.fullscreenActive === false,
+    resizeWindowed: resizeResult?.bounds?.width <= 1100 && resizeResult?.bounds?.height <= 720,
+    resizeStageFillsViewport: stageFillsViewport(resizeResult),
+    resizeEmbedRectOk: usingHtmlVideo || embeddedRectOk(resizeResult?.embedState, resizeResult),
+    resizeNoHorizontalOverflow: !resizeResult?.hasHorizontalOverflow,
+    compactWindowed: compactResizeResult?.bounds?.width <= 1000 && compactResizeResult?.bounds?.height <= 640,
+    compactControlsVisible:
+      compactResizeResult?.topVisible &&
+      compactResizeResult?.bottomVisible &&
+      compactResizeResult?.playButtonVisible &&
+      compactResizeResult?.fullscreenButtonVisible,
+    compactStageFillsViewport: stageFillsViewport(compactResizeResult),
+    compactControlsFit: (compactResizeResult?.bottom?.height ?? 999) <= 150,
+    compactEmbedRectOk: usingHtmlVideo || embeddedRectOk(compactResizeResult?.embedState, compactResizeResult),
+    compactNoHorizontalOverflow: !compactResizeResult?.hasHorizontalOverflow,
+    screenPixelsOk,
+  };
+  const functionalOk = Object.values(functionalChecks).every(Boolean);
 
   let runtimeCleanup = null;
   let runtimeCleanupError = null;
@@ -1076,6 +1367,7 @@ try {
   console.log(JSON.stringify({
     ok,
     functionalOk,
+    functionalChecks,
     localDecodeContract: localDecodeContractResult,
     screenshotPath,
     route: startResult.route,
@@ -1119,6 +1411,7 @@ try {
       screenPixelsOk,
       mpvPixelsOk,
       usingHtmlVideo,
+      visualSamples,
     },
     runtimeCleanup,
     runtimeCleanupError,

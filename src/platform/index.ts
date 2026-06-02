@@ -771,8 +771,20 @@ function webRequestTimeoutMs() {
 }
 
 async function fetchWithWebTimeout(input: string, init: RequestInit, timeoutMs: number) {
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+    try {
+      return await fetch(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    } catch (error) {
+      const name = (error as { name?: string })?.name;
+      if (name === "AbortError" || name === "TimeoutError") {
+        throw new Error(`request timeout after ${timeoutMs}ms`);
+      }
+      throw error;
+    }
+  }
+
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(input, { ...init, signal: controller.signal });
   } catch (error) {
@@ -781,7 +793,7 @@ async function fetchWithWebTimeout(input: string, init: RequestInit, timeoutMs: 
     }
     throw error;
   } finally {
-    window.clearTimeout(timer);
+    clearTimeout(timer);
   }
 }
 
@@ -799,17 +811,20 @@ async function webJson(
   let response: Response;
   const timeoutMs = webRequestTimeoutMs();
   try {
-    response = await fetchWithWebTimeout(url.toString(), {
-      method: init.method ?? "GET",
-      headers: browserSafeHeaders(init.headers ?? {}),
-      body: init.body,
-    }, timeoutMs);
+    response = await fetchViaWebPreviewProxy(url, init, timeoutMs);
   } catch (error) {
     try {
-      response = await fetchViaWebPreviewProxy(url, init, timeoutMs);
-    } catch (proxyError) {
-      const message = proxyError instanceof Error ? proxyError.message : String(proxyError);
-      throw new Error(`${context}: proxy request failed or timed out after ${timeoutMs}ms (${message})`);
+      response = await fetchWithWebTimeout(url.toString(), {
+        method: init.method ?? "GET",
+        headers: browserSafeHeaders(init.headers ?? {}),
+        body: init.body,
+      }, timeoutMs);
+    } catch (directError) {
+      const proxyMessage = error instanceof Error ? error.message : String(error);
+      const directMessage = directError instanceof Error ? directError.message : String(directError);
+      throw new Error(
+        `${context}: request failed or timed out after ${timeoutMs}ms (proxy: ${proxyMessage}; direct: ${directMessage})`,
+      );
     }
   }
 

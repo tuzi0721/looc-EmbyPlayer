@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import TopBar from "./components/common/TopBar.vue";
@@ -25,8 +25,11 @@ const router = useRouter();
 const route = useRoute();
 const bootstrapped = ref(false);
 const sidebarCollapsed = ref(false);
+const viewportWidth = ref(1280);
 
 const isFullscreen = computed(() => Boolean(route.meta?.fullscreen));
+const autoSidebarCollapsed = computed(() => viewportWidth.value < 900);
+const effectiveSidebarCollapsed = computed(() => sidebarCollapsed.value || autoSidebarCollapsed.value);
 
 function readSidebarCollapsed() {
   try {
@@ -50,6 +53,28 @@ function toggleSidebarCollapsed() {
 
 watch(sidebarCollapsed, persistSidebarCollapsed);
 
+function updateViewportWidth() {
+  viewportWidth.value = window.innerWidth;
+}
+
+function withBootstrapTimeout<T>(promise: Promise<T>, timeoutMs = 5000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      timer = null;
+      reject(new Error(`bootstrap timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer != null) clearTimeout(timer);
+  });
+}
+
+function ignoreBootstrapFailure<T>(promise: Promise<T>) {
+  return withBootstrapTimeout(promise).catch(() => {});
+}
+
 watch(
   () => route.name,
   (name) => {
@@ -60,6 +85,8 @@ watch(
 );
 
 onMounted(async () => {
+  updateViewportWidth();
+  window.addEventListener("resize", updateViewportWidth);
   sidebarCollapsed.value = readSidebarCollapsed();
   try {
     if ((await platformType()) === "windows") {
@@ -69,11 +96,11 @@ onMounted(async () => {
     /* ignore */
   }
   await Promise.all([
-    settings.refresh().catch(() => {}),
-    server.refresh().catch(() => {}),
-    auth.refresh().catch(() => {}),
-    downloads.refresh().catch(() => {}),
-    notifications.refresh().catch(() => {}),
+    ignoreBootstrapFailure(settings.refresh()),
+    ignoreBootstrapFailure(server.refresh()),
+    ignoreBootstrapFailure(auth.refresh()),
+    ignoreBootstrapFailure(downloads.refresh()),
+    ignoreBootstrapFailure(notifications.refresh()),
   ]);
   bootstrapped.value = true;
   server.startListening().catch(() => {});
@@ -116,6 +143,10 @@ onMounted(async () => {
     }
   }).catch(() => {});
 });
+
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", updateViewportWidth);
+});
 </script>
 
 <template>
@@ -124,7 +155,7 @@ onMounted(async () => {
     <AppSidebar
       v-if="!isFullscreen"
       class="app-sidebar"
-      :collapsed="sidebarCollapsed"
+      :collapsed="effectiveSidebarCollapsed"
       @toggle-collapsed="toggleSidebarCollapsed"
     />
     <div class="app-right" :class="{ 'is-fullscreen': isFullscreen }">

@@ -6,17 +6,20 @@ use std::time::Duration;
 use serde::Deserialize;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::Graphics::Gdi::{GetStockObject, BLACK_BRUSH, HBRUSH};
+use windows::Win32::Graphics::Gdi::{
+    BeginPaint, EndPaint, GetStockObject, BLACK_BRUSH, HBRUSH, PAINTSTRUCT,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, PeekMessageW, RegisterClassW,
     SetWindowPos, ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, HMENU,
-    HWND_TOP, HWND_TOPMOST, MSG, PM_REMOVE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE,
-    SW_SHOW, WNDCLASSW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TRANSPARENT, WS_POPUP,
+    HWND_TOP, MSG, PM_REMOVE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOW,
+    WNDCLASSW, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
 };
 
 const CLASS_NAME: &str = "HillsLiteElectronMpvHost\0";
+const WM_ERASEBKGND: u32 = 0x0014;
 const WM_NCHITTEST: u32 = 0x0084;
+const WM_PAINT: u32 = 0x000F;
 const HTTRANSPARENT: isize = -1;
 
 #[derive(Debug, Deserialize)]
@@ -49,13 +52,22 @@ fn wide(value: &str) -> Vec<u16> {
 unsafe extern "system" fn wnd_proc(
     hwnd: HWND,
     msg: u32,
-    wparam: WPARAM,
+    _wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    if msg == WM_ERASEBKGND {
+        return LRESULT(1);
+    }
+    if msg == WM_PAINT {
+        let mut ps = PAINTSTRUCT::default();
+        let _hdc = BeginPaint(hwnd, &mut ps);
+        let _ = EndPaint(hwnd, &ps);
+        return LRESULT(0);
+    }
     if msg == WM_NCHITTEST {
         return LRESULT(HTTRANSPARENT);
     }
-    DefWindowProcW(hwnd, msg, wparam, lparam)
+    DefWindowProcW(hwnd, msg, _wparam, lparam)
 }
 
 fn register_class() {
@@ -79,10 +91,10 @@ fn create_host_window(parent: HWND) -> windows::core::Result<HWND> {
     let class_name = wide(CLASS_NAME);
     unsafe {
         CreateWindowExW(
-            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+            Default::default(),
             PCWSTR(class_name.as_ptr()),
             PCWSTR::null(),
-            WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+            WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             640,
@@ -105,18 +117,18 @@ fn apply_rect(hwnd: HWND, x: f64, y: f64, width: f64, height: f64, scale: f64, t
     let y = (y * scale).round() as i32;
     let width = (width * scale).round().max(1.0) as i32;
     let height = (height * scale).round().max(1.0) as i32;
-    let insert_after = if top { HWND_TOPMOST } else { HWND_TOP };
+    let _ = top;
     unsafe {
-        let _ = SetWindowPos(hwnd, insert_after, x, y, width, height, SWP_NOACTIVATE);
+        let _ = SetWindowPos(hwnd, HWND_TOP, x, y, width, height, SWP_NOACTIVATE);
     }
 }
 
 fn apply_z_order(hwnd: HWND, top: bool) {
-    let insert_after = if top { HWND_TOPMOST } else { HWND_TOP };
+    let _ = top;
     unsafe {
         let _ = SetWindowPos(
             hwnd,
-            insert_after,
+            HWND_TOP,
             0,
             0,
             0,

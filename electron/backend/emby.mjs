@@ -690,7 +690,12 @@ export class EmbyClient {
     return this.listItems(server, account, null, [
       ["SearchTerm", term],
       ["Recursive", "true"],
+      ["IncludeItemTypes", "Movie,Series,Episode"],
       ["Fields", `PrimaryImageAspectRatio,Overview,ProductionYear,UserData,${IMAGE_FALLBACK_FIELDS}`],
+      ["EnableUserData", "true"],
+      ["EnableImages", "true"],
+      ["ImageTypeLimit", "3"],
+      ["EnableImageTypes", "Primary,Backdrop,Thumb"],
       ["Limit", "50"],
     ]);
   }

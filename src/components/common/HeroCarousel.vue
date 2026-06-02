@@ -206,7 +206,7 @@ onUnmounted(() => {
   width: calc(100% - var(--content-pad) * 2);
   max-width: 1280px;
   margin: 0 auto;
-  aspect-ratio: 16 / 6.2;
+  aspect-ratio: 16 / 6;
   min-height: 240px;
   border-radius: 0;
   overflow: hidden;
@@ -215,7 +215,7 @@ onUnmounted(() => {
   outline: none;
 }
 .hero--cinema {
-  aspect-ratio: 16 / 6.2;
+  aspect-ratio: 16 / 6;
   min-height: 240px;
 }
 .hero__bg {
@@ -369,11 +369,11 @@ onUnmounted(() => {
 @media (max-width: 760px) {
   .hero {
     width: calc(100% - 24px);
-    aspect-ratio: 16 / 6.6;
+    aspect-ratio: 16 / 6;
     min-height: 210px;
   }
   .hero--cinema {
-    aspect-ratio: 16 / 6.6;
+    aspect-ratio: 16 / 6;
     min-height: 210px;
   }
   .hero--cinema .hero__content {
@@ -395,10 +395,10 @@ onUnmounted(() => {
 }
 @media (max-height: 760px) and (min-width: 761px) {
   .hero {
-    aspect-ratio: 16 / 5.85;
+    aspect-ratio: 16 / 6;
   }
   .hero--cinema {
-    aspect-ratio: 16 / 5.85;
+    aspect-ratio: 16 / 6;
     min-height: 240px;
   }
   .hero--cinema .hero__content {
@@ -426,11 +426,11 @@ onUnmounted(() => {
 }
 @media (max-height: 700px) and (min-width: 761px) and (max-width: 1100px) {
   .hero {
-    aspect-ratio: 16 / 5.2;
+    aspect-ratio: 16 / 6;
     min-height: 200px;
   }
   .hero--cinema {
-    aspect-ratio: 16 / 5.2;
+    aspect-ratio: 16 / 6;
     min-height: 200px;
   }
   .hero--cinema .hero__content {
@@ -456,6 +456,32 @@ onUnmounted(() => {
   }
   .hero__dots {
     bottom: 9px;
+  }
+}
+@media (max-height: 480px) {
+  .hero,
+  .hero--cinema {
+    aspect-ratio: 16 / 6;
+    min-height: 0;
+  }
+  .hero--cinema .hero__content {
+    left: clamp(20px, 5vw, 44px);
+    bottom: 18px;
+    max-width: min(560px, 78%);
+  }
+  .hero--cinema .hero__logo {
+    max-height: 56px;
+    margin-bottom: 6px;
+  }
+  .hero--cinema .hero__title {
+    font-size: clamp(26px, 4vw, 34px);
+  }
+  .hero__meta,
+  .hero--cinema .hero__desc {
+    display: none;
+  }
+  .hero__dots {
+    bottom: 7px;
   }
 }
 @media (max-width: 420px) {
