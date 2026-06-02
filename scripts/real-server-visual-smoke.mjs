@@ -1193,16 +1193,24 @@ try {
     try {
       const embedState = await readEmbedState(ws);
       const nativeWindowHandle = embedState?.mpvHostWindowHandle ?? embedState?.hwnd ?? null;
-      playerNativeCapture = {
-        embedState,
-        capture: captureNativeWindowAndAnalyze(child.pid, nativeWindowHandle, "player-native-host"),
-      };
-      playerVisiblePixels = playerNativeCapture.capture;
-      stage("player-native-captured", {
-        hasHandle: Boolean(nativeWindowHandle),
-        brightRatio: playerVisiblePixels.brightRatio,
-        colorfulRatio: playerVisiblePixels.colorfulRatio,
-      });
+      if (nativeWindowHandle) {
+        playerNativeCapture = {
+          embedState,
+          capture: captureNativeWindowAndAnalyze(child.pid, nativeWindowHandle, "player-native-host"),
+        };
+        playerVisiblePixels = playerNativeCapture.capture;
+        stage("player-native-captured", {
+          hasHandle: true,
+          brightRatio: playerVisiblePixels.brightRatio,
+          colorfulRatio: playerVisiblePixels.colorfulRatio,
+        });
+      } else {
+        playerNativeCapture = {
+          embedState,
+          skipped: "no native host handle",
+        };
+        stage("player-native-capture-skipped", { reason: playerNativeCapture.skipped });
+      }
     } catch (error) {
       playerNativeCapture = {
         error: error instanceof Error ? error.message : String(error),

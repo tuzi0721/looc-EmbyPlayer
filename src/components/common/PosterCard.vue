@@ -76,15 +76,17 @@ const imageCandidates = computed<ImageCandidate[]>(() => {
 
   if (useBackdrop) {
     add(item.Id, "Backdrop", item.BackdropImageTags?.[0]);
-    add(parentBackdropId, "Backdrop", parentBackdropTag, item.Type === "Episode");
+    add(parentBackdropId, "Backdrop", parentBackdropTag);
     add(parentThumbId, "Thumb", parentThumbTag, item.Type === "Episode");
-    add(item.Id, "Primary", item.ImageTags?.Primary, true);
     add(parentPrimaryId, "Primary", parentPrimaryTag, item.Type === "Episode");
+    add(item.Id, "Primary", item.ImageTags?.Primary, true);
+    add(parentBackdropId, "Backdrop", parentBackdropTag, item.Type === "Episode");
   } else {
     add(item.Id, "Primary", item.ImageTags?.Primary, true);
     add(parentPrimaryId, "Primary", parentPrimaryTag, item.Type === "Episode");
     add(parentThumbId, "Thumb", parentThumbTag, item.Type === "Episode");
     add(item.Id, "Backdrop", item.BackdropImageTags?.[0]);
+    add(parentBackdropId, "Backdrop", parentBackdropTag);
     add(parentBackdropId, "Backdrop", parentBackdropTag, item.Type === "Episode");
   }
 

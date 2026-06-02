@@ -98,16 +98,18 @@ export function mediaItemImageUrl(
 
   if (imageType === "Backdrop") {
     add({ itemId: item.Id, imageType: "Backdrop", tag: item.BackdropImageTags?.[0] });
-    add({ itemId: parentBackdropId, imageType: "Backdrop", tag: parentBackdropTag, allowUntagged: allowParent });
+    add({ itemId: parentBackdropId, imageType: "Backdrop", tag: parentBackdropTag });
     add({ itemId: parentThumbId, imageType: "Thumb", tag: parentThumbTag, allowUntagged: allowParent });
-    add({ itemId: item.Id, imageType: "Primary", tag: item.ImageTags?.Primary, allowUntagged: true });
     add({ itemId: parentPrimaryId, imageType: "Primary", tag: parentPrimaryTag, allowUntagged: allowParent });
+    add({ itemId: item.Id, imageType: "Primary", tag: item.ImageTags?.Primary, allowUntagged: true });
+    add({ itemId: parentBackdropId, imageType: "Backdrop", tag: parentBackdropTag, allowUntagged: allowParent });
   } else if (imageType === "Thumb") {
     add({ itemId: item.Id, imageType: "Thumb", tag: item.ImageTags?.Thumb });
     add({ itemId: parentThumbId, imageType: "Thumb", tag: parentThumbTag, allowUntagged: allowParent });
-    add({ itemId: parentBackdropId, imageType: "Backdrop", tag: parentBackdropTag, allowUntagged: allowParent });
-    add({ itemId: item.Id, imageType: "Primary", tag: item.ImageTags?.Primary, allowUntagged: true });
+    add({ itemId: parentBackdropId, imageType: "Backdrop", tag: parentBackdropTag });
     add({ itemId: parentPrimaryId, imageType: "Primary", tag: parentPrimaryTag, allowUntagged: allowParent });
+    add({ itemId: item.Id, imageType: "Primary", tag: item.ImageTags?.Primary, allowUntagged: true });
+    add({ itemId: parentBackdropId, imageType: "Backdrop", tag: parentBackdropTag, allowUntagged: allowParent });
   } else if (imageType === "Logo") {
     add({ itemId: item.Id, imageType: "Logo", tag: item.ImageTags?.Logo });
     add({ itemId: parentLogoId, imageType: "Logo", tag: parentLogoTag, allowUntagged: allowParent });

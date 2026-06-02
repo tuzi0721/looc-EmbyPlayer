@@ -1,14 +1,15 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（Git push real smoke）
+> 更新时间：2026-06-02（Native screenshot and history images）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-1456-git-push-real-smoke.md`](./CHANGE_LOG/2026-06-02-1456-git-push-real-smoke.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-1509-native-screenshot-and-history-images.md`](./CHANGE_LOG/2026-06-02-1509-native-screenshot-and-history-images.md)
 
 ---
 
 ## 0. 最新视觉修正阶段
+- 2026-06-02 15:09 针对真实视检截图复核发现的桌面/其他窗口误抓问题，真实 visual smoke 已改为只有拿到受控原生宿主窗口句柄时才抓 native host 截图；无句柄时记录 `player-native-capture-skipped`，继续使用应用内播放器截图和 mpv 状态作为证据，避免再把桌面截图误当播放证据。同时调整卡片图片候选顺序，优先使用带 tag 的父级 Backdrop/Thumb/Primary，再走无 tag 兜底，以改善真实历史/收藏中 Episode 图片加载。`node --check scripts\real-server-visual-smoke.mjs`、`npm.cmd run build`、`node scripts\smoke-electron-home-hero.mjs` 已通过；本地 smoke 中历史图片 3/3、收藏 2/2、聚合 6/6 均加载。真实服务器在图片候选顺序修复后的最终复测仍待用户明确批准网络升级重跑。
 - 2026-06-02 14:56 已提交并推送本轮 PosterCard 激活、CDP smoke 加固、真实 smoke 脱敏和阶段日志：本地提交 `7404a05 Fix poster activation real smoke` 已推送到 `origin/main`，远端从 `2115d94` 更新到 `7404a05`。普通沙箱推送仍因 `SEC_E_NO_CREDENTIALS` 失败，使用本机凭据上下文重试后成功。
 - 2026-06-02 14:52 脱敏后的真实服务器 visual smoke 已通过，最终 `ok: true`、`failures: []`。本轮覆盖真实 Emby 识别和登录、5 个首页尺寸、5 个详情页尺寸、5 个 Series 详情尺寸、收藏/历史/聚合路由、搜索、真实 Series 详情点击进入具体单集、真实详情页点击进入播放器、播放器可见状态就绪后额外等待 5 秒截图、后退从约 15000 ms 到约 5000 ms、全屏、1366×768 / 960×600 / 760×430 播放器缩放，以及退出后 Electron/mpv 子进程清理。真实 PlaybackInfo 选择 `DirectPlay`，媒体源 `supportsTranscoding: false`，继续满足本机解码硬约束。
 - 2026-06-02 14:50 已给真实服务器 visual smoke 增加统一敏感值脱敏：阶段输出、CDP 调用错误、CDP evaluate 异常和最终 JSON 都会替换输入的线路 URL、URL origin/host、用户名和密码。`node --check scripts\real-server-visual-smoke.mjs` 已通过。上一轮交互重跑在播放前失败，原因是 TTY 隐藏输入未逐项回车导致字段拼接；下一轮必须逐字段输入并继续真实服务器多尺寸视检。
@@ -223,6 +224,9 @@ node scripts\check-notification-clear.mjs
 - `node scripts\smoke-electron-home-hero.mjs`（真实鼠标点击跨服务器收藏/历史卡片，切换来源账号并保留详情 query，`ok: true`）
 - `node --check scripts\real-server-visual-smoke.mjs`（真实 smoke 输出脱敏后通过）
 - `node scripts\real-server-visual-smoke.mjs`（脱敏后真实服务器多尺寸 visual smoke，`ok: true`，`failures: []`）
+- `node --check scripts\real-server-visual-smoke.mjs`（native host 截图跳过策略后通过）
+- `npm.cmd run build`（卡片图片候选顺序调整后通过）
+- `node scripts\smoke-electron-home-hero.mjs`（本地历史/收藏/聚合图片加载与跨服务器点击仍通过）
 - 当前新增真实 smoke 脚本与阶段日志属于本轮预期变更；Electron 命令覆盖为 104/104，显式 no-op 命令为 0。首页 smoke 已覆盖双服务器同名同 ID 收藏/历史/聚合/搜索记录不会被合并、收藏/历史/聚合卡片缺 Backdrop 时的图片回退解码、单集只有父级 Thumb 时仍能加载图片、巨幕 Logo 艺术标题图加载、巨幕无右侧海报且点击进入详情、侧边栏汉堡按钮折叠/展开、添加服务器弹窗账号/密码/任意端口/自动类型与名称、线路高级 UA，以及 960×600 compact 窗口下巨幕首屏自适应。真实 smoke 已覆盖真实账号登录、详情页真实点击播放、可见 mpv 视频帧、seek、全屏、缩放和退出清理。
 
 ---
