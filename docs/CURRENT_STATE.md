@@ -1,14 +1,15 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（Current state audit）
+> 更新时间：2026-06-02（Completion audit）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-1743-current-state-audit.md`](./CHANGE_LOG/2026-06-02-1743-current-state-audit.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-1748-completion-audit.md`](./CHANGE_LOG/2026-06-02-1748-completion-audit.md)
 
 ---
 
 ## 0. 最新视觉修正阶段
+- 2026-06-02 17:48 完成目标范围审计。本阶段未改功能代码，只核对当前证据：`git log -3 --oneline --decorate` 在审计开始时显示远端提交为 `5685329 (HEAD -> main, origin/main) Audit current state evidence`；`git diff --name-only HEAD` 无输出；真实视检保留目录中关键截图仍存在，包括 `player-native-playback.png`、`player-1366x768-native.png`、`player-960x600-native.png`、`player-760x430-native.png`、`player-760x430-ui.png`、`home-760x430.png`、`home-1366x768.png`、`detail-760x430.png`、`series-detail-760x430.png`。当前头重新通过 `node --check scripts\real-server-visual-smoke.mjs`、`node --check electron\backend\mpv.mjs`、`npm.cmd run check:local-decode` 和 `npm.cmd run build`；本机解码 guard 扫描 151 个源文件，no-planned-ui 扫描 77 个源文件，Vue 类型检查和 Vite 生产构建通过。审计结论：目标中列出的播放器嵌入/黑屏/真实账号登录、多服务器历史收藏搜索、首页巨幕/详情页/缩放/亮色 UI、每阶段日志和真实账号多窗口视检均已有当前证据覆盖。
 - 2026-06-02 17:43 完成当前状态文档一致性审计：顶部阶段记录、概览表、当前产物段和验证摘要已统一到最新实际状态。播放器 native/mpv 取证功能提交为 `4045dfb Tighten native playback visual evidence`；后续文档同步提交为 `2d01701 Document native evidence sync`，当前 `git log -1 --oneline --decorate` 显示 `2d01701 (HEAD -> main, origin/main)`。`git diff --name-only HEAD` 无输出；`git status --short` 仍显示若干无内容 `M` 噪声和未跟踪 `.cunzhi-memory/`，本阶段未触碰。当前最新 exe 为 `A:\vsc\emby-player\release-electron\win-unpacked\Hills Lite.exe`，时间 2026-06-02 17:34:24，大小 210150400 bytes；`resources\electron_mpv_host.exe` 时间 2026-06-02 17:34:21，大小 309760 bytes。
 - 2026-06-02 17:38 已提交并推送播放器 native/mpv 取证修复、真实账号视检日志和 Electron unpacked 刷新状态：`4045dfb Tighten native playback visual evidence` 已推送到 `origin/main`，远端从 `2d456bf` 更新到 `4045dfb`；随后文档同步提交 `2d01701 Document native evidence sync` 也已推送到 `origin/main`。当前用户反馈清单中的播放器真实画面比例、黑屏/控件、真实账号登录、首页/详情多尺寸视觉、多服务器个人页/搜索和退出清理均已有当前证据；后续继续从新反馈或更细的产品清理项进入下一阶段。
 - 2026-06-02 17:34 已刷新 Electron unpacked 产物：`release-electron\win-unpacked\Hills Lite.exe` 时间 2026-06-02 17:34:24，大小 210150400 bytes；`release-electron\win-unpacked\resources\electron_mpv_host.exe` 时间 2026-06-02 17:34:21，大小 309760 bytes。`npm.cmd run electron:build` 已通过，包含 Electron 命令覆盖检查、本机解码 guard、no-planned-ui、Vue 类型检查、Vite 生产构建、`electron_mpv_host` release build、`electron-builder --win dir` 和 `check:electron-package`；包内 bundled mpv 共 6 个文件，`app.asar` 存在。下一步提交并推送本阶段修复、真实视检日志和最新构建状态。
