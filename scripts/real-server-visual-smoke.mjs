@@ -217,18 +217,44 @@ function analyzePng(imagePath) {
     $total = 0
     $bright = 0
     $colorful = 0
+    $meaningful = 0
+    $left = $bmp.Width
+    $top = $bmp.Height
+    $right = -1
+    $bottom = -1
     $x0 = [Math]::Floor($bmp.Width * 0.18)
     $x1 = [Math]::Floor($bmp.Width * 0.82)
     $y0 = [Math]::Floor($bmp.Height * 0.16)
     $y1 = [Math]::Floor($bmp.Height * 0.74)
-    for ($y = $y0; $y -lt $y1; $y += 8) {
-      for ($x = $x0; $x -lt $x1; $x += 8) {
+    for ($y = 0; $y -lt $bmp.Height; $y += 6) {
+      for ($x = 0; $x -lt $bmp.Width; $x += 6) {
         $p = $bmp.GetPixel($x, $y)
         $max = [Math]::Max($p.R, [Math]::Max($p.G, $p.B))
         $min = [Math]::Min($p.R, [Math]::Min($p.G, $p.B))
-        $total += 1
-        if ($max -gt 48) { $bright += 1 }
-        if (($max - $min) -gt 36) { $colorful += 1 }
+        if ($x -ge $x0 -and $x -lt $x1 -and $y -ge $y0 -and $y -lt $y1) {
+          $total += 1
+          if ($max -gt 48) { $bright += 1 }
+          if (($max - $min) -gt 36) { $colorful += 1 }
+        }
+        if ($max -gt 42 -or ($max - $min) -gt 30) {
+          $meaningful += 1
+          if ($x -lt $left) { $left = $x }
+          if ($x -gt $right) { $right = $x }
+          if ($y -lt $top) { $top = $y }
+          if ($y -gt $bottom) { $bottom = $y }
+        }
+      }
+    }
+    $contentWidth = if ($right -ge $left) { $right - $left + 1 } else { 0 }
+    $contentHeight = if ($bottom -ge $top) { $bottom - $top + 1 } else { 0 }
+    $contentBox = $null
+    if ($contentWidth -gt 0 -and $contentHeight -gt 0) {
+      $contentBox = [PSCustomObject]@{
+        x = $left
+        y = $top
+        width = $contentWidth
+        height = $contentHeight
+        aspect = $contentWidth / $contentHeight
       }
     }
     [PSCustomObject]@{
@@ -238,8 +264,11 @@ function analyzePng(imagePath) {
       total = $total
       bright = $bright
       colorful = $colorful
+      meaningful = $meaningful
       brightRatio = if ($total -gt 0) { $bright / $total } else { 0 }
       colorfulRatio = if ($total -gt 0) { $colorful / $total } else { 0 }
+      meaningfulRatio = if ($bmp.Width * $bmp.Height -gt 0) { ($meaningful * 36) / ($bmp.Width * $bmp.Height) } else { 0 }
+      contentBox = $contentBox
     } | ConvertTo-Json -Compress
     $bmp.Dispose()
   `;
@@ -251,6 +280,89 @@ function pixelSampleOk(pixels) {
   return pixels && (pixels.brightRatio >= 0.18 || pixels.colorfulRatio >= 0.04);
 }
 
+function validAspect(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0.1 && number < 10 ? number : null;
+}
+
+function aspectFromSize(width, height) {
+  const w = Number(width);
+  const h = Number(height);
+  return Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0 ? w / h : null;
+}
+
+function aspectFromParams(params) {
+  if (!params || typeof params !== "object") return null;
+  return (
+    validAspect(params.aspect) ??
+    aspectFromSize(params.dw, params.dh) ??
+    aspectFromSize(params.w, params.h) ??
+    aspectFromSize(params.width, params.height)
+  );
+}
+
+function osdContentAspect(dimensions) {
+  if (!dimensions || typeof dimensions !== "object") return null;
+  const width = Number(dimensions.w ?? dimensions.width ?? 0);
+  const height = Number(dimensions.h ?? dimensions.height ?? 0);
+  const left = Number(dimensions.ml ?? dimensions.left ?? 0);
+  const right = Number(dimensions.mr ?? dimensions.right ?? 0);
+  const top = Number(dimensions.mt ?? dimensions.top ?? 0);
+  const bottom = Number(dimensions.mb ?? dimensions.bottom ?? 0);
+  return aspectFromSize(width - left - right, height - top - bottom);
+}
+
+function aspectClose(actual, expected, tolerance) {
+  if (!actual || !expected) return false;
+  return Math.abs(actual - expected) <= tolerance;
+}
+
+function playbackAspectEvidence(metrics) {
+  const html = metrics?.htmlVideo;
+  if (html) {
+    const expectedAspect = aspectFromSize(html.videoWidth, html.videoHeight);
+    return {
+      mode: "htmlVideo",
+      expectedAspect,
+      outputAspect: expectedAspect,
+      outputSource: "htmlVideo.videoWidth/videoHeight",
+      ok: Boolean(expectedAspect),
+    };
+  }
+
+  const mpv = metrics?.mpvState;
+  if (!mpv) {
+    return { mode: "none", expectedAspect: null, outputAspect: null, outputSource: null, ok: false };
+  }
+
+  const expectedAspect = aspectFromParams(mpv.videoParams);
+  const outputAspect = aspectFromParams(mpv.videoOutParams);
+  const osdAspect = osdContentAspect(mpv.osdDimensions);
+  const candidates = [
+    { source: "video-out-params", aspect: outputAspect, tolerance: 0.04 },
+    { source: "osd-dimensions-content", aspect: osdAspect, tolerance: 0.08 },
+  ].filter((candidate) => candidate.aspect);
+  const passing = candidates.find((candidate) =>
+    aspectClose(candidate.aspect, expectedAspect, candidate.tolerance),
+  );
+  const fallbackOk = candidates.length === 0 && Boolean(expectedAspect) && mpv.keepaspect !== false;
+
+  return {
+    mode: "mpv",
+    expectedAspect,
+    outputAspect,
+    osdContentAspect: osdAspect,
+    outputSource: passing?.source ?? (fallbackOk ? "video-params-with-keepaspect" : candidates[0]?.source ?? null),
+    ok: Boolean(passing) || fallbackOk,
+    keepaspect: mpv.keepaspect ?? null,
+    panscan: mpv.panscan ?? null,
+    videoZoom: mpv.videoZoom ?? null,
+    videoScaleX: mpv.videoScaleX ?? null,
+    videoScaleY: mpv.videoScaleY ?? null,
+    pixelContentAspect: metrics?.visiblePixels?.contentBox?.aspect ?? null,
+  };
+}
+
 async function readEmbedState(ws) {
   return cdpEval(ws, `
     (async () => {
@@ -258,6 +370,18 @@ async function readEmbedState(ws) {
       return window.hillsLite.invoke("get_embed_state");
     })()
   `);
+}
+
+async function capturePlaybackNativeLayer(ws, rootPid, name) {
+  const embedState = await readEmbedState(ws).catch((error) => ({
+    error: error instanceof Error ? error.message : String(error),
+  }));
+  const nativeWindowHandle = embedState?.mpvHostWindowHandle ?? embedState?.hwnd ?? null;
+  return {
+    embedState,
+    capture: captureNativeWindowAndAnalyze(rootPid, nativeWindowHandle, name),
+    usedHandle: Boolean(nativeWindowHandle),
+  };
 }
 
 function captureNativeWindowAndAnalyze(rootPid, windowHandle, name) {
@@ -561,6 +685,7 @@ function metricsExpression() {
         posterCount: document.querySelectorAll(".poster, .history-card").length,
         loadedImageCount: document.querySelectorAll(".poster__art img.loaded, .history-card img.loaded").length,
         playerStage,
+        playerPosterCard: rect(".player__poster-card"),
         playerBottom,
         playerControls: {
           top: rect(".player__top"),
@@ -587,6 +712,14 @@ function metricsExpression() {
           videoCodec: mpvState.videoCodec ?? null,
           audioCodec: mpvState.audioCodec ?? null,
           videoParams: mpvState.videoParams ?? null,
+          videoOutParams: mpvState.videoOutParams ?? null,
+          osdDimensions: mpvState.osdDimensions ?? null,
+          keepaspect: mpvState.keepaspect ?? null,
+          panscan: mpvState.panscan ?? null,
+          videoZoom: mpvState.videoZoom ?? null,
+          videoScaleX: mpvState.videoScaleX ?? null,
+          videoScaleY: mpvState.videoScaleY ?? null,
+          videoAspectOverride: mpvState.videoAspectOverride ?? null,
         } : null,
         bodyTextLength: document.body.innerText.length,
       };
@@ -607,8 +740,9 @@ async function resizeAndInspect(ws, route, size, name) {
     })()
   `);
   const filePath = await capture(ws, name);
+  const pixels = analyzePng(filePath);
   const metrics = await cdpEvalAfterContextReset(ws, metricsExpression());
-  return { size, screenshotPath: filePath, metrics };
+  return { size, screenshotPath: filePath, pixels, metrics };
 }
 
 async function waitForPlaybackVisualReady(ws) {
@@ -1190,30 +1324,24 @@ try {
   stage("player-screenshot-captured");
   const playerPixels = analyzePng(playerScreenshot);
   const playerInitial = await cdpEvalAfterContextReset(ws, metricsExpression());
+  const playerInitialState = playerInitial.htmlVideo ?? playerInitial.mpvState;
   let playerNativeCapture = null;
   let playerVisiblePixels = playerPixels;
   if (!playerInitial.htmlVideo && playerInitial.mpvState) {
     try {
-      const embedState = await readEmbedState(ws);
-      const nativeWindowHandle = embedState?.mpvHostWindowHandle ?? embedState?.hwnd ?? null;
-      if (nativeWindowHandle) {
-        playerNativeCapture = {
-          embedState,
-          capture: captureNativeWindowAndAnalyze(child.pid, nativeWindowHandle, "player-native-host"),
-        };
-        playerVisiblePixels = playerNativeCapture.capture;
-        stage("player-native-captured", {
-          hasHandle: true,
-          brightRatio: playerVisiblePixels.brightRatio,
-          colorfulRatio: playerVisiblePixels.colorfulRatio,
-        });
-      } else {
-        playerNativeCapture = {
-          embedState,
-          skipped: "no native host handle",
-        };
-        stage("player-native-capture-skipped", { reason: playerNativeCapture.skipped });
-      }
+      playerNativeCapture = await capturePlaybackNativeLayer(ws, child.pid, "player-native-playback");
+      playerVisiblePixels = playerNativeCapture.capture;
+      stage("player-native-captured", {
+        usedHandle: playerNativeCapture.usedHandle,
+        mode: playerNativeCapture.embedState?.mode ?? null,
+        processName: playerVisiblePixels.windowInfo?.processName ?? null,
+        windowSize: playerVisiblePixels.windowInfo
+          ? `${playerVisiblePixels.windowInfo.width}x${playerVisiblePixels.windowInfo.height}`
+          : null,
+        brightRatio: playerVisiblePixels.brightRatio,
+        colorfulRatio: playerVisiblePixels.colorfulRatio,
+        contentAspect: playerVisiblePixels.contentBox?.aspect ?? null,
+      });
     } catch (error) {
       playerNativeCapture = {
         error: error instanceof Error ? error.message : String(error),
@@ -1225,6 +1353,8 @@ try {
     hasHtmlVideo: Boolean(playerInitial.htmlVideo),
     hasMpvState: Boolean(playerInitial.mpvState),
   });
+  const playerAspectEvidence = playbackAspectEvidence(playerInitial);
+  stage("player-aspect-evidence", playerAspectEvidence);
 
   let seekBack = null;
   const seekBackCenter = centerOf(playerInitial.playerControls?.seekBack);
@@ -1285,6 +1415,30 @@ try {
     stage("fullscreen-complete");
   }
 
+  let resizeVisualRestore = null;
+  if (playerInitialState && playerVisualReady.ready) {
+    const durationMs = playerInitialState.durationMs ?? 0;
+    const initialPositionMs = playerInitialState.positionMs ?? 0;
+    const targetMs = Math.max(0, Math.min(initialPositionMs, Math.max(0, durationMs - 3000)));
+    stage("player-resize-visual-restore-start", { targetMs });
+    await cdpEvalAfterContextReset(ws, `
+      (async () => {
+        const targetMs = ${Math.floor(targetMs)};
+        const video = document.querySelector("video");
+        if (video && Number.isFinite(video.duration)) {
+          video.currentTime = targetMs / 1000;
+          await video.play().catch(() => {});
+        } else if (window.hillsLite) {
+          await window.hillsLite.invoke("seek", { payload: { positionMs: targetMs } });
+        }
+        return true;
+      })()
+    `);
+    resizeVisualRestore = await waitForPlaybackVisualReady(ws);
+    stage("player-resize-visual-restore-complete", resizeVisualRestore);
+    await wait(1200);
+  }
+
   const playerResizes = [];
   stage("player-resize-start");
   for (const size of [
@@ -1292,8 +1446,38 @@ try {
     { width: 960, height: 600 },
     { width: 760, height: 430 },
   ]) {
-    playerResizes.push(await resizeAndInspect(ws, null, size, `player-${size.width}x${size.height}`));
-    stage("player-resize-size", size);
+    const entry = await resizeAndInspect(ws, null, size, `player-${size.width}x${size.height}-ui`);
+    if (!entry.metrics.htmlVideo && entry.metrics.mpvState) {
+      try {
+        const nativeCapture = await capturePlaybackNativeLayer(
+          ws,
+          child.pid,
+          `player-${size.width}x${size.height}-native`,
+        );
+        entry.nativeCapture = nativeCapture;
+        entry.visiblePixels = nativeCapture.capture;
+      } catch (error) {
+        entry.nativeCapture = {
+          error: error instanceof Error ? error.message : String(error),
+        };
+        entry.visiblePixels = entry.pixels;
+      }
+    } else {
+      entry.visiblePixels = entry.pixels;
+    }
+    entry.aspectEvidence = playbackAspectEvidence(entry.metrics);
+    playerResizes.push(entry);
+    stage("player-resize-size", {
+      ...size,
+      aspectEvidence: entry.aspectEvidence,
+      nativeWindow: entry.visiblePixels?.windowInfo
+        ? {
+            processName: entry.visiblePixels.windowInfo.processName,
+            width: entry.visiblePixels.windowInfo.width,
+            height: entry.visiblePixels.windowInfo.height,
+          }
+        : null,
+    });
   }
 
   stage("runtime-cleanup-start");
@@ -1371,7 +1555,7 @@ try {
     }
   }
   if (!search.attempted || search.count < 1) failures.push("search did not return the selected real item");
-  const playerState = playerInitial.htmlVideo ?? playerInitial.mpvState;
+  const playerState = playerInitialState;
   if (!playerState) failures.push("player did not expose a playback state");
   if (playerInitial.htmlVideo?.error) failures.push(`player video error code ${playerInitial.htmlVideo.error.code}`);
   if (playerInitial.htmlVideo && (playerInitial.htmlVideo.readyState ?? 0) < 2) {
@@ -1385,7 +1569,25 @@ try {
   }
   if ((playerState?.durationMs ?? 0) < 1) failures.push("player duration is unknown");
   if (!playerVisualReady.ready) failures.push("player did not become ready before delayed screenshot");
+  if (playerInitial.playerPosterCard) failures.push("player DOM still renders poster card while mpv playback is active");
+  if (playerInitial.mpvState && playerNativeCapture?.error) {
+    failures.push(`native mpv playback capture failed: ${playerNativeCapture.error}`);
+  }
+  if (playerInitial.mpvState && !playerNativeCapture?.capture) {
+    failures.push("native mpv playback capture missing; page screenshot is not valid video evidence");
+  }
   if (!pixelSampleOk(playerVisiblePixels)) failures.push("player screenshot is visually black/blank");
+  if (!playerAspectEvidence.ok) {
+    failures.push(
+      `player video aspect evidence failed: expected ${
+        playerAspectEvidence.expectedAspect?.toFixed?.(2) ?? "unknown"
+      }, output ${
+        playerAspectEvidence.outputAspect?.toFixed?.(2) ??
+        playerAspectEvidence.osdContentAspect?.toFixed?.(2) ??
+        "unknown"
+      }`,
+    );
+  }
   if (!playerInitial.playerControls?.bottom || !playerInitial.playerControls?.seekBack || !playerInitial.playerControls?.fullscreen) {
     failures.push("player controls/progress buttons are not visible");
   }
@@ -1400,8 +1602,26 @@ try {
   for (const entry of playerResizes) {
     const m = entry.metrics;
     if (m.hasHorizontalOverflow) failures.push(`player ${entry.size.width}x${entry.size.height}: horizontal overflow`);
+    if (m.playerPosterCard) failures.push(`player ${entry.size.width}x${entry.size.height}: DOM poster card visible during mpv playback`);
     if (!m.playerControls?.bottom || !m.playerControls?.fullscreen) {
       failures.push(`player ${entry.size.width}x${entry.size.height}: controls missing after resize`);
+    }
+    if (entry.nativeCapture?.error) {
+      failures.push(`player ${entry.size.width}x${entry.size.height}: native capture failed: ${entry.nativeCapture.error}`);
+    }
+    if (!pixelSampleOk(entry.visiblePixels)) {
+      failures.push(`player ${entry.size.width}x${entry.size.height}: resize screenshot is visually black/blank`);
+    }
+    if (!entry.aspectEvidence?.ok) {
+      failures.push(
+        `player ${entry.size.width}x${entry.size.height}: video aspect evidence failed: expected ${
+          entry.aspectEvidence?.expectedAspect?.toFixed?.(2) ?? "unknown"
+        }, output ${
+          entry.aspectEvidence?.outputAspect?.toFixed?.(2) ??
+          entry.aspectEvidence?.osdContentAspect?.toFixed?.(2) ??
+          "unknown"
+        }`,
+      );
     }
   }
   if (!runtimeCleanup.ok) failures.push("runtime cleanup left playback/electron child processes alive");
@@ -1422,10 +1642,12 @@ try {
       pixels: playerPixels,
       visiblePixels: playerVisiblePixels,
       nativeCapture: playerNativeCapture,
+      aspectEvidence: playerAspectEvidence,
       visualReady: playerVisualReady,
       initial: playerInitial,
       seekBack,
       fullscreen,
+      resizeVisualRestore,
       resizes: playerResizes,
     },
     runtimeCleanup,

@@ -2143,7 +2143,7 @@ onBeforeUnmount(async () => {
           @error="onVideoError"
         />
       </div>
-      <div v-if="primaryPosterUrl && !htmlHasFrame" class="player__poster-card">
+      <div v-if="useHtmlVideo && primaryPosterUrl && !htmlHasFrame" class="player__poster-card">
         <img :src="primaryPosterUrl" :alt="item?.Name ?? ''" />
       </div>
 

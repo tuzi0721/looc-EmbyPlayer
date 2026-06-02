@@ -1,14 +1,18 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（Git push compact detail refresh）
+> 更新时间：2026-06-02（Electron unpacked aspect refresh）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-1620-git-push-compact-detail-refresh.md`](./CHANGE_LOG/2026-06-02-1620-git-push-compact-detail-refresh.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-1734-electron-unpacked-aspect-refresh.md`](./CHANGE_LOG/2026-06-02-1734-electron-unpacked-aspect-refresh.md)
 
 ---
 
 ## 0. 最新视觉修正阶段
+- 2026-06-02 17:34 已刷新 Electron unpacked 产物：`release-electron\win-unpacked\Hills Lite.exe` 时间 2026-06-02 17:34:24，大小 210150400 bytes；`release-electron\win-unpacked\resources\electron_mpv_host.exe` 时间 2026-06-02 17:34:21，大小 309760 bytes。`npm.cmd run electron:build` 已通过，包含 Electron 命令覆盖检查、本机解码 guard、no-planned-ui、Vue 类型检查、Vite 生产构建、`electron_mpv_host` release build、`electron-builder --win dir` 和 `check:electron-package`；包内 bundled mpv 共 6 个文件，`app.asar` 存在。下一步提交并推送本阶段修复、真实视检日志和最新构建状态。
+- 2026-06-02 17:30 已用真实测试账号重跑真实 Emby 多尺寸 visual smoke，输出 `ok: true`、失败项为空，保留目录 `C:\Users\Sakur\AppData\Local\Temp\hills-lite-real-visual-1780392497912`。真实服务器检测/登录成功，加载 5 个媒体库视图；播放源为 `DirectPlay`，选中源 `supportsTranscoding: false`，保持本机解码约束；剧集详情页播放探针打开真实可播集 `/player/34758?...`；详情页播放打开 `/player/25372?...`。播放器在 ready 后额外等待 5 秒抓取 `mpv.exe` native 窗口，初始播放和 1366x768 / 960x600 / 760x430 resize 均有 native/mpv 非黑屏截图；mpv `videoParams` 和 `videoOutParams` 均约 `1.777778`，`osd-dimensions` 内容框在各尺寸下也约等于 16:9，且 `keepaspect=true`、`panscan=0`、`videoZoom=0`、`videoScaleX=1`、`videoScaleY=1`。人工复核了 `player-native-playback.png`、`player-1366x768-native.png`、`player-960x600-native.png`、`player-760x430-native.png`、`player-760x430-ui.png`、`home-760x430.png`、`home-1366x768.png`、`detail-760x430.png`、`series-detail-760x430.png`；确认不再以竖版海报冒充播放，播放器控件可见，首页巨幕固定比例并露出继续观看，详情/剧集页 760x430 下仍为打满式 hero。后退、全屏进入/退出和退出清理均通过，剩余播放进程为 0。下一步刷新 Electron unpacked exe 并提交推送。
+- 2026-06-02 17:24 用户指出上一轮“真实画面”比例明显不对后，已收紧播放器比例证据链：Electron mpv snapshot 现在暴露 `videoOutParams` / `osdDimensions` / keepaspect/panscan/zoom/scale 等真实输出状态；真实服务器 visual smoke 不再用暗场截图的亮色像素框推断比例，而是优先用 mpv `video-out-params` 与 `osd-dimensions` 内容框和源 `videoParams` 对比，native/mpv 截图只用于确认窗口来源和非黑屏。当前只是证据标准修正，尚未宣称真实账号多尺寸播放器视检通过；下一步立即跑语法、构建、本地 embedded smoke 和真实账号 visual smoke。
+- 2026-06-02 17:15 人工复核确认上一轮播放器截图中的竖版可见画面不能作为真实播放通过证据：它可能来自页面内 `player__poster-card` 海报兜底，而不是 mpv 视频层。当前已修改播放器和真实 visual smoke：嵌入 mpv 模式不再显示竖版海报卡，mpv 启动默认保持原始比例；真实 smoke 在 mpv 播放时必须抓当前 Electron 进程树内的 native/mpv 窗口，页面截图只作为 UI 层证据，native 取证失败不得退回页面截图，并新增可见内容比例与 `videoParams` 显示比例的断言。`node --check scripts\real-server-visual-smoke.mjs`、`node --check electron\backend\mpv.mjs`、`npm.cmd run build`、`node --check scripts\smoke-electron-embedded-local.mjs` 和 `node scripts\smoke-electron-embedded-local.mjs` 已通过；真实账号多尺寸视检尚需立即重跑，不能沿用旧 `player-initial.png` 作为播放器通过证据。
 - 2026-06-02 16:20 已把详情页紧凑标题修复与 Electron unpacked 刷新两个本地提交推送到 GitHub：`origin/main` 从 `8c49635` 更新到 `3a503d0`。推送前 `git diff --name-only HEAD` 无输出；`git status` 仍显示多项 `M`，但当前判断为索引/时间戳噪声而非实际内容 diff。本阶段未修改功能代码，属于 Git 同步闭环；下一步继续审计用户反馈清单中仍缺少当前证据或仍需真实多尺寸视检的项目。
 - 2026-06-02 15:33 已刷新包含详情页紧凑标题修复的 Electron unpacked 产物：`release-electron\win-unpacked\Hills Lite.exe` 文件时间 2026-06-02 15:32:43，`resources\electron_mpv_host.exe` 文件时间 2026-06-02 15:32:41。`npm.cmd run electron:build` 通过，包含 Electron 命令覆盖检查、本机解码 guard、no-planned-ui、Vue 类型检查、Vite 生产构建、helper release build、`electron-builder --win dir` 和 `check:electron-package`；本阶段仍未生成 portable 单文件包。
 - 2026-06-02 15:26 已修复真实详情页紧凑窗口长标题被顶边裁切的问题：`DetailView.vue` 在窄宽或低高窗口下为 hero 内容设置顶边约束、紧凑标题/间距和滚动兜底；真实 visual smoke 新增 `detailTitle` / `detailTitleClipped` 指标，并在详情页或剧集详情标题越出视口时直接失败。`node --check scripts\real-server-visual-smoke.mjs`、`npm.cmd run build`、`node scripts\smoke-electron-home-hero.mjs` 和真实账号 `node scripts\real-server-visual-smoke.mjs` 已通过；人工复核新保留截图确认 `detail-960x600.png`、`detail-760x430.png`、`series-detail-960x600.png` 标题不再裁切，首页紧凑巨幕仍保持固定比例并露出继续观看。播放器仍按“就绪后额外等待 5 秒截图”执行，seek/fullscreen/resize/退出清理通过，且未生成 `player-native-host.png` 误导性截图证据。

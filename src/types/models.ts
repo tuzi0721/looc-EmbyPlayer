@@ -228,6 +228,17 @@ export interface MpvVideoParams {
   "average-bpp"?: number;
 }
 
+export interface MpvOsdDimensions {
+  w?: number;
+  h?: number;
+  par?: number;
+  aspect?: number;
+  mt?: number;
+  mb?: number;
+  ml?: number;
+  mr?: number;
+}
+
 export interface MpvAudioParams {
   samplerate?: number;
   channels?: string;
@@ -258,8 +269,16 @@ export interface MpvSnapshot {
   videoCodec?: string | null;
   audioCodec?: string | null;
   videoParams?: MpvVideoParams | null;
+  videoOutParams?: MpvVideoParams | null;
+  osdDimensions?: MpvOsdDimensions | null;
   audioParams?: MpvAudioParams | null;
   hwdecCurrent?: string | null;
+  keepaspect?: boolean;
+  panscan?: number;
+  videoZoom?: number;
+  videoScaleX?: number;
+  videoScaleY?: number;
+  videoAspectOverride?: number;
   containerFps?: number | null;
   estimatedVfFps?: number | null;
   videoBitrate?: number | null;
