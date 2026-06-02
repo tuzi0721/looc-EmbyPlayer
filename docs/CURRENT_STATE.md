@@ -1,14 +1,15 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（Real visual smoke manual reject）
+> 更新时间：2026-06-02（Detail compact title visual pass）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-1518-real-visual-smoke-manual-reject.md`](./CHANGE_LOG/2026-06-02-1518-real-visual-smoke-manual-reject.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-1526-detail-compact-title-visual-pass.md`](./CHANGE_LOG/2026-06-02-1526-detail-compact-title-visual-pass.md)
 
 ---
 
 ## 0. 最新视觉修正阶段
+- 2026-06-02 15:26 已修复真实详情页紧凑窗口长标题被顶边裁切的问题：`DetailView.vue` 在窄宽或低高窗口下为 hero 内容设置顶边约束、紧凑标题/间距和滚动兜底；真实 visual smoke 新增 `detailTitle` / `detailTitleClipped` 指标，并在详情页或剧集详情标题越出视口时直接失败。`node --check scripts\real-server-visual-smoke.mjs`、`npm.cmd run build`、`node scripts\smoke-electron-home-hero.mjs` 和真实账号 `node scripts\real-server-visual-smoke.mjs` 已通过；人工复核新保留截图确认 `detail-960x600.png`、`detail-760x430.png`、`series-detail-960x600.png` 标题不再裁切，首页紧凑巨幕仍保持固定比例并露出继续观看。播放器仍按“就绪后额外等待 5 秒截图”执行，seek/fullscreen/resize/退出清理通过，且未生成 `player-native-host.png` 误导性截图证据。
 - 2026-06-02 15:18 真实服务器多尺寸 visual smoke 已重跑并保留截图，自动化输出 `ok: true`、`failures: []`：真实 Emby 登录、5 个首页尺寸、5 个详情页尺寸、5 个 Series 详情尺寸、个人页、搜索、Series 详情播放进入具体单集、详情页播放、播放器就绪后额外等待 5 秒截图、后退、全屏、播放器缩放和退出清理均完成；PlaybackInfo 仍为 `DirectPlay` 且 `supportsTranscoding: false`。但人工复核保留截图时发现 `detail-960x600.png` 的长标题顶部裁切，因此本轮不能记为完整视觉通过；下一步先修详情页紧凑窗口标题裁切，并补脚本断言。
 - 2026-06-02 15:13 已提交并推送原生截图防误抓与历史/收藏图片候选修复：本地提交 `aea1cf6 Fix native smoke capture and card images` 已推送到 `origin/main`，远端从 `9e74a45` 更新到 `aea1cf6`。普通沙箱推送仍因 `SEC_E_NO_CREDENTIALS` 失败，使用本机 Git 凭据上下文重试后成功。下一步仍需在明确网络批准后重跑真实服务器多尺寸 visual smoke；该脚本已保持“播放器可见状态就绪后额外等待 5 秒再截图”的规则。
 - 2026-06-02 15:09 针对真实视检截图复核发现的桌面/其他窗口误抓问题，真实 visual smoke 已改为只有拿到受控原生宿主窗口句柄时才抓 native host 截图；无句柄时记录 `player-native-capture-skipped`，继续使用应用内播放器截图和 mpv 状态作为证据，避免再把桌面截图误当播放证据。同时调整卡片图片候选顺序，优先使用带 tag 的父级 Backdrop/Thumb/Primary，再走无 tag 兜底，以改善真实历史/收藏中 Episode 图片加载。`node --check scripts\real-server-visual-smoke.mjs`、`npm.cmd run build`、`node scripts\smoke-electron-home-hero.mjs` 已通过；本地 smoke 中历史图片 3/3、收藏 2/2、聚合 6/6 均加载。真实服务器在图片候选顺序修复后的最终复测仍待用户明确批准网络升级重跑。

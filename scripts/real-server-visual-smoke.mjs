@@ -524,6 +524,7 @@ function metricsExpression() {
       const sections = rects(".row-section");
       const hero = rect(".hero.hero--cinema");
       const detailHero = rect(".detail .hero");
+      const detailTitle = rect(".detail .hero__title");
       const playerStage = rect(".player__stage");
       const playerBottom = rect(".player__bottom");
       const video = document.querySelector("video");
@@ -552,6 +553,8 @@ function metricsExpression() {
         secondSectionVisible: visibleHeight(sections[1]),
         detailHero,
         detailHeroAspect: detailHero ? detailHero.width / detailHero.height : null,
+        detailTitle,
+        detailTitleClipped: Boolean(detailTitle && (detailTitle.top < -1 || detailTitle.bottom > window.innerHeight + 1)),
         detailPanel: rect(".hero__playback-panel"),
         appSidebarVisible: Boolean(document.querySelector(".app-sidebar")),
         topbarVisible: Boolean(document.querySelector(".topbar")),
@@ -1329,6 +1332,8 @@ try {
     if (m.detailHero && m.detailHero.height < m.viewport.height * 0.88) {
       failures.push(`detail ${entry.size.width}x${entry.size.height}: hero does not fill viewport`);
     }
+    if (!m.detailTitle) failures.push(`detail ${entry.size.width}x${entry.size.height}: title missing`);
+    if (m.detailTitleClipped) failures.push(`detail ${entry.size.width}x${entry.size.height}: title clipped outside viewport`);
     if (m.appSidebarVisible || m.topbarVisible) failures.push(`detail ${entry.size.width}x${entry.size.height}: app chrome visible`);
     if (m.hasHorizontalOverflow) failures.push(`detail ${entry.size.width}x${entry.size.height}: horizontal overflow`);
   }
@@ -1342,6 +1347,8 @@ try {
     if (m.detailHero && m.detailHero.height < m.viewport.height * 0.88) {
       failures.push(`series detail ${entry.size.width}x${entry.size.height}: hero does not fill viewport`);
     }
+    if (!m.detailTitle) failures.push(`series detail ${entry.size.width}x${entry.size.height}: title missing`);
+    if (m.detailTitleClipped) failures.push(`series detail ${entry.size.width}x${entry.size.height}: title clipped outside viewport`);
     if (m.appSidebarVisible || m.topbarVisible) failures.push(`series detail ${entry.size.width}x${entry.size.height}: app chrome visible`);
     if (m.hasHorizontalOverflow) failures.push(`series detail ${entry.size.width}x${entry.size.height}: horizontal overflow`);
   }

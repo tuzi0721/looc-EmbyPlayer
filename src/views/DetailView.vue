@@ -2439,6 +2439,67 @@ async function togglePlayed() {
   }
 }
 
+@media (max-width: 1100px), (max-height: 700px) {
+  .hero__body {
+    top: 56px;
+    bottom: 0;
+    gap: 12px;
+    padding: 0 var(--content-pad) clamp(16px, 3vh, 28px);
+    overflow-y: auto;
+    align-content: end;
+  }
+  .hero__badges {
+    margin-bottom: 8px;
+  }
+  .hero__actions {
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .hero__title {
+    font-size: clamp(26px, 4vw, 38px);
+    line-height: 1.06;
+  }
+  .hero__ep {
+    margin-top: 4px;
+  }
+  .hero__tags {
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .hero__meta,
+  .hero__studios,
+  .hero__links {
+    margin-top: 7px;
+  }
+  .hero__playback-panel {
+    gap: 8px;
+    padding: 12px;
+  }
+  .hero-select select {
+    height: 34px;
+  }
+}
+
+@media (max-height: 620px) {
+  .hero__body {
+    top: 48px;
+  }
+  .hero__title {
+    font-size: clamp(24px, 3.6vw, 34px);
+  }
+  .hero__play {
+    padding: 10px 22px;
+  }
+  .circle-btn {
+    width: 36px;
+    height: 36px;
+  }
+  .hero__playback-panel {
+    max-height: min(312px, 48vh);
+    overflow-y: auto;
+  }
+}
+
 @media (max-width: 640px) {
   .hero {
     min-height: 100dvh;
