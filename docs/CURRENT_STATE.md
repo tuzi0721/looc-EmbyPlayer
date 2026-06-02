@@ -1,14 +1,15 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（Real visual smoke pass）
+> 更新时间：2026-06-02（Git push real smoke）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-1452-real-visual-smoke-pass.md`](./CHANGE_LOG/2026-06-02-1452-real-visual-smoke-pass.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-1456-git-push-real-smoke.md`](./CHANGE_LOG/2026-06-02-1456-git-push-real-smoke.md)
 
 ---
 
 ## 0. 最新视觉修正阶段
+- 2026-06-02 14:56 已提交并推送本轮 PosterCard 激活、CDP smoke 加固、真实 smoke 脱敏和阶段日志：本地提交 `7404a05 Fix poster activation real smoke` 已推送到 `origin/main`，远端从 `2115d94` 更新到 `7404a05`。普通沙箱推送仍因 `SEC_E_NO_CREDENTIALS` 失败，使用本机凭据上下文重试后成功。
 - 2026-06-02 14:52 脱敏后的真实服务器 visual smoke 已通过，最终 `ok: true`、`failures: []`。本轮覆盖真实 Emby 识别和登录、5 个首页尺寸、5 个详情页尺寸、5 个 Series 详情尺寸、收藏/历史/聚合路由、搜索、真实 Series 详情点击进入具体单集、真实详情页点击进入播放器、播放器可见状态就绪后额外等待 5 秒截图、后退从约 15000 ms 到约 5000 ms、全屏、1366×768 / 960×600 / 760×430 播放器缩放，以及退出后 Electron/mpv 子进程清理。真实 PlaybackInfo 选择 `DirectPlay`，媒体源 `supportsTranscoding: false`，继续满足本机解码硬约束。
 - 2026-06-02 14:50 已给真实服务器 visual smoke 增加统一敏感值脱敏：阶段输出、CDP 调用错误、CDP evaluate 异常和最终 JSON 都会替换输入的线路 URL、URL origin/host、用户名和密码。`node --check scripts\real-server-visual-smoke.mjs` 已通过。上一轮交互重跑在播放前失败，原因是 TTY 隐藏输入未逐项回车导致字段拼接；下一轮必须逐字段输入并继续真实服务器多尺寸视检。
 - 2026-06-02 14:44 已将 `PosterCard` 激活从单纯组件事件补强为显式 `activateHandler` 回调，同时保留原 `activate` 事件兼容旧调用；收藏、历史、聚合视界、首页搜索、媒体库、类型、人员和工作室列表的卡片打开都已改走显式回调。本地 Electron smoke 已通过并输出 `ok: true`：脚本用真实鼠标事件点击跨服务器同名收藏/历史卡片，确认会切到对应服务器/账号，并进入带 `server` / `account` query 的详情页。真实播放 visual smoke 的截图策略继续保持“播放器可见状态就绪后额外等待 5 秒再截图”；下一步重跑真实服务器多尺寸视检。
