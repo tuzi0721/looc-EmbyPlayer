@@ -130,6 +130,32 @@ const resumeItem = {
   IndexNumber: 2,
 };
 
+const seriesItem = {
+  Id: "smoke-series",
+  Name: "Smoke Series",
+  Type: "Series",
+  Overview: "Series detail playback smoke target.",
+  ProductionYear: 2026,
+  CommunityRating: 8.2,
+  ImageTags: { Primary: "series-primary-tag", Logo: "series-logo-tag" },
+  BackdropImageTags: ["series-backdrop-tag"],
+  UserData: {
+    PlaybackPositionTicks: 0,
+    IsFavorite: false,
+    Played: false,
+    PlayedPercentage: 0,
+  },
+};
+
+const seasonItem = {
+  Id: "smoke-season-1",
+  Name: "第 1 季",
+  Type: "Season",
+  SeriesId: "smoke-series",
+  IndexNumber: 1,
+  ImageTags: { Primary: "season-primary-tag" },
+};
+
 const duplicateMovie = {
   ...heroMovie,
   ProductionYear: 2025,
@@ -147,10 +173,15 @@ function createFakeEmbyServer({
   token = "home-token",
   item = heroMovie,
   resumeItems = [resumeItem],
+  series = seriesItem,
+  seasons = [seasonItem],
+  episodes = [resumeItem],
+  episodeDelayMs = 0,
 } = {}) {
   return http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     const pathname = decodeURIComponent(url.pathname);
+    const allItems = [item, ...resumeItems, series, ...seasons, ...episodes].filter(Boolean);
 
     if (req.method === "GET" && pathname === "/System/Info/Public") {
       json(res, { ProductName: "Emby Server", ServerName: serverName, Version: "4.8.0" });
@@ -187,10 +218,24 @@ function createFakeEmbyServer({
       return;
     }
 
+    if (req.method === "GET" && pathname === `/Shows/${series?.Id}/Seasons`) {
+      json(res, { Items: seasons, TotalRecordCount: seasons.length });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === `/Shows/${series?.Id}/Episodes`) {
+      const seasonId = url.searchParams.get("SeasonId");
+      const filtered = seasonId ? episodes.filter((episode) => episode.SeasonId === seasonId || !episode.SeasonId) : episodes;
+      setTimeout(() => {
+        json(res, { Items: filtered, TotalRecordCount: filtered.length });
+      }, episodeDelayMs);
+      return;
+    }
+
     const detailMatch = pathname.match(new RegExp(`^/Users/${userId}/Items/([^/]+)$`));
     if (req.method === "GET" && detailMatch) {
       const targetId = detailMatch[1];
-      const mediaItem = [item, ...resumeItems].find((candidate) => candidate.Id === targetId) ?? item;
+      const mediaItem = allItems.find((candidate) => candidate.Id === targetId) ?? item;
       json(res, mediaItem);
       return;
     }
@@ -203,7 +248,7 @@ function createFakeEmbyServer({
     const imageMatch = pathname.match(/^\/Items\/([^/]+)\/Images\/(Primary|Backdrop|Thumb|Logo)$/);
     if (req.method === "GET" && imageMatch) {
       const [, itemId, imageType] = imageMatch;
-      const mediaItem = [item, ...resumeItems].find((candidate) => candidate.Id === itemId);
+      const mediaItem = allItems.find((candidate) => candidate.Id === itemId);
       const parentItem = resumeItems.find(
         (candidate) =>
           candidate.SeriesId === itemId ||
@@ -305,7 +350,7 @@ async function cdpEval(ws, expression) {
 await ensureDevServer();
 await fsp.mkdir(userDataDir, { recursive: true });
 
-const fakeServer = createFakeEmbyServer();
+const fakeServer = createFakeEmbyServer({ episodeDelayMs: 700 });
 const fakeBaseUrl = await listen(fakeServer);
 const duplicateServer = createFakeEmbyServer({
   serverName: "Duplicate Smoke",
@@ -608,6 +653,37 @@ try {
   const detailScreenshot = await cdpCall(ws, "Page.captureScreenshot", { format: "png" });
   await fsp.writeFile(detailScreenshotPath, Buffer.from(detailScreenshot.data, "base64"));
 
+  const seriesPlayProbe = await cdpEval(ws, `
+    (async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+      await appRouter.push("/item/smoke-series");
+      let button = null;
+      for (let i = 0; i < 30; i += 1) {
+        const title = document.querySelector(".hero__title")?.textContent ?? "";
+        button = document.querySelector(".hero__play");
+        if (button && title.includes("Smoke Series")) break;
+        await wait(100);
+      }
+      const beforeClickRoute = appRouter.currentRoute.value.fullPath;
+      const buttonDisabled = button ? Boolean(button.disabled) : null;
+      button?.click();
+      let playerRoute = appRouter.currentRoute.value.fullPath;
+      for (let i = 0; i < 60; i += 1) {
+        playerRoute = appRouter.currentRoute.value.fullPath;
+        if (playerRoute.startsWith("/player/")) break;
+        await wait(100);
+      }
+      return {
+        beforeClickRoute,
+        hasButton: Boolean(button),
+        buttonDisabled,
+        playerRoute,
+        actionError: document.querySelector(".hero__action-error")?.textContent?.trim() ?? null,
+      };
+    })()
+  `);
+
   const multiServerSearch = await cdpEval(ws, `
     (async () => {
       const { useLibraryStore } = await import("/src/stores/library.ts");
@@ -814,6 +890,18 @@ try {
   }
   if (!detailProbe.playerRoute.includes("mediaSourceId=source-alt")) {
     failures.push(`detail play did not preserve selected media source: ${detailProbe.playerRoute}`);
+  }
+  if (!seriesPlayProbe.beforeClickRoute.startsWith("/item/smoke-series")) {
+    failures.push(`series probe did not open series detail: ${seriesPlayProbe.beforeClickRoute}`);
+  }
+  if (!seriesPlayProbe.hasButton || seriesPlayProbe.buttonDisabled) {
+    failures.push(`series detail play button unavailable: ${JSON.stringify(seriesPlayProbe)}`);
+  }
+  if (!seriesPlayProbe.playerRoute.startsWith("/player/resume-episode")) {
+    failures.push(`series detail play did not open an episode player: ${JSON.stringify(seriesPlayProbe)}`);
+  }
+  if (seriesPlayProbe.actionError) {
+    failures.push(`series detail play surfaced an action error: ${seriesPlayProbe.actionError}`);
   }
   if (result.errors.length > 0) failures.push(`page errors: ${result.errors.join(" | ")}`);
   for (const route of personalRoutes) {

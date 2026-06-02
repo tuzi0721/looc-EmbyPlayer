@@ -1017,19 +1017,105 @@ watch(
   { immediate: true },
 );
 
+function preferredEpisode(list: MediaItem[]): MediaItem | null {
+  const inProgress = list.find(
+    (episode) => (episode.UserData?.PlaybackPositionTicks ?? 0) > 0 && !episode.UserData?.Played,
+  );
+  return inProgress ?? list[0] ?? null;
+}
+
+function pushUniqueSeasonId(target: string[], id?: string | null) {
+  if (id && !target.includes(id)) target.push(id);
+}
+
+async function ensureSeriesPlaybackEpisode(): Promise<MediaItem | null> {
+  if (!seriesId.value) return null;
+  if (continueEpisode.value) return continueEpisode.value;
+
+  const requestSeriesId = seriesId.value;
+  const detailSeq = detailLoadSeq;
+  const episodesSeq = ++episodeLoadSeq;
+  loadingEpisodes.value = true;
+  try {
+    const seasonIds: string[] = [];
+    pushUniqueSeasonId(seasonIds, activeSeasonId.value);
+    for (const season of seasons.value) pushUniqueSeasonId(seasonIds, season.Id);
+
+    if (seasonIds.length === 0) {
+      const seasonResp = await withDetailTimeout(api.listSeasons(requestSeriesId), "list_seasons");
+      if (detailSeq !== detailLoadSeq || requestSeriesId !== seriesId.value) return null;
+      seasons.value = seasonResp.Items;
+      for (const season of seasonResp.Items) pushUniqueSeasonId(seasonIds, season.Id);
+    }
+
+    for (const targetSeasonId of seasonIds) {
+      const episodeResp = await withDetailTimeout(
+        api.listEpisodes({ seriesId: requestSeriesId, seasonId: targetSeasonId }),
+        "list_episodes",
+      );
+      if (detailSeq !== detailLoadSeq || requestSeriesId !== seriesId.value) return null;
+      const ep = preferredEpisode(episodeResp.Items);
+      if (ep) {
+        suppressNextSeasonWatch = true;
+        activeSeasonId.value = targetSeasonId;
+        episodes.value = episodeResp.Items;
+        return ep;
+      }
+    }
+
+    const allEpisodeResp = await withDetailTimeout(
+      api.listEpisodes({ seriesId: requestSeriesId, seasonId: null }),
+      "list_episodes",
+    );
+    if (detailSeq !== detailLoadSeq || requestSeriesId !== seriesId.value) return null;
+    const fallbackEpisode = preferredEpisode(allEpisodeResp.Items);
+    if (!fallbackEpisode) return null;
+
+    if (fallbackEpisode.SeasonId) {
+      suppressNextSeasonWatch = true;
+      activeSeasonId.value = fallbackEpisode.SeasonId;
+    }
+    episodes.value = allEpisodeResp.Items;
+    return fallbackEpisode;
+  } finally {
+    if (detailSeq === detailLoadSeq && requestSeriesId === seriesId.value && episodesSeq <= episodeLoadSeq) {
+      loadingEpisodes.value = false;
+    }
+  }
+}
+
+function setSeriesPlaybackQueue(ep: MediaItem) {
+  const idx = episodes.value.findIndex((e) => e.Id === ep.Id);
+  if (idx >= 0) {
+    playerStore.setQueue(
+      episodes.value.slice(idx).map((e) => e.Id),
+      0,
+    );
+  } else {
+    playerStore.setQueue([ep.Id], 0);
+  }
+}
+
+async function pushPlayerRoute(id: string, startMs: number) {
+  const query: Record<string, string> = { start: String(startMs), from: props.id };
+  if (id === props.id && selectedMediaSourcePlaybackId.value) {
+    query.mediaSourceId = selectedMediaSourcePlaybackId.value;
+  }
+  await router.push({
+    name: "player",
+    params: { id },
+    query,
+  });
+}
+
 async function playTarget(id: string, startMs: number) {
   if (playNavigating.value) return;
   playNavigating.value = true;
+  actionError.value = null;
   try {
-    const query: Record<string, string> = { start: String(startMs), from: props.id };
-    if (id === props.id && selectedMediaSourcePlaybackId.value) {
-      query.mediaSourceId = selectedMediaSourcePlaybackId.value;
-    }
-    await router.push({
-      name: "player",
-      params: { id },
-      query,
-    });
+    await pushPlayerRoute(id, startMs);
+  } catch (error) {
+    actionError.value = error instanceof Error ? error.message : String(error);
   } finally {
     playNavigating.value = false;
   }
@@ -1037,30 +1123,30 @@ async function playTarget(id: string, startMs: number) {
 
 async function continuePlay() {
   if (isSeries.value) {
-    const ep = continueEpisode.value;
-    if (!ep) return;
-    const idx = episodes.value.findIndex((e) => e.Id === ep.Id);
-    if (idx >= 0) {
-      playerStore.setQueue(
-        episodes.value.slice(idx).map((e) => e.Id),
-        0,
-      );
+    if (playNavigating.value) return;
+    playNavigating.value = true;
+    actionError.value = null;
+    try {
+      const ep = await ensureSeriesPlaybackEpisode();
+      if (!ep?.Id) {
+        actionError.value = "当前剧集没有可播放单集。";
+        return;
+      }
+      setSeriesPlaybackQueue(ep);
+      const start = Math.round((ep.UserData?.PlaybackPositionTicks ?? 0) / 10_000);
+      await pushPlayerRoute(ep.Id, start);
+    } catch (error) {
+      actionError.value = error instanceof Error ? error.message : String(error);
+    } finally {
+      playNavigating.value = false;
     }
-    const start = Math.round((ep.UserData?.PlaybackPositionTicks ?? 0) / 10_000);
-    await playTarget(ep.Id, start);
     return;
   }
   await playTarget(props.id, resumeMs.value > 0 ? resumeMs.value : 0);
 }
 
 async function playEpisode(ep: MediaItem) {
-  const idx = episodes.value.findIndex((e) => e.Id === ep.Id);
-  if (idx >= 0) {
-    playerStore.setQueue(
-      episodes.value.slice(idx).map((e) => e.Id),
-      0,
-    );
-  }
+  setSeriesPlaybackQueue(ep);
   const start = Math.round((ep.UserData?.PlaybackPositionTicks ?? 0) / 10_000);
   await playTarget(ep.Id, start);
 }

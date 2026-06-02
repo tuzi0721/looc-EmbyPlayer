@@ -97,6 +97,25 @@ async function cdpEval(ws, expression) {
   return result.result?.value ?? null;
 }
 
+function isExecutionContextReset(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /Execution context was destroyed|Cannot find context|Inspected target navigated|Cannot find default execution context/i.test(message);
+}
+
+async function cdpEvalAfterContextReset(ws, expression, attempts = 5) {
+  let lastError = null;
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      return await cdpEval(ws, expression);
+    } catch (error) {
+      lastError = error;
+      if (!isExecutionContextReset(error)) throw error;
+      await wait(350);
+    }
+  }
+  throw lastError ?? new Error("Runtime.evaluate failed after context reset");
+}
+
 async function cdpClick(ws, point) {
   await cdpCall(ws, "Input.dispatchMouseEvent", {
     type: "mouseMoved",
@@ -512,7 +531,7 @@ function metricsExpression() {
 }
 
 async function resizeAndInspect(ws, route, size, name) {
-  await cdpEval(ws, `
+  await cdpEvalAfterContextReset(ws, `
     (async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
@@ -524,8 +543,58 @@ async function resizeAndInspect(ws, route, size, name) {
     })()
   `);
   const filePath = await capture(ws, name);
-  const metrics = await cdpEval(ws, metricsExpression());
+  const metrics = await cdpEvalAfterContextReset(ws, metricsExpression());
   return { size, screenshotPath: filePath, metrics };
+}
+
+async function waitForPlaybackVisualReady(ws) {
+  let previousPosition = null;
+  let lastMetrics = null;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    await wait(250);
+    lastMetrics = await cdpEvalAfterContextReset(ws, metricsExpression());
+    const state = lastMetrics.htmlVideo ?? lastMetrics.mpvState;
+    const position = state?.positionMs ?? 0;
+    const advancing = previousPosition != null && position > previousPosition + 250;
+    previousPosition = position;
+    const htmlReady =
+      lastMetrics.htmlVideo &&
+      (lastMetrics.htmlVideo.readyState ?? 0) >= 2 &&
+      (lastMetrics.htmlVideo.videoWidth ?? 0) > 0 &&
+      (lastMetrics.htmlVideo.videoHeight ?? 0) > 0;
+    const mpvReady =
+      lastMetrics.mpvState &&
+      (lastMetrics.mpvState.durationMs ?? 0) > 0 &&
+      (lastMetrics.mpvState.trackCount ?? 0) > 0 &&
+      (lastMetrics.mpvState.videoParams?.w || lastMetrics.mpvState.videoCodec);
+    if (htmlReady || (mpvReady && (advancing || attempt >= 8))) {
+      return {
+        ready: true,
+        waitedMs: (attempt + 1) * 250,
+        advancing,
+        state: {
+          durationMs: state?.durationMs ?? 0,
+          positionMs: state?.positionMs ?? 0,
+          trackCount: state?.trackCount ?? null,
+          hasVideoParams: Boolean(lastMetrics.mpvState?.videoParams || lastMetrics.htmlVideo?.videoWidth),
+        },
+      };
+    }
+  }
+  const state = lastMetrics?.htmlVideo ?? lastMetrics?.mpvState;
+  return {
+    ready: false,
+    waitedMs: 25000,
+    advancing: false,
+    state: state
+      ? {
+          durationMs: state.durationMs ?? 0,
+          positionMs: state.positionMs ?? 0,
+          trackCount: state.trackCount ?? null,
+          hasVideoParams: Boolean(lastMetrics?.mpvState?.videoParams || lastMetrics?.htmlVideo?.videoWidth),
+        }
+      : null,
+  };
 }
 
 function centerOf(rect) {
@@ -658,15 +727,35 @@ try {
           ["EnableImageTypes", "Primary,Backdrop,Thumb,Logo"],
         ],
       });
+      const seriesResp = await api.listItems({
+        params: [
+          ["Recursive", "true"],
+          ["IncludeItemTypes", "Series"],
+          ["Fields", "PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks,ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,ParentLogoItemId,ParentLogoImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag"],
+          ["SortBy", "DateCreated"],
+          ["SortOrder", "Descending"],
+          ["Limit", "24"],
+          ["EnableUserData", "true"],
+          ["EnableImages", "true"],
+          ["ImageTypeLimit", "4"],
+          ["EnableImageTypes", "Primary,Backdrop,Thumb,Logo"],
+        ],
+      });
       const candidates = [
         ...lib.resume,
         ...lib.heroItems.filter((item) => item.Type === "Movie" || item.Type === "Episode"),
         ...(mediaResp.Items ?? []),
       ];
+      const seriesCandidates = [
+        ...lib.heroItems.filter((item) => item.Type === "Series"),
+        ...(seriesResp.Items ?? []),
+      ];
       const selected = candidates.find((item) => item?.Id && (item.Type === "Movie" || item.Type === "Episode"));
       if (!selected) throw new Error("real server has no Movie/Episode candidate for playback smoke");
+      const selectedSeries = seriesCandidates.find((item) => item?.Id && item.Type === "Series") ?? null;
       const source = await api.getPlaybackSource({ itemId: selected.Id, startMs: 0 });
       window.__hillsRealSmokeSelectedName = selected.Name ?? "";
+      window.__hillsRealSmokeSeriesName = selectedSeries?.Name ?? "";
       const selectedMediaSource = source.mediaSources?.find((item) => item.selected) ?? null;
       const playbackSummary = {
         playMethod: source.playMethod,
@@ -719,6 +808,15 @@ try {
           hasParentImage: Boolean(selected.ParentThumbItemId || selected.ParentBackdropItemId || selected.ParentPrimaryImageItemId),
           nameLength: String(selected.Name ?? "").length,
         },
+        series: selectedSeries ? {
+          id: selectedSeries.Id,
+          type: selectedSeries.Type,
+          hasOverview: Boolean(selectedSeries.Overview),
+          hasBackdrop: Boolean(selectedSeries.BackdropImageTags?.length),
+          hasPrimary: Boolean(selectedSeries.ImageTags?.Primary),
+          nameLength: String(selectedSeries.Name ?? "").length,
+        } : null,
+        seriesCandidateCount: seriesCandidates.filter((item) => item?.Id && item.Type === "Series").length,
         playbackSummary,
         loginWinningLineId: login.winningLineId,
       };
@@ -753,8 +851,20 @@ try {
     stage("detail-inspect-size", size);
   }
 
+  const seriesDetail = [];
+  const seriesRoute = setup.series?.id ? `/item/${setup.series.id}` : null;
+  if (seriesRoute) {
+    stage("series-detail-inspect-start", { count: homeSizes.length });
+    for (const size of homeSizes) {
+      seriesDetail.push(await resizeAndInspect(ws, seriesRoute, size, `series-detail-${size.width}x${size.height}`));
+      stage("series-detail-inspect-size", size);
+    }
+  } else {
+    stage("series-detail-inspect-skipped", { seriesCandidateCount: setup.seriesCandidateCount ?? 0 });
+  }
+
   stage("personal-routes-start");
-  const routes = await cdpEval(ws, `
+  const routes = await cdpEvalAfterContextReset(ws, `
     (async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
@@ -776,7 +886,7 @@ try {
   stage("personal-routes-complete", { count: routes.length });
 
   stage("search-start");
-  const search = await cdpEval(ws, `
+  const search = await cdpEvalAfterContextReset(ws, `
     (async () => {
       const { useLibraryStore } = await import("/src/stores/library.ts");
       const lib = useLibraryStore();
@@ -792,8 +902,149 @@ try {
   `);
   stage("search-complete", { count: search.count ?? null });
 
+  let seriesPlayProbe = {
+    attempted: false,
+    reason: "no real Series candidate was found",
+  };
+  if (seriesRoute) {
+    stage("series-play-from-detail-start");
+    seriesPlayProbe = {
+      attempted: true,
+      routeBeforeClick: null,
+      routeAfterClick: null,
+      opened: false,
+      hasButton: false,
+      buttonDisabled: null,
+      buttonText: null,
+      actionError: null,
+      playerItemId: null,
+      stopOk: false,
+      stopError: null,
+      exception: null,
+    };
+    try {
+      await cdpEvalAfterContextReset(ws, `
+        (async () => {
+          const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+          if (!appRouter) throw new Error("mounted Vue router not found");
+          await appRouter.push(${JSON.stringify(seriesRoute)});
+          window.moveTo(40, 40);
+          window.resizeTo(1366, 768);
+          return true;
+        })()
+      `);
+
+      let buttonSnapshot = null;
+      for (let index = 0; index < 80; index += 1) {
+        buttonSnapshot = await cdpEvalAfterContextReset(ws, `
+          (() => {
+            const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+            const route = appRouter?.currentRoute?.value?.fullPath ?? window.location.pathname;
+            const expectedName = window.__hillsRealSmokeSeriesName || "";
+            const title = document.querySelector(".hero__title")?.textContent ?? "";
+            const button = document.querySelector(".hero__play");
+            const rect = button?.getBoundingClientRect();
+            return {
+              route,
+              titleMatches: !expectedName || title.includes(expectedName),
+              hasButton: Boolean(button),
+              buttonDisabled: button ? Boolean(button.disabled) : null,
+              buttonText: button?.textContent?.replace(/\\s+/g, " ").trim() ?? null,
+              actionError: document.querySelector(".hero__action-error")?.textContent?.replace(/\\s+/g, " ").trim() ?? null,
+              buttonRect: rect ? {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+                top: rect.top,
+                left: rect.left,
+                bottom: rect.bottom,
+                right: rect.right,
+              } : null,
+            };
+          })()
+        `);
+        if (
+          buttonSnapshot?.route?.startsWith(seriesRoute) &&
+          buttonSnapshot?.hasButton &&
+          buttonSnapshot?.titleMatches
+        ) {
+          break;
+        }
+        await wait(150);
+      }
+      seriesPlayProbe.routeBeforeClick = buttonSnapshot?.route ?? null;
+      seriesPlayProbe.hasButton = Boolean(buttonSnapshot?.hasButton);
+      seriesPlayProbe.buttonDisabled = buttonSnapshot?.buttonDisabled ?? null;
+      seriesPlayProbe.buttonText = buttonSnapshot?.buttonText ?? null;
+      seriesPlayProbe.actionError = buttonSnapshot?.actionError ?? null;
+
+      if (buttonSnapshot?.buttonRect && !buttonSnapshot.buttonDisabled) {
+        await cdpClick(ws, centerOf(buttonSnapshot.buttonRect));
+        for (let index = 0; index < 120; index += 1) {
+          const routeSnapshot = await cdpEvalAfterContextReset(ws, `
+            (() => {
+              const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+              const route = appRouter?.currentRoute?.value?.fullPath ?? window.location.pathname;
+              const hasPlayer = Boolean(document.querySelector(".player"));
+              const actionError = document.querySelector(".hero__action-error")?.textContent?.replace(/\\s+/g, " ").trim() ?? null;
+              return {
+                route,
+                hasPlayer,
+                actionError,
+                playerItemId: String(route.split(/[/?#]/)[2] ?? ""),
+              };
+            })()
+          `);
+          seriesPlayProbe.routeAfterClick = routeSnapshot?.route ?? seriesPlayProbe.routeAfterClick;
+          seriesPlayProbe.actionError = routeSnapshot?.actionError ?? seriesPlayProbe.actionError;
+          if (routeSnapshot?.route?.startsWith("/player/") && routeSnapshot?.hasPlayer) {
+            seriesPlayProbe.opened = true;
+            seriesPlayProbe.playerItemId = routeSnapshot.playerItemId;
+            break;
+          }
+          await wait(200);
+        }
+      }
+    } catch (error) {
+      seriesPlayProbe.exception = error instanceof Error ? error.message : String(error);
+    } finally {
+      try {
+        await cdpEvalAfterContextReset(ws, `
+          (async () => {
+            const { usePlayerStore } = await import("/src/stores/player.ts");
+            const player = usePlayerStore();
+            await player.stop();
+            return true;
+          })()
+        `);
+        seriesPlayProbe.stopOk = true;
+      } catch (error) {
+        seriesPlayProbe.stopError = error instanceof Error ? error.message : String(error);
+      }
+      await cdpEvalAfterContextReset(ws, `
+        (async () => {
+          const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+          await appRouter?.push("/home");
+          return true;
+        })()
+      `).catch(() => {});
+      await wait(600);
+    }
+    stage("series-play-from-detail-complete", {
+      opened: seriesPlayProbe.opened,
+      hasButton: seriesPlayProbe.hasButton,
+      buttonDisabled: seriesPlayProbe.buttonDisabled,
+      routeAfterClick: seriesPlayProbe.routeAfterClick,
+      actionErrorPresent: Boolean(seriesPlayProbe.actionError),
+      exceptionPresent: Boolean(seriesPlayProbe.exception),
+    });
+  } else {
+    stage("series-play-from-detail-skipped", { reason: seriesPlayProbe.reason });
+  }
+
   stage("player-open-from-detail-start");
-  const playEntry = await cdpEval(ws, `
+  const playEntry = await cdpEvalAfterContextReset(ws, `
     (async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
@@ -829,7 +1080,7 @@ try {
   if (!playEntry.buttonRect) throw new Error("detail play button was not found");
   if (playEntry.buttonDisabled) throw new Error("detail play button was disabled");
   await cdpClick(ws, centerOf(playEntry.buttonRect));
-  const playerOpen = await cdpEval(ws, `
+  const playerOpen = await cdpEvalAfterContextReset(ws, `
     (async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
@@ -855,8 +1106,10 @@ try {
   if (!playerOpen.opened) {
     throw new Error(`detail play click did not open player route: ${playerOpen.route}`);
   }
-  await wait(9000);
-  await cdpEval(ws, `
+  const playerVisualReady = await waitForPlaybackVisualReady(ws);
+  stage("player-visual-ready", playerVisualReady);
+  await wait(5000);
+  await cdpEvalAfterContextReset(ws, `
     (() => {
       const player = document.querySelector(".player");
       player?.dispatchEvent(new MouseEvent("mousemove", {
@@ -871,7 +1124,7 @@ try {
   const playerScreenshot = await capture(ws, "player-initial");
   stage("player-screenshot-captured");
   const playerPixels = analyzePng(playerScreenshot);
-  const playerInitial = await cdpEval(ws, metricsExpression());
+  const playerInitial = await cdpEvalAfterContextReset(ws, metricsExpression());
   let playerNativeCapture = null;
   let playerVisiblePixels = playerPixels;
   if (!playerInitial.htmlVideo && playerInitial.mpvState) {
@@ -902,31 +1155,41 @@ try {
 
   let seekBack = null;
   const seekBackCenter = centerOf(playerInitial.playerControls?.seekBack);
-  if (seekBackCenter) {
+  if (seekBackCenter && playerVisualReady.ready) {
     stage("seek-back-start");
-    await cdpEval(ws, `
-      (async () => {
-        const video = document.querySelector("video");
-        if (video && Number.isFinite(video.duration)) video.currentTime = Math.min(15, Math.max(0, video.duration - 1));
-        else if (window.hillsLite) await window.hillsLite.invoke("seek", { payload: { positionMs: 15000 } });
-        return true;
-      })()
-    `);
-    let before = null;
-    for (let attempt = 0; attempt < 12; attempt += 1) {
-      await wait(250);
-      before = await cdpEval(ws, metricsExpression());
-      const state = before.htmlVideo ?? before.mpvState;
-      if ((state?.positionMs ?? 0) >= 12000) break;
+    try {
+      await cdpEvalAfterContextReset(ws, `
+        (async () => {
+          const video = document.querySelector("video");
+          if (video && Number.isFinite(video.duration)) video.currentTime = Math.min(15, Math.max(0, video.duration - 1));
+          else if (window.hillsLite) await window.hillsLite.invoke("seek", { payload: { positionMs: 15000 } });
+          return true;
+        })()
+      `);
+      let before = null;
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        await wait(250);
+        before = await cdpEvalAfterContextReset(ws, metricsExpression());
+        const state = before.htmlVideo ?? before.mpvState;
+        if ((state?.positionMs ?? 0) >= 12000) break;
+      }
+      await cdpClick(ws, seekBackCenter);
+      await wait(1100);
+      const after = await cdpEvalAfterContextReset(ws, metricsExpression());
+      seekBack = { before: before.htmlVideo ?? before.mpvState, after: after.htmlVideo ?? after.mpvState };
+      stage("seek-back-complete", {
+        beforePositionMs: seekBack.before?.positionMs ?? null,
+        afterPositionMs: seekBack.after?.positionMs ?? null,
+      });
+    } catch (error) {
+      seekBack = {
+        error: error instanceof Error ? error.message : String(error),
+      };
+      stage("seek-back-failed", seekBack);
     }
-    await cdpClick(ws, seekBackCenter);
-    await wait(1100);
-    const after = await cdpEval(ws, metricsExpression());
-    seekBack = { before: before.htmlVideo ?? before.mpvState, after: after.htmlVideo ?? after.mpvState };
-    stage("seek-back-complete", {
-      beforePositionMs: seekBack.before?.positionMs ?? null,
-      afterPositionMs: seekBack.after?.positionMs ?? null,
-    });
+  } else if (seekBackCenter) {
+    seekBack = { skipped: "player did not become ready" };
+    stage("seek-back-skipped", seekBack);
   }
 
   let fullscreen = null;
@@ -935,8 +1198,8 @@ try {
     stage("fullscreen-start");
     await cdpClick(ws, fullscreenCenter);
     await wait(1200);
-    const entered = await cdpEval(ws, metricsExpression());
-    await cdpEval(ws, `
+    const entered = await cdpEvalAfterContextReset(ws, metricsExpression());
+    await cdpEvalAfterContextReset(ws, `
       (async () => {
         if (document.fullscreenElement && document.exitFullscreen) await document.exitFullscreen();
         else if (window.hillsLite) await window.hillsLite.invoke("set_fullscreen", { enabled: false });
@@ -944,7 +1207,7 @@ try {
       })()
     `);
     await wait(900);
-    const exited = await cdpEval(ws, metricsExpression());
+    const exited = await cdpEvalAfterContextReset(ws, metricsExpression());
     fullscreen = { entered, exited };
     stage("fullscreen-complete");
   }
@@ -999,6 +1262,31 @@ try {
     if (m.appSidebarVisible || m.topbarVisible) failures.push(`detail ${entry.size.width}x${entry.size.height}: app chrome visible`);
     if (m.hasHorizontalOverflow) failures.push(`detail ${entry.size.width}x${entry.size.height}: horizontal overflow`);
   }
+  if (!setup.series) failures.push("real account loaded no Series candidate for series detail playback smoke");
+  for (const entry of seriesDetail) {
+    const m = entry.metrics;
+    if (!m.detailHero) failures.push(`series detail ${entry.size.width}x${entry.size.height}: hero missing`);
+    if (m.detailHero && (Math.abs(m.detailHero.x) > 2 || Math.abs(m.detailHero.y) > 2)) {
+      failures.push(`series detail ${entry.size.width}x${entry.size.height}: hero not anchored to window origin`);
+    }
+    if (m.detailHero && m.detailHero.height < m.viewport.height * 0.88) {
+      failures.push(`series detail ${entry.size.width}x${entry.size.height}: hero does not fill viewport`);
+    }
+    if (m.appSidebarVisible || m.topbarVisible) failures.push(`series detail ${entry.size.width}x${entry.size.height}: app chrome visible`);
+    if (m.hasHorizontalOverflow) failures.push(`series detail ${entry.size.width}x${entry.size.height}: horizontal overflow`);
+  }
+  if (!seriesPlayProbe.attempted) failures.push(`series detail play was not attempted: ${seriesPlayProbe.reason}`);
+  if (seriesPlayProbe.attempted && !seriesPlayProbe.hasButton) failures.push("series detail play button was not found");
+  if (seriesPlayProbe.attempted && seriesPlayProbe.buttonDisabled) failures.push("series detail play button was disabled");
+  if (seriesPlayProbe.exception) failures.push(`series detail play probe exception: ${seriesPlayProbe.exception}`);
+  if (seriesPlayProbe.actionError) failures.push(`series detail play action error: ${seriesPlayProbe.actionError}`);
+  if (seriesPlayProbe.attempted && !seriesPlayProbe.opened) {
+    failures.push(`series detail play did not open player route: ${seriesPlayProbe.routeAfterClick ?? seriesPlayProbe.routeBeforeClick}`);
+  }
+  if (seriesPlayProbe.opened && seriesPlayProbe.playerItemId === setup.series?.id) {
+    failures.push("series detail play opened the Series item itself instead of a playable episode");
+  }
+  if (seriesPlayProbe.attempted && !seriesPlayProbe.stopOk) failures.push("series detail play probe could not stop playback after route check");
   for (const route of routes) {
     if (route.errorCount > 0) failures.push(`${route.route}: rendered error state`);
     if (route.posterCount > 0 && route.loadedImageCount < Math.min(route.posterCount, 2)) {
@@ -1019,11 +1307,14 @@ try {
     failures.push("mpv player has no tracks");
   }
   if ((playerState?.durationMs ?? 0) < 1) failures.push("player duration is unknown");
+  if (!playerVisualReady.ready) failures.push("player did not become ready before delayed screenshot");
   if (!pixelSampleOk(playerVisiblePixels)) failures.push("player screenshot is visually black/blank");
   if (!playerInitial.playerControls?.bottom || !playerInitial.playerControls?.seekBack || !playerInitial.playerControls?.fullscreen) {
     failures.push("player controls/progress buttons are not visible");
   }
-  if (seekBack && (seekBack.after?.positionMs ?? 0) >= (seekBack.before?.positionMs ?? 0) - 5000) {
+  if (seekBack?.error) failures.push(`seek back failed: ${seekBack.error}`);
+  if (seekBack?.skipped) failures.push(`seek back skipped: ${seekBack.skipped}`);
+  if (seekBack?.before && seekBack?.after && (seekBack.after.positionMs ?? 0) >= (seekBack.before.positionMs ?? 0) - 5000) {
     failures.push("seek back did not move playback backward");
   }
   if (!fullscreen?.entered?.playerStage || fullscreen.entered.playerStage.height < fullscreen.entered.viewport.height * 0.82) {
@@ -1045,13 +1336,16 @@ try {
     setup,
     home,
     detail,
+    seriesDetail,
     routes,
     search,
+    seriesPlayProbe,
     player: {
       screenshotPath: playerScreenshot,
       pixels: playerPixels,
       visiblePixels: playerVisiblePixels,
       nativeCapture: playerNativeCapture,
+      visualReady: playerVisualReady,
       initial: playerInitial,
       seekBack,
       fullscreen,

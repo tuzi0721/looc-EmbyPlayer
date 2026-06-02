@@ -1,14 +1,29 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（Git sync real playback）
+> 更新时间：2026-06-02（Git sync local commit）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-1247-git-sync-real-playback.md`](./CHANGE_LOG/2026-06-02-1247-git-sync-real-playback.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-1352-git-sync-local-commit.md`](./CHANGE_LOG/2026-06-02-1352-git-sync-local-commit.md)
 
 ---
 
 ## 0. 最新视觉修正阶段
+- 2026-06-02 13:52 已将 Series 详情播放修复、真实账号视觉 smoke 补强、真实 Series 诊断脚本和阶段日志提交到本地 `main`：`9bf31e7 Fix series detail playback smoke`。普通 `git push origin main` 未更新远端，原因是当前 Git 凭据不可用并返回 `SEC_E_NO_CREDENTIALS`；本地分支因此领先 `origin/main` 1 个提交。提交后 `git diff --name-status` 无内容差异，并确认没有残留 `electron` / `mpv` / `electron_mpv_host` / `Hills Lite` 进程。下一步继续尝试在可用凭据上下文推送，若仍不可用则继续本地完整目标缺口审计与修复。
+- 2026-06-02 13:40 已刷新 Electron unpacked 产物：`release-electron\win-unpacked\Hills Lite.exe` 文件时间 2026-06-02 13:40:17，`resources\electron_mpv_host.exe` 文件时间 2026-06-02 13:40:14。`npm.cmd run electron:build` 通过，包含命令覆盖检查、本机解码 guard、planned UI 检查、`vue-tsc --noEmit`、Vite 生产构建、Electron helper release build、`electron-builder --win dir` 和 `check:electron-package`。portable 单文件包未由本命令生成；下一步检查提交范围和敏感信息后处理 Git。
+- 2026-06-02 13:36 完整真实账号视觉 smoke 已通过，最终输出 `ok: true` 且 `failures: []`。真实 Series 详情 `/item/34743` 点击播放已进入具体单集 `/player/34758?...&from=34743`，播放器先等待可用播放状态，再额外等待 5 秒后截图；原生 mpv 窗口像素非黑屏，seek 从约 15000 ms 回退到约 5000 ms，全屏、播放器缩放和退出子进程清理均通过。下一步检查打包产物是否因本轮 `DetailView.vue` 与 smoke 脚本变更而需要刷新。
+- 2026-06-02 13:33 真实账号 smoke 已确认 Series 详情播放修复生效：真实 Series 点击播放进入具体单集 `/player/...&from=34743`，无动作错误。随后主播放候选 25 秒内未暴露 duration/tracks/videoParams，seek 调用触发 mpv 命令错误导致脚本提前退出。已修正 smoke：播放器未就绪时跳过 seek 并记录失败项，不再崩溃；`node --check scripts\real-server-visual-smoke.mjs` 已通过。下一步继续重跑完整真实账号视觉 smoke，获取最终 pass/fail JSON。
+- 2026-06-02 13:30 Series 请求序列修复后，本地 Electron smoke 再次通过，输出 `ok: true`。下一步继续完整真实账号视觉 smoke，重点验证真实 Series 详情播放是否进入具体单集播放器，以及播放器截图延迟后的画面判定。
+- 2026-06-02 13:29 已新增真实 Series 计数诊断脚本并定位到服务端接口本身能返回单集：失败 Series 有 1 季、12 个 Episode，`Shows/{seriesId}/Episodes`、带 `SeasonId`、以及按季 `ParentId` 查询均能拿到单集。由此修正 `DetailView.vue` 的 Series 播放请求序列：播放按钮自己的单集查询不再因为同一详情页内季 watcher 的 `episodeLoadSeq` 刷新而被误判过期，只在详情页或 Series id 真正变化时中止。`node --check scripts\real-server-series-diagnose.mjs`、真实诊断脚本、`npm.cmd run build` 已通过；下一步重跑 Electron smoke 与真实账号视觉 smoke。
+- 2026-06-02 13:24 按用户反馈调整真实播放视检：起播不是瞬时完成，真实 smoke 现在会先等待播放器暴露可用视频状态，再额外等待 5 秒后截图，并输出 `player-visual-ready` 阶段信息。`node --check scripts\real-server-visual-smoke.mjs` 已通过。此改动仅提高视检有效性，不代表 Series 详情播放或真实播放画面已通过；下一步继续诊断 Series 单集接口与重跑真实 smoke。
+- 2026-06-02 13:20 真实账号 smoke 重跑时在详情页尺寸检查阶段被 `Runtime.evaluate: Execution context was destroyed` 打断。已把 CDP 上下文重试扩展到真实视觉 smoke 的路由/resize/metrics 读取路径，包括 `resizeAndInspect`、个人页检查、搜索、播放器打开等待、seek/fullscreen/player resize 指标读取；登录/setup 仍不重试，避免重复写入服务器/账号状态。`node --check scripts\real-server-visual-smoke.mjs` 已通过，下一步继续完整真实账号视觉 smoke。
+- 2026-06-02 13:18 Series 跨季兜底修复后，本地 Electron smoke 再次通过并输出 `ok: true`；覆盖 fake Emby Series 详情播放入口、首页巨幕固定比例、多服务器收藏/历史/聚合、搜索同名多服务器、侧边栏折叠、亮色主题和添加服务器 UI。下一步重跑真实账号视觉 smoke。
+- 2026-06-02 13:16 真实账号视觉 smoke 已定位 Series 播放业务失败：`/item/34743` 顶部播放按钮可见且可点，但点击后仍停留在详情页并提示“当前剧集没有可播放单集。”原因是 Series 播放入口只检查活动季/第一季，真实服务端该 Series 的第一候选季没有可播放单集。已修复为按活动季、所有已知季、全剧单集兜底依次寻找可播放单集，并继续优先续播未看完单集。`npm.cmd run build` 已通过；下一步重跑本地 Electron smoke 与真实账号视觉 smoke。
+- 2026-06-02 13:13 真实账号视觉 smoke 首跑到达 Series 详情播放探针后，脚本被 `Runtime.evaluate: Execution context was destroyed` 打断；这不是播放通过结果，已将探针拆为短 CDP 步骤并增加路由切换时的上下文重试：进入 Series 详情、轮询播放按钮位置、CDP 点击、轮询 `/player/:episodeId`、停止播放并回到首页。`node --check scripts\real-server-visual-smoke.mjs` 已通过，下一步立即重跑完整真实账号视觉 smoke。
+- 2026-06-02 13:09 本地门禁已通过：`node --check scripts\smoke-electron-home-hero.mjs`、`npm.cmd run build`、`node scripts\smoke-electron-home-hero.mjs` 均通过；本地 Electron smoke 输出 `ok: true`，覆盖 fake Emby 的 Series 详情播放入口探针、首页巨幕固定比例、多服务器收藏/历史/聚合、搜索同名多服务器结果、侧边栏折叠、亮色主题和添加服务器 UI。下一步继续真实账号真实服务器视觉 smoke。
+- 2026-06-02 13:05 已补强真实服务器视觉 smoke 的 Series 详情播放探针：脚本现在会搜索真实 `Series` 候选，按 1920×1080、1366×768、1024×768、960×600、760×430 视窗检查 Series 详情布局，再从 Series 顶部播放按钮点击并断言进入具体 `/player/:episodeId`，同时确认没有打开 Series 本身；探针结束会立即 `player.stop()`，避免前一段验证留下后台播放。已通过 `node --check scripts\real-server-visual-smoke.mjs`。下一步继续跑本地构建/本地 Electron smoke，并在需要网络时用真实账号跑完整真实环境链路。
+- 2026-06-02 13:02 已刷新包含 Series 播放入口修复的 Electron unpacked 产物：`release-electron\win-unpacked\Hills Lite.exe` 文件时间 2026-06-02 13:02:31，`resources\electron_mpv_host.exe` 文件时间 2026-06-02 13:02:29。`npm.cmd run electron:build` 通过，包含命令覆盖检查、前端生产构建、helper release build、`electron-builder --win dir` 和 `check:electron-package`。portable 单文件包仍未生成；下一步继续用真实账号/真实服务器验证实际播放器打开链路。
+- 2026-06-02 12:58 修复 Series 详情页播放入口空点：此前真实播放 smoke 只覆盖 Movie/Episode，未覆盖 Series；当集列表尚未加载完成或 `continueEpisode` 为空时，Series 顶部播放按钮会静默返回，用户体感为“根本没打开”。现已改为点击时主动加载季和单集，选择续播集或第一集进入 `/player/:episodeId`，无单集时显示动作错误。`node --check scripts\smoke-electron-home-hero.mjs`、`npm.cmd run build` 和 `node scripts\smoke-electron-home-hero.mjs` 已通过；本地 fake Emby smoke 新增 Series / Season / Episodes 探针，并断言 `/item/smoke-series` 点击播放进入 `/player/resume-episode...`。下一步继续验证 packaged exe 与真实账号真实服务器的实际播放器打开链路。
 - 2026-06-02 12:47 已提交并推送真实 Electron mpv 播放修复：本地提交 `064e2e0 Fix real Electron mpv playback path` 已推送到 `origin/main`，远端从 `9a3c322` 更新到 `064e2e0`。提交前通过 `git diff --cached --check`、敏感字面量扫描、`npm.cmd run check:workspace`，测试账号/密码/完整线路 URL 未写入仓库。
 - 2026-06-02 12:44 已刷新 Electron unpacked 产物：`release-electron\win-unpacked\Hills Lite.exe`，文件时间 2026-06-02 12:44:28；`resources\electron_mpv_host.exe` 文件时间 2026-06-02 12:44:25。`npm.cmd run electron:build` 通过，包含命令覆盖、生产构建、helper release build、`electron-builder --win dir` 和 `check:electron-package`；本阶段未生成 portable 单文件包。
 - 2026-06-02 12:40 真实账号默认 Electron overlay mpv 视觉 smoke 已通过：脚本现在从真实详情页点击播放按钮进入播放器，而不是直接跳 `/player/:id`；真实 MKV 继续走随包 mpv 本机 DirectPlay，暴露 duration/position/tracks/codec/D3D11 参数并采集到有效可见视频帧。后退从 15s 精确回到 5s，全屏、1366×768、960×600、760×430 缩放控件与退出清理均通过，最终失败项为空。上一轮“player screenshot is visually black/blank”是暗场真实帧被过严色彩阈值误判，已修正为亮度或色彩任一足够即可通过，仍会拦截全黑窗口。
@@ -46,14 +61,14 @@
 | 显示名 | Hills Lite |
 | 主运行壳 | Electron + Vue 3 + TypeScript |
 | Tauri 状态 | 保留可运行路径，`tauri.conf.json` 当前 `bundle.active: false` |
-| Electron unpacked | `release-electron\win-unpacked\Hills Lite.exe`（2026-06-02 12:44:28 刷新） |
+| Electron unpacked | `release-electron\win-unpacked\Hills Lite.exe`（2026-06-02 13:40:17 刷新） |
 | Electron portable | 当前不存在；旧 `release-electron\Hills Lite 0.1.0.exe` 已删除 |
 | Tauri release exe | `src-tauri\target\release\emby-player.exe` |
 | 内置 mpv | `release-electron\win-unpacked\resources\mpv\mpv.exe`；Tauri 为 `src-tauri\target\release\resources\mpv\mpv.exe` |
 
 历史流水和每轮验证保留在 [`CHANGE_LOG`](./CHANGE_LOG/)；本文件只记录当前可执行状态，避免旧阶段描述误导后续判断。
 
-当前最新 Electron unpacked 产物已刷新：`A:\vsc\emby-player\release-electron\win-unpacked\Hills Lite.exe`，文件时间 2026-06-02 12:44:28；随包 `resources\electron_mpv_host.exe` 文件时间 2026-06-02 12:44:25。
+当前最新 Electron unpacked 产物已刷新：`A:\vsc\emby-player\release-electron\win-unpacked\Hills Lite.exe`，文件时间 2026-06-02 13:40:17；随包 `resources\electron_mpv_host.exe` 文件时间 2026-06-02 13:40:14。
 
 当前 Electron portable 单文件包尚未刷新成功，旧 `A:\vsc\emby-player\release-electron\Hills Lite 0.1.0.exe` 已删除。`npm.cmd run electron:dist` 在 `electron-builder --win portable` 阶段因 GitHub NSIS 依赖下载超时失败；如需 portable，需要重新生成新的单文件包。
 
@@ -174,6 +189,24 @@ node scripts\check-notification-clear.mjs
 - `node --check electron\backend\emby.mjs`
 - `node --check scripts\smoke-electron-home-hero.mjs`
 - `node scripts\smoke-electron-home-hero.mjs`
+- `node --check scripts\smoke-electron-home-hero.mjs`
+- `node scripts\smoke-electron-home-hero.mjs`（新增 Series 详情页播放入口探针：`/item/smoke-series` -> `/player/resume-episode...`）
+- `npm.cmd run electron:build`
+- `node --check scripts\real-server-visual-smoke.mjs`（新增真实 Series 详情点击播放探针）
+- `npm.cmd run build`
+- `node scripts\smoke-electron-home-hero.mjs`（本地 Electron smoke `ok: true`）
+- `node --check scripts\real-server-visual-smoke.mjs`（Series 探针拆短步骤并增加上下文重试）
+- `npm.cmd run build`（Series 跨季/全剧单集兜底修复后通过）
+- `node scripts\smoke-electron-home-hero.mjs`（Series 跨季兜底修复后本地 Electron smoke `ok: true`）
+- `node --check scripts\real-server-visual-smoke.mjs`（真实 smoke 路由/resize/metrics 上下文重试扩展后通过）
+- `node --check scripts\real-server-visual-smoke.mjs`（播放器状态就绪后额外等待 5 秒截图）
+- `node --check scripts\real-server-series-diagnose.mjs`
+- `node scripts\real-server-series-diagnose.mjs`（真实 Series 计数诊断：1 季、12 单集）
+- `npm.cmd run build`（Series 请求序列修复后通过）
+- `node scripts\smoke-electron-home-hero.mjs`（Series 请求序列修复后本地 Electron smoke `ok: true`）
+- `node --check scripts\real-server-visual-smoke.mjs`（播放器未就绪时 seek 记录失败而非脚本崩溃）
+- `node scripts\real-server-visual-smoke.mjs`（真实账号完整视觉 smoke：Series 详情播放进入具体单集；播放就绪后额外等待 5 秒截图；seek、全屏、缩放与退出清理均通过）
+- `npm.cmd run electron:build`（刷新 Electron unpacked：随包 mpv、helper、app.asar 完整）
 - `git diff --check`
 - `npm.cmd run build`
 - `node scripts\smoke-electron-embedded-local.mjs`
