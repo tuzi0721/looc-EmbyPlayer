@@ -1,14 +1,15 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（Electron unpacked refresh）
+> 更新时间：2026-06-02（Git sync real playback）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-1244-electron-unpacked-refresh.md`](./CHANGE_LOG/2026-06-02-1244-electron-unpacked-refresh.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-1247-git-sync-real-playback.md`](./CHANGE_LOG/2026-06-02-1247-git-sync-real-playback.md)
 
 ---
 
 ## 0. 最新视觉修正阶段
+- 2026-06-02 12:47 已提交并推送真实 Electron mpv 播放修复：本地提交 `064e2e0 Fix real Electron mpv playback path` 已推送到 `origin/main`，远端从 `9a3c322` 更新到 `064e2e0`。提交前通过 `git diff --cached --check`、敏感字面量扫描、`npm.cmd run check:workspace`，测试账号/密码/完整线路 URL 未写入仓库。
 - 2026-06-02 12:44 已刷新 Electron unpacked 产物：`release-electron\win-unpacked\Hills Lite.exe`，文件时间 2026-06-02 12:44:28；`resources\electron_mpv_host.exe` 文件时间 2026-06-02 12:44:25。`npm.cmd run electron:build` 通过，包含命令覆盖、生产构建、helper release build、`electron-builder --win dir` 和 `check:electron-package`；本阶段未生成 portable 单文件包。
 - 2026-06-02 12:40 真实账号默认 Electron overlay mpv 视觉 smoke 已通过：脚本现在从真实详情页点击播放按钮进入播放器，而不是直接跳 `/player/:id`；真实 MKV 继续走随包 mpv 本机 DirectPlay，暴露 duration/position/tracks/codec/D3D11 参数并采集到有效可见视频帧。后退从 15s 精确回到 5s，全屏、1366×768、960×600、760×430 缩放控件与退出清理均通过，最终失败项为空。上一轮“player screenshot is visually black/blank”是暗场真实帧被过严色彩阈值误判，已修正为亮度或色彩任一足够即可通过，仍会拦截全黑窗口。
 - 2026-06-02 12:29 真实账号默认 Electron overlay mpv 视觉 smoke 已重跑：真实登录、媒体库、详情页多尺寸均可达，播放器已通过随包 mpv 打开真实 MKV，暴露 duration/position/tracks/codec/D3D11 参数并采集到有效视频像素；全屏、缩放控件和退出清理进入可验证状态。剩余失败收敛为 3 项：760×430 首页巨幕比例漂移到约 3.08、搜索未命中本轮选中真实条目、后退断言未观察到 position 回退。
