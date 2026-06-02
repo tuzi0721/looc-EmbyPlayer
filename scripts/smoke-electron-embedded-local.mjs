@@ -4,6 +4,7 @@ import fsp from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { WebSocket } from "undici";
 
 const devServerUrl = process.env.HILLS_SMOKE_DEV_SERVER_URL ?? "http://127.0.0.1:1420";
 const remotePort = Number(process.env.HILLS_SMOKE_CDP_PORT ?? 9351);
@@ -220,21 +221,55 @@ async function getTargets() {
   throw new Error("CDP target timeout");
 }
 
+async function cdpMessageText(event) {
+  const data = event.data;
+  if (typeof data === "string") return data;
+  if (data instanceof ArrayBuffer) return Buffer.from(data).toString("utf8");
+  if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8");
+  if (data && typeof data.text === "function") return data.text();
+  return String(data);
+}
+
+function ensureCdpDispatch(ws) {
+  if (ws.__hillsCdpDispatchReady) return;
+  ws.__hillsCdpDispatchReady = true;
+  ws.__hillsCdpPending = new Map();
+  ws.__hillsCdpHandlers = [];
+  ws.addEventListener("message", async (event) => {
+    let message;
+    try {
+      message = JSON.parse(await cdpMessageText(event));
+    } catch {
+      return;
+    }
+    if (message.id != null && ws.__hillsCdpPending.has(message.id)) {
+      const pending = ws.__hillsCdpPending.get(message.id);
+      ws.__hillsCdpPending.delete(message.id);
+      clearTimeout(pending.timer);
+      if (message.error) pending.reject(new Error(`${pending.method}: ${JSON.stringify(message.error)}`));
+      else pending.resolve(message.result);
+      return;
+    }
+    for (const handler of ws.__hillsCdpHandlers) handler(message);
+  });
+}
+
+function addCdpEventHandler(ws, handler) {
+  ensureCdpDispatch(ws);
+  ws.__hillsCdpHandlers.push(handler);
+}
+
 async function cdpCall(ws, method, params = {}) {
+  ensureCdpDispatch(ws);
   const id = cdpCall.nextId;
   cdpCall.nextId += 1;
-  ws.send(JSON.stringify({ id, method, params }));
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${method} timeout`)), 45_000);
-    const listener = (event) => {
-      const message = JSON.parse(event.data);
-      if (message.id !== id) return;
-      clearTimeout(timer);
-      ws.removeEventListener("message", listener);
-      if (message.error) reject(new Error(`${method}: ${JSON.stringify(message.error)}`));
-      else resolve(message.result);
-    };
-    ws.addEventListener("message", listener);
+    const timer = setTimeout(() => {
+      ws.__hillsCdpPending.delete(id);
+      reject(new Error(`${method} timeout`));
+    }, 45_000);
+    ws.__hillsCdpPending.set(id, { method, resolve, reject, timer });
+    ws.send(JSON.stringify({ id, method, params }));
   });
 }
 cdpCall.nextId = 1;
@@ -977,6 +1012,7 @@ const child = spawn(electron, [`--remote-debugging-port=${remotePort}`, "electro
   env: {
     ...process.env,
     HILLS_ELECTRON_DEV_SERVER_URL: devServerUrl,
+    HILLS_ELECTRON_DISABLE_GPU: "1",
     HILLS_ELECTRON_OPEN_DEVTOOLS: "0",
     HILLS_ELECTRON_USER_DATA_DIR: userDataDir,
   },
@@ -1011,8 +1047,7 @@ try {
   await cdpCall(ws, "Page.enable");
   const pageConsole = [];
   const pageExceptions = [];
-  ws.addEventListener("message", (event) => {
-    const message = JSON.parse(event.data);
+  addCdpEventHandler(ws, (message) => {
     if (message.method === "Runtime.consoleAPICalled") {
       pageConsole.push({
         type: message.params?.type,

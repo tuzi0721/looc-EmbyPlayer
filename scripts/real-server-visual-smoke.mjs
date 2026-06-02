@@ -3,6 +3,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { WebSocket } from "undici";
 
 const devServerUrl = process.env.HILLS_SMOKE_DEV_SERVER_URL ?? "http://127.0.0.1:1420";
 const forceNativeMpv = process.env.HILLS_REAL_NATIVE_MPV === "1";
@@ -13,9 +14,33 @@ const tmpDir = path.join(os.tmpdir(), `hills-lite-real-visual-${Date.now()}`);
 const userDataDir = path.join(tmpDir, "user-data");
 const screenshotsDir = path.join(tmpDir, "screenshots");
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const sensitiveValues = new Set();
+
+function registerSensitiveValue(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return;
+  sensitiveValues.add(text);
+  sensitiveValues.add(text.replace(/\/+$/, ""));
+  try {
+    const url = new URL(text);
+    sensitiveValues.add(url.origin);
+    sensitiveValues.add(url.host);
+  } catch {
+    // Non-URL secrets are still covered by their raw value.
+  }
+}
+
+function redactSensitiveText(value) {
+  let text = String(value ?? "");
+  const ordered = Array.from(sensitiveValues).filter(Boolean).sort((a, b) => b.length - a.length);
+  for (const secret of ordered) {
+    text = text.split(secret).join("[redacted]");
+  }
+  return text;
+}
 
 function stage(name, details = {}) {
-  console.error(JSON.stringify({ stage: name, ...details }));
+  console.error(redactSensitiveText(JSON.stringify({ stage: name, ...details })));
 }
 
 function readInput() {
@@ -68,21 +93,57 @@ async function getTargets() {
   throw new Error("CDP target timeout");
 }
 
+async function cdpMessageText(event) {
+  const data = event.data;
+  if (typeof data === "string") return data;
+  if (data instanceof ArrayBuffer) return Buffer.from(data).toString("utf8");
+  if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8");
+  if (data && typeof data.text === "function") return data.text();
+  return String(data);
+}
+
+function ensureCdpDispatch(ws) {
+  if (ws.__hillsCdpDispatchReady) return;
+  ws.__hillsCdpDispatchReady = true;
+  ws.__hillsCdpPending = new Map();
+  ws.__hillsCdpHandlers = [];
+  ws.addEventListener("message", async (event) => {
+    let message;
+    try {
+      message = JSON.parse(await cdpMessageText(event));
+    } catch {
+      ws.__hillsCdpLastParseError = Object.prototype.toString.call(event.data);
+      return;
+    }
+    if (message.id != null && ws.__hillsCdpPending.has(message.id)) {
+      const pending = ws.__hillsCdpPending.get(message.id);
+      ws.__hillsCdpPending.delete(message.id);
+      clearTimeout(pending.timer);
+      if (message.error) pending.reject(new Error(redactSensitiveText(`${pending.method}: ${JSON.stringify(message.error)}`)));
+      else pending.resolve(message.result);
+      return;
+    }
+    for (const handler of ws.__hillsCdpHandlers) handler(message);
+  });
+}
+
+function addCdpEventHandler(ws, handler) {
+  ensureCdpDispatch(ws);
+  ws.__hillsCdpHandlers.push(handler);
+}
+
 async function cdpCall(ws, method, params = {}) {
+  ensureCdpDispatch(ws);
   const id = cdpCall.nextId;
   cdpCall.nextId += 1;
-  ws.send(JSON.stringify({ id, method, params }));
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${method} timeout`)), 60_000);
-    const listener = (event) => {
-      const message = JSON.parse(event.data);
-      if (message.id !== id) return;
-      clearTimeout(timer);
-      ws.removeEventListener("message", listener);
-      if (message.error) reject(new Error(`${method}: ${JSON.stringify(message.error)}`));
-      else resolve(message.result);
-    };
-    ws.addEventListener("message", listener);
+    const timer = setTimeout(() => {
+      ws.__hillsCdpPending.delete(id);
+      const parseNote = ws.__hillsCdpLastParseError ? `; last parse data ${ws.__hillsCdpLastParseError}` : "";
+      reject(new Error(`${method} timeout${parseNote}`));
+    }, 60_000);
+    ws.__hillsCdpPending.set(id, { method, resolve, reject, timer });
+    ws.send(JSON.stringify({ id, method, params }));
   });
 }
 cdpCall.nextId = 1;
@@ -93,7 +154,7 @@ async function cdpEval(ws, expression) {
     awaitPromise: true,
     returnByValue: true,
   });
-  if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
+  if (result.exceptionDetails) throw new Error(redactSensitiveText(JSON.stringify(result.exceptionDetails)));
   return result.result?.value ?? null;
 }
 
@@ -603,6 +664,7 @@ function centerOf(rect) {
 }
 
 const [line1, line2, username, password] = readInput();
+for (const value of [line1, line2, username, password]) registerSensitiveValue(value);
 stage("input-read", {
   line1Present: Boolean(line1),
   line2Present: Boolean(line2),
@@ -625,6 +687,7 @@ const child = spawn(electron, [`--remote-debugging-port=${remotePort}`, "electro
   env: {
     ...process.env,
     HILLS_ELECTRON_DEV_SERVER_URL: devServerUrl,
+    HILLS_ELECTRON_DISABLE_GPU: "1",
     HILLS_ELECTRON_OPEN_DEVTOOLS: "0",
     HILLS_ELECTRON_USER_DATA_DIR: userDataDir,
   },
@@ -662,8 +725,7 @@ try {
   await cdpCall(ws, "Page.enable");
   const pageConsole = [];
   const pageExceptions = [];
-  ws.addEventListener("message", (event) => {
-    const message = JSON.parse(event.data);
+  addCdpEventHandler(ws, (message) => {
     if (message.method === "Runtime.consoleAPICalled") {
       pageConsole.push({
         type: message.params?.type,
@@ -1359,7 +1421,8 @@ try {
       pageExceptions,
     },
   };
-  console.log(JSON.stringify(output, null, 2));
+  const redactedOutput = JSON.parse(redactSensitiveText(JSON.stringify(output)));
+  console.log(JSON.stringify(redactedOutput, null, 2));
   if (!output.ok) process.exitCode = 1;
 } finally {
   ws?.close();

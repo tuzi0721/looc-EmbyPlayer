@@ -149,7 +149,7 @@ function gotoAddServer() {
               v-for="item in lib.searchResults"
               :key="mediaItemKey(item)"
               :item="item"
-              @activate="openItem(item)"
+              :activate-handler="openItem"
             />
           </div>
         </section>

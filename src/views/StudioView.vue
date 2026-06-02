@@ -164,7 +164,7 @@ onBeforeUnmount(() => {
           v-for="item in items"
           :key="item.Id"
           :item="item"
-          @activate="openItem(item.Id)"
+          :activate-handler="() => openItem(item.Id)"
         />
       </div>
 

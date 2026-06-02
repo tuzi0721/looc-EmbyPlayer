@@ -15,10 +15,11 @@ const props = defineProps<{
   item: MediaItem;
   aspect?: PosterAspect | "auto";
   eager?: boolean;
+  activateHandler?: (item: MediaItem) => void | Promise<void>;
 }>();
 
 const emit = defineEmits<{
-  activate: [];
+  (e: "activate"): void;
 }>();
 
 const artEl = ref<HTMLDivElement | null>(null);
@@ -138,13 +139,22 @@ const subtitle = computed(() => {
   return "";
 });
 const sourceLabel = computed(() => mediaItemSourceLabel(props.item));
+
+function activate() {
+  if (props.activateHandler) void props.activateHandler(props.item);
+  emit("activate");
+}
 </script>
 
 <template>
   <article
     class="poster"
     :class="[`poster--${resolvedAspect}`, { 'poster--collection': isCollection }]"
-    @click="emit('activate')"
+    role="button"
+    tabindex="0"
+    @click="activate"
+    @keydown.enter.prevent="activate"
+    @keydown.space.prevent="activate"
   >
     <div ref="artEl" class="poster__art">
       <img

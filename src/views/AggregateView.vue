@@ -210,7 +210,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
             :key="mediaItemKey(item)"
             :item="item"
             :aspect="itemAspect(item)"
-            @activate="openItem(item)"
+            :activate-handler="openItem"
           />
         </div>
       </section>
@@ -227,7 +227,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
               :key="mediaItemKey(item)"
               :item="item"
               aspect="backdrop"
-              @activate="openItem(item)"
+              :activate-handler="openItem"
             />
           </div>
         </section>
@@ -245,7 +245,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
               :key="mediaItemKey(item)"
               :item="item"
               :aspect="itemAspect(item)"
-              @activate="openItem(item)"
+              :activate-handler="openItem"
             />
           </div>
         </section>
@@ -263,7 +263,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
               :key="mediaItemKey(item)"
               :item="item"
               :aspect="itemAspect(item)"
-              @activate="openItem(item)"
+              :activate-handler="openItem"
             />
           </div>
         </section>
@@ -289,7 +289,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
             :key="mediaItemKey(item)"
             :item="item"
             :aspect="itemAspect(item)"
-            @activate="openItem(item)"
+            :activate-handler="openItem"
           />
         </div>
       </section>

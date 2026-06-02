@@ -4,6 +4,7 @@ import fsp from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { WebSocket } from "undici";
 
 const devServerUrl = process.env.HILLS_SMOKE_DEV_SERVER_URL ?? "http://localhost:1420";
 const remotePort = process.env.HILLS_SMOKE_CDP_PORT
@@ -318,21 +319,52 @@ async function getTargets() {
   throw new Error("CDP target timeout");
 }
 
+async function cdpMessageText(event) {
+  const data = event.data;
+  if (typeof data === "string") return data;
+  if (data instanceof ArrayBuffer) return Buffer.from(data).toString("utf8");
+  if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8");
+  if (data && typeof data.text === "function") return data.text();
+  return String(data);
+}
+
+function ensureCdpDispatch(ws) {
+  if (ws.__hillsCdpDispatchReady) return;
+  ws.__hillsCdpDispatchReady = true;
+  ws.__hillsCdpPending = new Map();
+  ws.__hillsCdpHandlers = [];
+  ws.addEventListener("message", async (event) => {
+    let message;
+    try {
+      message = JSON.parse(await cdpMessageText(event));
+    } catch {
+      ws.__hillsCdpLastParseError = Object.prototype.toString.call(event.data);
+      return;
+    }
+    if (message.id != null && ws.__hillsCdpPending.has(message.id)) {
+      const pending = ws.__hillsCdpPending.get(message.id);
+      ws.__hillsCdpPending.delete(message.id);
+      clearTimeout(pending.timer);
+      if (message.error) pending.reject(new Error(`${pending.method}: ${JSON.stringify(message.error)}`));
+      else pending.resolve(message.result);
+      return;
+    }
+    for (const handler of ws.__hillsCdpHandlers) handler(message);
+  });
+}
+
 async function cdpCall(ws, method, params = {}) {
+  ensureCdpDispatch(ws);
   const id = cdpCall.nextId;
   cdpCall.nextId += 1;
-  ws.send(JSON.stringify({ id, method, params }));
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${method} timeout`)), 45_000);
-    const listener = (event) => {
-      const message = JSON.parse(event.data);
-      if (message.id !== id) return;
-      clearTimeout(timer);
-      ws.removeEventListener("message", listener);
-      if (message.error) reject(new Error(`${method}: ${JSON.stringify(message.error)}`));
-      else resolve(message.result);
-    };
-    ws.addEventListener("message", listener);
+    const timer = setTimeout(() => {
+      ws.__hillsCdpPending.delete(id);
+      const parseNote = ws.__hillsCdpLastParseError ? `; last parse data ${ws.__hillsCdpLastParseError}` : "";
+      reject(new Error(`${method} timeout${parseNote}`));
+    }, 45_000);
+    ws.__hillsCdpPending.set(id, { method, resolve, reject, timer });
+    ws.send(JSON.stringify({ id, method, params }));
   });
 }
 cdpCall.nextId = 1;
@@ -345,6 +377,149 @@ async function cdpEval(ws, expression) {
   });
   if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
   return result.result?.value ?? null;
+}
+
+async function cdpClick(ws, point) {
+  await cdpCall(ws, "Page.bringToFront");
+  await cdpCall(ws, "Input.dispatchMouseEvent", {
+    type: "mouseMoved",
+    x: point.x,
+    y: point.y,
+    button: "left",
+    buttons: 0,
+  });
+  await cdpCall(ws, "Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    x: point.x,
+    y: point.y,
+    button: "left",
+    buttons: 1,
+    clickCount: 1,
+  });
+  await cdpCall(ws, "Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    x: point.x,
+    y: point.y,
+    button: "left",
+    buttons: 0,
+    clickCount: 1,
+  });
+}
+
+function centerOf(rect) {
+  return {
+    x: rect.x + rect.width / 2,
+    y: rect.y + rect.height / 2,
+  };
+}
+
+async function clickSourceCardByMouse(ws, route, sourceLabel) {
+  const prepared = await cdpEval(ws, `
+    (async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const { useAuthStore } = await import("/src/stores/auth.ts");
+      const { useServerStore } = await import("/src/stores/server.ts");
+      const auth = useAuthStore();
+      const serverStore = useServerStore();
+      const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+      const activeSnapshot = () => {
+        const account = auth.activeAccount;
+        const server = account ? serverStore.byId(account.serverId) : null;
+        return {
+          accountId: auth.activeId,
+          serverId: server?.id ?? null,
+          serverName: server?.name ?? null,
+        };
+      };
+      const accountsSnapshot = () => auth.accounts.map((account) => ({
+        id: account.id,
+        serverId: account.serverId,
+        serverName: serverStore.byId(account.serverId)?.name ?? null,
+      }));
+      const sourceCards = () =>
+        Array.from(document.querySelectorAll(".poster")).map((card) => ({
+          card,
+          label: card.querySelector(".poster__source")?.textContent?.trim() ?? "",
+          title: card.querySelector("h4")?.textContent?.trim() ?? "",
+        }));
+      await appRouter.push(${JSON.stringify(route)});
+      for (let i = 0; i < 30; i += 1) {
+        await wait(120);
+        if (sourceCards().some((entry) => entry.label === ${JSON.stringify(sourceLabel)})) break;
+      }
+      const entry = sourceCards().find((item) => item.label === ${JSON.stringify(sourceLabel)});
+      entry?.card.scrollIntoView({ block: "center", inline: "center" });
+      await wait(120);
+      const rect = entry?.card.getBoundingClientRect();
+      const hit = rect
+        ? document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+        : null;
+      const hitPoster = hit?.closest?.(".poster");
+      return {
+        sourceLabel: ${JSON.stringify(sourceLabel)},
+        found: Boolean(entry),
+        before: activeSnapshot(),
+        accounts: accountsSnapshot(),
+        card: rect
+          ? {
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+              title: entry.title,
+              label: entry.label,
+            }
+          : null,
+        hit: hit
+          ? {
+              tag: hit.tagName,
+              className: String(hit.className ?? ""),
+              text: hit.textContent?.replace(/\\s+/g, " ").trim().slice(0, 80) ?? "",
+              posterLabel: hitPoster?.querySelector(".poster__source")?.textContent?.trim() ?? "",
+          }
+          : null,
+      };
+    })()
+  `);
+
+  if (prepared?.card) {
+    await cdpClick(ws, centerOf(prepared.card));
+  }
+
+  const result = await cdpEval(ws, `
+    (async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const { useAuthStore } = await import("/src/stores/auth.ts");
+      const { useServerStore } = await import("/src/stores/server.ts");
+      const auth = useAuthStore();
+      const serverStore = useServerStore();
+      const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+      const activeSnapshot = () => {
+        const account = auth.activeAccount;
+        const server = account ? serverStore.byId(account.serverId) : null;
+        return {
+          accountId: auth.activeId,
+          serverId: server?.id ?? null,
+          serverName: server?.name ?? null,
+        };
+      };
+      let after = activeSnapshot();
+      let detailRoute = appRouter.currentRoute.value.fullPath;
+      for (let i = 0; i < 50; i += 1) {
+        await wait(120);
+        after = activeSnapshot();
+        detailRoute = appRouter.currentRoute.value.fullPath;
+        if (detailRoute.startsWith("/item/")) break;
+      }
+      return {
+        after,
+        detailRoute,
+        query: { ...appRouter.currentRoute.value.query },
+      };
+    })()
+  `);
+
+  return { ...prepared, ...result };
 }
 
 await ensureDevServer();
@@ -367,22 +542,62 @@ const child = spawn(electron, [`--remote-debugging-port=${remotePort}`, "electro
   env: {
     ...process.env,
     HILLS_ELECTRON_DEV_SERVER_URL: devServerUrl,
+    HILLS_ELECTRON_DISABLE_GPU: "1",
     HILLS_ELECTRON_OPEN_DEVTOOLS: "0",
     HILLS_ELECTRON_USER_DATA_DIR: userDataDir,
   },
   stdio: ["ignore", "pipe", "pipe"],
   windowsHide: true,
 });
+const childStdout = [];
+const childStderr = [];
+child.stdout?.on("data", (chunk) => {
+  childStdout.push(String(chunk));
+  if (childStdout.join("").length > 8000) childStdout.shift();
+});
+child.stderr?.on("data", (chunk) => {
+  childStderr.push(String(chunk));
+  if (childStderr.join("").length > 8000) childStderr.shift();
+});
 
 let ws;
+let selectedTarget = null;
+let targetSummary = [];
+let wsCloseInfo = null;
+let wsErrorInfo = null;
 try {
   const targets = await getTargets();
+  targetSummary = targets.map((item) => ({
+    id: item.id,
+    type: item.type,
+    url: item.url,
+    title: item.title,
+  }));
   const target =
     targets.find((item) => item.type === "page" && item.url.startsWith(devServerUrl)) ??
     targets.find((item) => item.type === "page");
   if (!target?.webSocketDebuggerUrl) throw new Error("page target not found");
+  selectedTarget = {
+    id: target.id,
+    type: target.type,
+    url: target.url,
+    title: target.title,
+  };
 
   ws = new WebSocket(target.webSocketDebuggerUrl);
+  ws.addEventListener("close", (event) => {
+    wsCloseInfo = {
+      code: event.code,
+      reason: event.reason,
+      wasClean: event.wasClean,
+    };
+  });
+  ws.addEventListener("error", (event) => {
+    wsErrorInfo = {
+      type: event.type,
+      message: event.message ?? null,
+    };
+  });
   await new Promise((resolve, reject) => {
     ws.onopen = resolve;
     ws.onerror = () => reject(new Error("websocket error"));
@@ -603,6 +818,11 @@ try {
       return routes;
     })()
   `);
+
+  const multiServerOpenProbe = {
+    duplicate: await clickSourceCardByMouse(ws, "/favorites", "Existing Smoke Server"),
+    home: await clickSourceCardByMouse(ws, "/history", "Home Hero Smoke"),
+  };
 
   const detailProbe = await cdpEval(ws, `
     (async () => {
@@ -931,6 +1151,30 @@ try {
       failures.push("/aggregate did not show cross-server source labels");
     }
   }
+  if (!multiServerOpenProbe.duplicate?.found) {
+    failures.push("favorite cross-server duplicate card was not found");
+  }
+  if (multiServerOpenProbe.duplicate?.after?.serverName !== "Existing Smoke Server") {
+    failures.push(`favorite click did not switch to duplicate server: ${JSON.stringify(multiServerOpenProbe.duplicate)}`);
+  }
+  if (!multiServerOpenProbe.duplicate?.detailRoute?.startsWith("/item/hero-movie")) {
+    failures.push(`favorite click did not open duplicate detail: ${JSON.stringify(multiServerOpenProbe.duplicate)}`);
+  }
+  if (!multiServerOpenProbe.duplicate?.query?.server || !multiServerOpenProbe.duplicate?.query?.account) {
+    failures.push(`favorite detail route lost source query: ${JSON.stringify(multiServerOpenProbe.duplicate)}`);
+  }
+  if (!multiServerOpenProbe.home?.found) {
+    failures.push("history cross-server home card was not found");
+  }
+  if (multiServerOpenProbe.home?.after?.serverName !== "Home Hero Smoke") {
+    failures.push(`history click did not switch back to home server: ${JSON.stringify(multiServerOpenProbe.home)}`);
+  }
+  if (!multiServerOpenProbe.home?.detailRoute?.startsWith("/item/hero-movie")) {
+    failures.push(`history click did not open home detail: ${JSON.stringify(multiServerOpenProbe.home)}`);
+  }
+  if (!multiServerOpenProbe.home?.query?.server || !multiServerOpenProbe.home?.query?.account) {
+    failures.push(`history detail route lost source query: ${JSON.stringify(multiServerOpenProbe.home)}`);
+  }
   if (multiServerSearch.count < 2) failures.push("search did not query all logged-in servers");
   if (!multiServerSearch.sourceLabels.includes("Home Hero Smoke") || !multiServerSearch.sourceLabels.includes("Existing Smoke Server")) {
     failures.push(`search source labels missing: ${multiServerSearch.sourceLabels.join(", ")}`);
@@ -984,6 +1228,7 @@ try {
         sidebarCollapse,
         detailProbe,
         personalRoutes,
+        multiServerOpenProbe,
         multiServerSearch,
         compactHome,
       },
@@ -991,6 +1236,25 @@ try {
       2,
     ),
   );
+} catch (error) {
+  const diagnostic = {
+    remotePort,
+    selectedTarget,
+    targetSummary,
+    wsReadyState: ws?.readyState ?? null,
+    wsCloseInfo,
+    wsErrorInfo,
+    child: {
+      pid: child.pid,
+      exitCode: child.exitCode,
+      signalCode: child.signalCode,
+      killed: child.killed,
+    },
+    stdout: childStdout.join("").slice(-4000),
+    stderr: childStderr.join("").slice(-4000),
+  };
+  console.error(`home hero smoke diagnostic:\n${JSON.stringify(diagnostic, null, 2)}`);
+  throw error;
 } finally {
   if (ws) ws.close();
   child.kill();

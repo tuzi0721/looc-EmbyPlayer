@@ -81,7 +81,7 @@ function open(item: MediaItem) {
           :key="mediaItemKey(item)"
           :item="item"
           aspect="backdrop"
-          @activate="open(item)"
+          :activate-handler="open"
         />
       </div>
     </div>

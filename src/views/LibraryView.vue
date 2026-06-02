@@ -237,7 +237,7 @@ function openItem(id: string) {
 
           :item="item"
 
-          @activate="openItem(item.Id)"
+          :activate-handler="() => openItem(item.Id)"
 
         />
 
