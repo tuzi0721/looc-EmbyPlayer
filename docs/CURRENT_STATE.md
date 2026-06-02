@@ -1,15 +1,16 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（Git sync native evidence）
+> 更新时间：2026-06-02（Current state audit）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-1738-git-sync-native-evidence.md`](./CHANGE_LOG/2026-06-02-1738-git-sync-native-evidence.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-1743-current-state-audit.md`](./CHANGE_LOG/2026-06-02-1743-current-state-audit.md)
 
 ---
 
 ## 0. 最新视觉修正阶段
-- 2026-06-02 17:38 已提交并推送播放器 native/mpv 取证修复、真实账号视检日志和 Electron unpacked 刷新状态：`4045dfb Tighten native playback visual evidence` 已推送到 `origin/main`，远端从 `2d456bf` 更新到 `4045dfb`。推送后 `git log -1 --oneline --decorate` 显示 `4045dfb (HEAD -> main, origin/main)`，`git diff --name-only HEAD` 无输出；`git status --short` 仍显示若干无内容 `M` 噪声和未跟踪 `.cunzhi-memory/`，本阶段未触碰。当前最新 exe 仍为 `A:\vsc\emby-player\release-electron\win-unpacked\Hills Lite.exe`，时间 2026-06-02 17:34:24，大小 210150400 bytes。当前用户反馈清单中的播放器真实画面比例、黑屏/控件、真实账号登录、首页/详情多尺寸视觉、多服务器个人页/搜索和退出清理均已有当前证据；后续继续从新反馈或更细的产品清理项进入下一阶段。
+- 2026-06-02 17:43 完成当前状态文档一致性审计：顶部阶段记录、概览表、当前产物段和验证摘要已统一到最新实际状态。播放器 native/mpv 取证功能提交为 `4045dfb Tighten native playback visual evidence`；后续文档同步提交为 `2d01701 Document native evidence sync`，当前 `git log -1 --oneline --decorate` 显示 `2d01701 (HEAD -> main, origin/main)`。`git diff --name-only HEAD` 无输出；`git status --short` 仍显示若干无内容 `M` 噪声和未跟踪 `.cunzhi-memory/`，本阶段未触碰。当前最新 exe 为 `A:\vsc\emby-player\release-electron\win-unpacked\Hills Lite.exe`，时间 2026-06-02 17:34:24，大小 210150400 bytes；`resources\electron_mpv_host.exe` 时间 2026-06-02 17:34:21，大小 309760 bytes。
+- 2026-06-02 17:38 已提交并推送播放器 native/mpv 取证修复、真实账号视检日志和 Electron unpacked 刷新状态：`4045dfb Tighten native playback visual evidence` 已推送到 `origin/main`，远端从 `2d456bf` 更新到 `4045dfb`；随后文档同步提交 `2d01701 Document native evidence sync` 也已推送到 `origin/main`。当前用户反馈清单中的播放器真实画面比例、黑屏/控件、真实账号登录、首页/详情多尺寸视觉、多服务器个人页/搜索和退出清理均已有当前证据；后续继续从新反馈或更细的产品清理项进入下一阶段。
 - 2026-06-02 17:34 已刷新 Electron unpacked 产物：`release-electron\win-unpacked\Hills Lite.exe` 时间 2026-06-02 17:34:24，大小 210150400 bytes；`release-electron\win-unpacked\resources\electron_mpv_host.exe` 时间 2026-06-02 17:34:21，大小 309760 bytes。`npm.cmd run electron:build` 已通过，包含 Electron 命令覆盖检查、本机解码 guard、no-planned-ui、Vue 类型检查、Vite 生产构建、`electron_mpv_host` release build、`electron-builder --win dir` 和 `check:electron-package`；包内 bundled mpv 共 6 个文件，`app.asar` 存在。下一步提交并推送本阶段修复、真实视检日志和最新构建状态。
 - 2026-06-02 17:30 已用真实测试账号重跑真实 Emby 多尺寸 visual smoke，输出 `ok: true`、失败项为空，保留目录 `C:\Users\Sakur\AppData\Local\Temp\hills-lite-real-visual-1780392497912`。真实服务器检测/登录成功，加载 5 个媒体库视图；播放源为 `DirectPlay`，选中源 `supportsTranscoding: false`，保持本机解码约束；剧集详情页播放探针打开真实可播集 `/player/34758?...`；详情页播放打开 `/player/25372?...`。播放器在 ready 后额外等待 5 秒抓取 `mpv.exe` native 窗口，初始播放和 1366x768 / 960x600 / 760x430 resize 均有 native/mpv 非黑屏截图；mpv `videoParams` 和 `videoOutParams` 均约 `1.777778`，`osd-dimensions` 内容框在各尺寸下也约等于 16:9，且 `keepaspect=true`、`panscan=0`、`videoZoom=0`、`videoScaleX=1`、`videoScaleY=1`。人工复核了 `player-native-playback.png`、`player-1366x768-native.png`、`player-960x600-native.png`、`player-760x430-native.png`、`player-760x430-ui.png`、`home-760x430.png`、`home-1366x768.png`、`detail-760x430.png`、`series-detail-760x430.png`；确认不再以竖版海报冒充播放，播放器控件可见，首页巨幕固定比例并露出继续观看，详情/剧集页 760x430 下仍为打满式 hero。后退、全屏进入/退出和退出清理均通过，剩余播放进程为 0。下一步刷新 Electron unpacked exe 并提交推送。
 - 2026-06-02 17:24 用户指出上一轮“真实画面”比例明显不对后，已收紧播放器比例证据链：Electron mpv snapshot 现在暴露 `videoOutParams` / `osdDimensions` / keepaspect/panscan/zoom/scale 等真实输出状态；真实服务器 visual smoke 不再用暗场截图的亮色像素框推断比例，而是优先用 mpv `video-out-params` 与 `osd-dimensions` 内容框和源 `videoParams` 对比，native/mpv 截图只用于确认窗口来源和非黑屏。当前只是证据标准修正，尚未宣称真实账号多尺寸播放器视检通过；下一步立即跑语法、构建、本地 embedded smoke 和真实账号 visual smoke。
@@ -77,14 +78,14 @@
 | 显示名 | Hills Lite |
 | 主运行壳 | Electron + Vue 3 + TypeScript |
 | Tauri 状态 | 保留可运行路径，`tauri.conf.json` 当前 `bundle.active: false` |
-| Electron unpacked | `release-electron\win-unpacked\Hills Lite.exe`（2026-06-02 15:32:43 刷新） |
+| Electron unpacked | `release-electron\win-unpacked\Hills Lite.exe`（2026-06-02 17:34:24 刷新，210150400 bytes） |
 | Electron portable | 当前不存在；旧 `release-electron\Hills Lite 0.1.0.exe` 已删除 |
 | Tauri release exe | `src-tauri\target\release\emby-player.exe` |
 | 内置 mpv | `release-electron\win-unpacked\resources\mpv\mpv.exe`；Tauri 为 `src-tauri\target\release\resources\mpv\mpv.exe` |
 
 历史流水和每轮验证保留在 [`CHANGE_LOG`](./CHANGE_LOG/)；本文件只记录当前可执行状态，避免旧阶段描述误导后续判断。
 
-当前最新 Electron unpacked 产物已刷新：`A:\vsc\emby-player\release-electron\win-unpacked\Hills Lite.exe`，文件时间 2026-06-02 15:32:43；随包 `resources\electron_mpv_host.exe` 文件时间 2026-06-02 15:32:41。
+当前最新 Electron unpacked 产物已刷新：`A:\vsc\emby-player\release-electron\win-unpacked\Hills Lite.exe`，文件时间 2026-06-02 17:34:24，大小 210150400 bytes；随包 `resources\electron_mpv_host.exe` 文件时间 2026-06-02 17:34:21，大小 309760 bytes。
 
 当前 Electron portable 单文件包尚未刷新成功，旧 `A:\vsc\emby-player\release-electron\Hills Lite 0.1.0.exe` 已删除。`npm.cmd run electron:dist` 在 `electron-builder --win portable` 阶段因 GitHub NSIS 依赖下载超时失败；如需 portable，需要重新生成新的单文件包。
 
@@ -237,7 +238,7 @@ node scripts\check-notification-clear.mjs
 - `node --check scripts\real-server-visual-smoke.mjs`（native host 截图跳过策略后通过）
 - `npm.cmd run build`（卡片图片候选顺序调整后通过）
 - `node scripts\smoke-electron-home-hero.mjs`（本地历史/收藏/聚合图片加载与跨服务器点击仍通过）
-- 当前新增真实 smoke 脚本与阶段日志属于本轮预期变更；Electron 命令覆盖为 104/104，显式 no-op 命令为 0。首页 smoke 已覆盖双服务器同名同 ID 收藏/历史/聚合/搜索记录不会被合并、收藏/历史/聚合卡片缺 Backdrop 时的图片回退解码、单集只有父级 Thumb 时仍能加载图片、巨幕 Logo 艺术标题图加载、巨幕无右侧海报且点击进入详情、侧边栏汉堡按钮折叠/展开、添加服务器弹窗账号/密码/任意端口/自动类型与名称、线路高级 UA，以及 960×600 compact 窗口下巨幕首屏自适应。真实 smoke 已覆盖真实账号登录、详情页真实点击播放、可见 mpv 视频帧、seek、全屏、缩放和退出清理。
+- 当前新增真实 smoke 脚本与阶段日志属于本轮预期变更；Electron 命令覆盖为 104 renderer commands、105 Electron handlers、0 explicit no-op commands。首页 smoke 已覆盖双服务器同名同 ID 收藏/历史/聚合/搜索记录不会被合并、收藏/历史/聚合卡片缺 Backdrop 时的图片回退解码、单集只有父级 Thumb 时仍能加载图片、巨幕 Logo 艺术标题图加载、巨幕无右侧海报且点击进入详情、侧边栏汉堡按钮折叠/展开、添加服务器弹窗账号/密码/任意端口/自动类型与名称、线路高级 UA，以及 960×600 compact 窗口下巨幕首屏自适应。真实 smoke 已覆盖真实账号登录、详情页真实点击播放、可见 mpv 视频帧、seek、全屏、缩放和退出清理。
 
 ---
 
