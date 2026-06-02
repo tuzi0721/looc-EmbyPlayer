@@ -1,14 +1,15 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（Electron unpacked refresh）
+> 更新时间：2026-06-02（Git push compact detail refresh）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-1533-electron-unpacked-refresh.md`](./CHANGE_LOG/2026-06-02-1533-electron-unpacked-refresh.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-1620-git-push-compact-detail-refresh.md`](./CHANGE_LOG/2026-06-02-1620-git-push-compact-detail-refresh.md)
 
 ---
 
 ## 0. 最新视觉修正阶段
+- 2026-06-02 16:20 已把详情页紧凑标题修复与 Electron unpacked 刷新两个本地提交推送到 GitHub：`origin/main` 从 `8c49635` 更新到 `3a503d0`。推送前 `git diff --name-only HEAD` 无输出；`git status` 仍显示多项 `M`，但当前判断为索引/时间戳噪声而非实际内容 diff。本阶段未修改功能代码，属于 Git 同步闭环；下一步继续审计用户反馈清单中仍缺少当前证据或仍需真实多尺寸视检的项目。
 - 2026-06-02 15:33 已刷新包含详情页紧凑标题修复的 Electron unpacked 产物：`release-electron\win-unpacked\Hills Lite.exe` 文件时间 2026-06-02 15:32:43，`resources\electron_mpv_host.exe` 文件时间 2026-06-02 15:32:41。`npm.cmd run electron:build` 通过，包含 Electron 命令覆盖检查、本机解码 guard、no-planned-ui、Vue 类型检查、Vite 生产构建、helper release build、`electron-builder --win dir` 和 `check:electron-package`；本阶段仍未生成 portable 单文件包。
 - 2026-06-02 15:26 已修复真实详情页紧凑窗口长标题被顶边裁切的问题：`DetailView.vue` 在窄宽或低高窗口下为 hero 内容设置顶边约束、紧凑标题/间距和滚动兜底；真实 visual smoke 新增 `detailTitle` / `detailTitleClipped` 指标，并在详情页或剧集详情标题越出视口时直接失败。`node --check scripts\real-server-visual-smoke.mjs`、`npm.cmd run build`、`node scripts\smoke-electron-home-hero.mjs` 和真实账号 `node scripts\real-server-visual-smoke.mjs` 已通过；人工复核新保留截图确认 `detail-960x600.png`、`detail-760x430.png`、`series-detail-960x600.png` 标题不再裁切，首页紧凑巨幕仍保持固定比例并露出继续观看。播放器仍按“就绪后额外等待 5 秒截图”执行，seek/fullscreen/resize/退出清理通过，且未生成 `player-native-host.png` 误导性截图证据。
 - 2026-06-02 15:18 真实服务器多尺寸 visual smoke 已重跑并保留截图，自动化输出 `ok: true`、`failures: []`：真实 Emby 登录、5 个首页尺寸、5 个详情页尺寸、5 个 Series 详情尺寸、个人页、搜索、Series 详情播放进入具体单集、详情页播放、播放器就绪后额外等待 5 秒截图、后退、全屏、播放器缩放和退出清理均完成；PlaybackInfo 仍为 `DirectPlay` 且 `supportsTranscoding: false`。但人工复核保留截图时发现 `detail-960x600.png` 的长标题顶部裁切，因此本轮不能记为完整视觉通过；下一步先修详情页紧凑窗口标题裁切，并补脚本断言。
