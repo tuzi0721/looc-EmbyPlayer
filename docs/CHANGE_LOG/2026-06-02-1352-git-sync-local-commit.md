@@ -6,13 +6,14 @@
 - Attempted to push the commit to `origin/main`.
 
 ## Verification
-- Local commit: `9bf31e7 Fix series detail playback smoke`.
+- Initial local commit: `9bf31e7 Fix series detail playback smoke`.
+- Amended current local commit after adding this log: `59ba2a5 Fix series detail playback smoke`.
 - `git diff --name-status` after the commit returned no content changes.
 - Process check found no remaining `electron`, `mpv`, `electron_mpv_host`, or `Hills Lite` process.
 
 ## Push Status
 - Push did not update the remote because Git reported local credential failure: `SEC_E_NO_CREDENTIALS`.
-- Current branch state after the failed push: local `main` is ahead of `origin/main` by 1 commit.
+- Branch state immediately after the failed push: local `main` was ahead of `origin/main` by 1 commit.
 
 ## Notes
 - No credentials, tokens, complete server URLs, or playback URLs are recorded in this log.

@@ -1,15 +1,16 @@
 # Hills Lite 当前项目状态快照
 
-> 更新时间：2026-06-02（Git sync local commit）
+> 更新时间：2026-06-02（Git push Series playback）
 >
 > 规格：[`UI_REFERENCE_HILLS_LITE.md`](./UI_REFERENCE_HILLS_LITE.md)
 >
-> 最新变更日志：[`CHANGE_LOG/2026-06-02-1352-git-sync-local-commit.md`](./CHANGE_LOG/2026-06-02-1352-git-sync-local-commit.md)
+> 最新变更日志：[`CHANGE_LOG/2026-06-02-1354-git-push-series-playback.md`](./CHANGE_LOG/2026-06-02-1354-git-push-series-playback.md)
 
 ---
 
 ## 0. 最新视觉修正阶段
-- 2026-06-02 13:52 已将 Series 详情播放修复、真实账号视觉 smoke 补强、真实 Series 诊断脚本和阶段日志提交到本地 `main`：`9bf31e7 Fix series detail playback smoke`。普通 `git push origin main` 未更新远端，原因是当前 Git 凭据不可用并返回 `SEC_E_NO_CREDENTIALS`；本地分支因此领先 `origin/main` 1 个提交。提交后 `git diff --name-status` 无内容差异，并确认没有残留 `electron` / `mpv` / `electron_mpv_host` / `Hills Lite` 进程。下一步继续尝试在可用凭据上下文推送，若仍不可用则继续本地完整目标缺口审计与修复。
+- 2026-06-02 13:54 已在可用本机凭据上下文中重新执行 `git push origin main` 并成功更新远端：`origin/main` 从 `7081b28` 推进到 `59ba2a5 Fix series detail playback smoke`。此前 `SEC_E_NO_CREDENTIALS` 属于沙箱/本机凭据上下文问题，不是仓库或代码失败。下一步继续完整目标缺口审计，优先找仍缺少真实多尺寸证据或仍可能只被本地 fake smoke 覆盖的用户反馈项。
+- 2026-06-02 13:52 已将 Series 详情播放修复、真实账号视觉 smoke 补强、真实 Series 诊断脚本和阶段日志提交到本地 `main`；初始本地提交为 `9bf31e7`，补入本阶段日志后 amend 为 `59ba2a5 Fix series detail playback smoke`。普通 `git push origin main` 未更新远端，原因是当前 Git 凭据不可用并返回 `SEC_E_NO_CREDENTIALS`；当时本地分支领先 `origin/main` 1 个提交。提交后 `git diff --name-status` 无内容差异，并确认没有残留 `electron` / `mpv` / `electron_mpv_host` / `Hills Lite` 进程。
 - 2026-06-02 13:40 已刷新 Electron unpacked 产物：`release-electron\win-unpacked\Hills Lite.exe` 文件时间 2026-06-02 13:40:17，`resources\electron_mpv_host.exe` 文件时间 2026-06-02 13:40:14。`npm.cmd run electron:build` 通过，包含命令覆盖检查、本机解码 guard、planned UI 检查、`vue-tsc --noEmit`、Vite 生产构建、Electron helper release build、`electron-builder --win dir` 和 `check:electron-package`。portable 单文件包未由本命令生成；下一步检查提交范围和敏感信息后处理 Git。
 - 2026-06-02 13:36 完整真实账号视觉 smoke 已通过，最终输出 `ok: true` 且 `failures: []`。真实 Series 详情 `/item/34743` 点击播放已进入具体单集 `/player/34758?...&from=34743`，播放器先等待可用播放状态，再额外等待 5 秒后截图；原生 mpv 窗口像素非黑屏，seek 从约 15000 ms 回退到约 5000 ms，全屏、播放器缩放和退出子进程清理均通过。下一步检查打包产物是否因本轮 `DetailView.vue` 与 smoke 脚本变更而需要刷新。
 - 2026-06-02 13:33 真实账号 smoke 已确认 Series 详情播放修复生效：真实 Series 点击播放进入具体单集 `/player/...&from=34743`，无动作错误。随后主播放候选 25 秒内未暴露 duration/tracks/videoParams，seek 调用触发 mpv 命令错误导致脚本提前退出。已修正 smoke：播放器未就绪时跳过 seek 并记录失败项，不再崩溃；`node --check scripts\real-server-visual-smoke.mjs` 已通过。下一步继续重跑完整真实账号视觉 smoke，获取最终 pass/fail JSON。
