@@ -1670,6 +1670,49 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
   });
 }
 
+const playbackContextTimeoutMs = 8000;
+
+function activeAccountHasServer(): boolean {
+  const account = auth.activeAccount;
+  return Boolean(account && serverStore.byId(account.serverId));
+}
+
+async function refreshPlaybackContext() {
+  await Promise.allSettled([
+    withTimeout(serverStore.refresh(), playbackContextTimeoutMs, "同步服务器列表超时"),
+    withTimeout(auth.refresh(), playbackContextTimeoutMs, "同步登录账号超时"),
+  ]);
+}
+
+async function ensureRemotePlaybackContext() {
+  const requestedAccountId = routeAccountId.value;
+  const requestedAccountMissing =
+    Boolean(requestedAccountId) &&
+    !auth.accounts.some((account) => account.id === requestedAccountId);
+
+  if (!activeAccountHasServer() || requestedAccountMissing) {
+    await refreshPlaybackContext();
+  }
+
+  const nextAccountId = routeAccountId.value;
+  if (nextAccountId && auth.activeId !== nextAccountId) {
+    await withTimeout(auth.switchTo(nextAccountId), playbackContextTimeoutMs, "切换播放账号超时");
+  }
+
+  const account = auth.activeAccount;
+  if (!account) {
+    throw new Error("当前没有已登录账号，请先在服务器设置中登录 Emby/Jellyfin。");
+  }
+
+  if (!serverStore.byId(account.serverId)) {
+    await withTimeout(serverStore.refresh(), playbackContextTimeoutMs, "同步服务器列表超时");
+  }
+
+  if (!serverStore.byId(account.serverId)) {
+    throw new Error("找不到当前账号对应的服务器配置，请重新登录该服务器。");
+  }
+}
+
 async function syncEmbedRectAfterLayout() {
   if (!embedVideo) return;
   await nextTick();
@@ -2050,6 +2093,11 @@ async function startCurrentPlayback() {
   const stealthWhenRecording = route.query.stealth !== "0";
   const lineId = firstQueryString(route.query.lineId) || null;
   const mediaSourceId = firstQueryString(route.query.mediaSourceId) || null;
+  const isRemoteLibraryPlayback =
+    !filePath && props.id !== "webdav-file" && props.id !== "alist-file";
+  if (isRemoteLibraryPlayback) {
+    await ensureRemotePlaybackContext();
+  }
   if (routeAccountId.value && auth.activeId !== routeAccountId.value) {
     await auth.switchTo(routeAccountId.value);
   }

@@ -3,7 +3,7 @@ import { createPinia } from "pinia";
 
 import App from "./App.vue";
 import { router } from "./router";
-import { installTauriCompatBridge } from "./platform";
+import { hasNativeRuntime, installTauriCompatBridge } from "./platform";
 
 import "./styles/theme.css";
 import "./styles/glass.css";
@@ -11,11 +11,19 @@ import "./styles/glass.css";
 function initialMemoryRoute(): string | null {
   if (typeof window === "undefined") return null;
   const { protocol, pathname, search, hash } = window.location;
-  if (hash.startsWith("#/")) return hash.slice(1);
+  if (hash.startsWith("#/")) return safeInitialRoute(hash.slice(1));
   if (protocol === "file:" || !pathname || pathname === "/" || pathname.endsWith("/index.html")) {
     return null;
   }
-  return `${pathname}${search}`;
+  return safeInitialRoute(`${pathname}${search}`);
+}
+
+function safeInitialRoute(route: string): string | null {
+  const path = route.split(/[?#]/, 1)[0] ?? "";
+  if (hasNativeRuntime() && (path === "/player" || path.startsWith("/player/"))) {
+    return "/home";
+  }
+  return route;
 }
 
 const app = createApp(App);
