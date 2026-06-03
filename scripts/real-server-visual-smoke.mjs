@@ -12,6 +12,7 @@ const remotePort = process.env.HILLS_SMOKE_CDP_PORT
   : 9400 + Math.floor(Math.random() * 500);
 const appMode = process.env.HILLS_REAL_APP_MODE ?? "electron";
 const commandOnly = process.env.HILLS_REAL_COMMAND_ONLY === "1";
+const expectClearBlock = process.env.HILLS_REAL_EXPECT_CLEAR_BLOCK === "1";
 const personalOnly = process.env.HILLS_REAL_PERSONAL_ONLY === "1";
 const layoutMetricsOnly = process.env.HILLS_REAL_LAYOUT_METRICS === "1";
 const isTauriMode = appMode.startsWith("tauri");
@@ -59,15 +60,16 @@ function readInput() {
     process.env.HILLS_REAL_LINE2,
     process.env.HILLS_REAL_USERNAME,
     process.env.HILLS_REAL_PASSWORD,
+    process.env.HILLS_REAL_ITEM_ID ?? "",
   ];
-  if (envValues.every((value) => typeof value === "string" && value.length > 0)) {
+  if (envValues.slice(0, 4).every((value) => typeof value === "string" && value.length > 0)) {
     return envValues;
   }
   const inputFile = process.env.HILLS_REAL_INPUT_FILE;
   if (inputFile) {
     try {
       const values = fs.readFileSync(inputFile, "utf8").split(/\r?\n/).map((line) => line.trim());
-      return [values[0], values[1], values[2], values[3]];
+      return [values[0], values[1], values[2], values[3], values[4] ?? ""];
     } finally {
       if (process.env.HILLS_REAL_INPUT_FILE_KEEP !== "1") {
         try {
@@ -79,7 +81,7 @@ function readInput() {
     }
   }
   const values = fs.readFileSync(0, "utf8").split(/\r?\n/).map((line) => line.trim());
-  return [values[0], values[1], values[2], values[3]];
+  return [values[0], values[1], values[2], values[3], values[4] ?? ""];
 }
 
 function run(command, args, options = {}) {
@@ -713,7 +715,13 @@ async function setupRealAccountCommandOnly(ws) {
     ...heroItems.filter((item) => item.Type === "Series"),
     ...(seriesResp.Items ?? []),
   ];
-  const selected = candidates.find((item) => item?.Id && (item.Type === "Movie" || item.Type === "Episode"));
+  const requestedSelected = requestedItemId
+    ? candidates.find((item) => item?.Id === requestedItemId)
+    : null;
+  const selected =
+    requestedSelected ??
+    candidates.find((item) => item?.Id && (item.Type === "Movie" || item.Type === "Episode")) ??
+    (requestedItemId ? { Id: requestedItemId, Type: "Movie", Name: "" } : null);
   if (!selected) throw new Error("real server has no Movie/Episode candidate for playback smoke");
   const selectedSeries = seriesCandidates.find((item) => item?.Id && item.Type === "Series") ?? null;
 
@@ -1516,6 +1524,66 @@ function processTree(rootPid) {
   return Array.isArray(parsed) ? parsed : [parsed];
 }
 
+function listTopLevelPlaybackWindows(rootPid) {
+  const pid = Number(rootPid) || 0;
+  if (!pid || process.platform !== "win32") return [];
+  const script = `
+    $root = ${pid}
+    $all = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine
+    $ids = New-Object 'System.Collections.Generic.HashSet[int]'
+    [void]$ids.Add($root)
+    $frontier = @($root)
+    while ($frontier.Count -gt 0) {
+      $next = @()
+      foreach ($parent in $frontier) {
+        foreach ($p in ($all | Where-Object { $_.ParentProcessId -eq $parent })) {
+          if ($ids.Add([int]$p.ProcessId)) {
+            $next += [int]$p.ProcessId
+          }
+        }
+      }
+      $frontier = $next
+    }
+    $windows = @()
+    foreach ($id in $ids) {
+      try {
+        $p = Get-Process -Id $id -ErrorAction Stop
+      } catch {
+        continue
+      }
+      if ($p.MainWindowHandle -eq 0) { continue }
+      $info = $all | Where-Object { $_.ProcessId -eq $id } | Select-Object -First 1
+      $windows += [PSCustomObject]@{
+        processId = [int]$id
+        processName = [string]$p.ProcessName
+        title = [string]$p.MainWindowTitle
+        hwnd = [int64]$p.MainWindowHandle
+        commandLine = [string]$info.CommandLine
+      }
+    }
+    $windows | ConvertTo-Json -Compress
+  `;
+  const result = run("powershell", ["-NoProfile", "-Command", script], {
+    timeout: 6000,
+    killSignal: "SIGKILL",
+  });
+  const stdout = result.stdout.trim();
+  if (!stdout) return [];
+  const parsed = JSON.parse(stdout);
+  return Array.isArray(parsed) ? parsed : [parsed].filter(Boolean);
+}
+
+function playbackWindowConflicts(windows) {
+  const list = Array.isArray(windows) ? windows : [];
+  const externalMpv = list.filter((windowInfo) => /mpv/i.test(windowInfo.processName ?? ""));
+  const hillsWindows = list.filter((windowInfo) => String(windowInfo.title ?? "").trim() === "Hills Lite");
+  return {
+    externalMpv,
+    hillsWindowCount: hillsWindows.length,
+    ok: externalMpv.length === 0 && hillsWindows.length <= 1,
+  };
+}
+
 function processesByPid(pids) {
   const ids = [...new Set(pids.map((pid) => Number(pid)).filter(Boolean))];
   if (ids.length === 0) return [];
@@ -1826,7 +1894,8 @@ function centerOf(rect) {
   return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
 }
 
-const [line1, line2, username, password] = readInput();
+const [line1, line2, username, password, requestedItemIdRaw] = readInput();
+const requestedItemId = String(requestedItemIdRaw ?? "").trim();
 for (const value of [line1, line2, username, password]) registerSensitiveValue(value);
 stage("input-read", {
   line1Present: Boolean(line1),
@@ -2099,7 +2168,14 @@ try {
         ...heroItems.filter((item) => item.Type === "Series"),
         ...(seriesResp.Items ?? []),
       ];
-      const selected = candidates.find((item) => item?.Id && (item.Type === "Movie" || item.Type === "Episode"));
+      const requestedItemId = ${JSON.stringify(requestedItemId)};
+      const requestedSelected = requestedItemId
+        ? candidates.find((item) => item?.Id === requestedItemId)
+        : null;
+      const selected =
+        requestedSelected ??
+        candidates.find((item) => item?.Id && (item.Type === "Movie" || item.Type === "Episode")) ??
+        (requestedItemId ? { Id: requestedItemId, Type: "Movie", Name: "" } : null);
       if (!selected) throw new Error("real server has no Movie/Episode candidate for playback smoke");
       const selectedSeries = seriesCandidates.find((item) => item?.Id && item.Type === "Series") ?? null;
       const source = await api.getPlaybackSource({ itemId: selected.Id, startMs: 0 });
@@ -2475,49 +2551,58 @@ try {
     `, 3);
     let frameEvidence = null;
     const frameEvidenceCandidates = [];
-    const screenshotCandidates = Array.isArray(playerOpen.frameScreenshots) && playerOpen.frameScreenshots.length > 0
-      ? playerOpen.frameScreenshots
-      : [playerOpen.frameScreenshot].filter(Boolean);
-    for (const screenshot of screenshotCandidates) {
-      if (!screenshot?.ok || !screenshot.filePath) {
-        frameEvidenceCandidates.push({
-          attempt: screenshot?.attempt ?? null,
-          error: screenshot?.error ?? "mpv frame screenshot was not captured",
-          pixelOk: false,
-        });
-        continue;
-      }
-      const fileReady = await waitForFile(screenshot.filePath, 5000);
-      if (!fileReady) {
-        frameEvidenceCandidates.push({
+    const expectedClearBlockSeen = expectClearBlock && Boolean(playerOpen.errorText);
+    if (!expectedClearBlockSeen) {
+      const screenshotCandidates = Array.isArray(playerOpen.frameScreenshots) && playerOpen.frameScreenshots.length > 0
+        ? playerOpen.frameScreenshots
+        : [playerOpen.frameScreenshot].filter(Boolean);
+      for (const screenshot of screenshotCandidates) {
+        if (!screenshot?.ok || !screenshot.filePath) {
+          frameEvidenceCandidates.push({
+            attempt: screenshot?.attempt ?? null,
+            error: screenshot?.error ?? "mpv frame screenshot was not captured",
+            pixelOk: false,
+          });
+          continue;
+        }
+        const fileReady = await waitForFile(screenshot.filePath, 5000);
+        if (!fileReady) {
+          frameEvidenceCandidates.push({
+            attempt: screenshot.attempt ?? null,
+            error: "mpv frame screenshot file was not written",
+            pixelOk: false,
+          });
+          continue;
+        }
+        const pixels = analyzePng(screenshot.filePath);
+        const candidate = {
           attempt: screenshot.attempt ?? null,
-          error: "mpv frame screenshot file was not written",
-          pixelOk: false,
-        });
-        continue;
+          width: pixels.width,
+          height: pixels.height,
+          aspect: aspectFromSize(pixels.width, pixels.height),
+          brightRatio: pixels.brightRatio,
+          colorfulRatio: pixels.colorfulRatio,
+          meaningfulRatio: pixels.meaningfulRatio,
+          contentAspect: pixels.contentBox?.aspect ?? null,
+          pixelOk: pixelSampleOk(pixels),
+        };
+        frameEvidenceCandidates.push(candidate);
+        await fsp.rm(screenshot.filePath, { force: true }).catch(() => {});
+        if (candidate.pixelOk && !frameEvidence) frameEvidence = candidate;
       }
-      const pixels = analyzePng(screenshot.filePath);
-      const candidate = {
-        attempt: screenshot.attempt ?? null,
-        width: pixels.width,
-        height: pixels.height,
-        aspect: aspectFromSize(pixels.width, pixels.height),
-        brightRatio: pixels.brightRatio,
-        colorfulRatio: pixels.colorfulRatio,
-        meaningfulRatio: pixels.meaningfulRatio,
-        contentAspect: pixels.contentBox?.aspect ?? null,
-        pixelOk: pixelSampleOk(pixels),
+      frameEvidence = frameEvidence ?? frameEvidenceCandidates.find((entry) => entry.width) ?? {
+        error: playerOpen.frameScreenshot?.error ?? "mpv frame screenshot was not captured",
+        pixelOk: false,
       };
-      frameEvidenceCandidates.push(candidate);
-      await fsp.rm(screenshot.filePath, { force: true }).catch(() => {});
-      if (candidate.pixelOk && !frameEvidence) frameEvidence = candidate;
+    } else {
+      frameEvidence = {
+        skipped: true,
+        error: "expected clear pre-mpv playback block",
+        pixelOk: false,
+      };
     }
-    frameEvidence = frameEvidence ?? frameEvidenceCandidates.find((entry) => entry.width) ?? {
-      error: playerOpen.frameScreenshot?.error ?? "mpv frame screenshot was not captured",
-      pixelOk: false,
-    };
     let nativeFrameEvidence = null;
-    if (!frameEvidence?.pixelOk && isTauriMode) {
+    if (!expectedClearBlockSeen && !frameEvidence?.pixelOk && isTauriMode) {
       try {
         const nativeCapture = await capturePlaybackNativeLayer(ws, child.pid, "command-player-native-playback");
         nativeFrameEvidence = nativeCapture.capture;
@@ -2533,6 +2618,8 @@ try {
         nativeFrameEvidence = { error: error?.message ?? String(error), pixelOk: false };
       }
     }
+    const topLevelPlaybackWindows = listTopLevelPlaybackWindows(child.pid);
+    const playbackWindows = playbackWindowConflicts(topLevelPlaybackWindows);
     const cleanup = await cdpEvalAfterContextReset(ws, `
       (async () => {
         const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -2573,32 +2660,48 @@ try {
     );
     const failures = [];
     if (!playerOpen.hasPlayer) failures.push("player route did not mount");
-    if (playerOpen.stateTimedOut) failures.push("player get_state timed out");
-    if (playerOpen.errorText) failures.push("player displayed an error");
+    if (expectClearBlock) {
+      if (!playerOpen.errorText) failures.push("expected clear playback error was not displayed");
+      if (backendReachedLoad) failures.push("expected clear block still reached mpv load");
+      if (backendCompletedLoad) failures.push("expected clear block still completed mpv load");
+    } else {
+      if (playerOpen.stateTimedOut) failures.push("player get_state timed out");
+      if (playerOpen.errorText) failures.push("player displayed an error");
+    }
     if (!attached) failures.push("embedded host did not attach");
-    if (!backendReachedLoad) failures.push("backend play did not reach mpv load");
-    if (!backendCompletedLoad) failures.push("backend mpv load did not complete");
-    if (!stateReady) failures.push("mpv video state did not become ready");
-    if (!stateReady && playerOpen.state?.backendDiagnostics?.lastError) {
-      failures.push(`mpv diagnostic error: ${playerOpen.state.backendDiagnostics.lastError}`);
+    if (!expectClearBlock) {
+      if (!backendReachedLoad) failures.push("backend play did not reach mpv load");
+      if (!backendCompletedLoad) failures.push("backend mpv load did not complete");
+      if (!stateReady) failures.push("mpv video state did not become ready");
+      if (!stateReady && playerOpen.state?.backendDiagnostics?.lastError) {
+        failures.push(`mpv diagnostic error: ${playerOpen.state.backendDiagnostics.lastError}`);
+      }
+      if (!stateReady && playerOpen.state) {
+        failures.push(
+          `mpv unready detail: duration=${playerOpen.state.durationMs ?? 0} tracks=${playerOpen.state.trackCount ?? 0} videoTracks=${playerOpen.state.videoTrackCount ?? 0} eof=${playerOpen.state.eof === true} idle=${playerOpen.state.idleActive ?? "unknown"} demuxer=${playerOpen.state.demuxer ?? "none"} format=${playerOpen.state.fileFormat ?? "none"}`,
+        );
+      }
+      if (!playerOpen.controls?.pauseOk) failures.push("pause command did not take effect");
+      if (!playerOpen.controls?.resumeOk) failures.push("resume command did not take effect");
+      if (!playerOpen.controls?.seekForwardOk) failures.push("seek forward command did not move position");
+      if (!playerOpen.controls?.seekBackwardOk) failures.push("seek backward command did not move position back");
     }
-    if (!stateReady && playerOpen.state) {
-      failures.push(
-        `mpv unready detail: duration=${playerOpen.state.durationMs ?? 0} tracks=${playerOpen.state.trackCount ?? 0} videoTracks=${playerOpen.state.videoTrackCount ?? 0} eof=${playerOpen.state.eof === true} idle=${playerOpen.state.idleActive ?? "unknown"} demuxer=${playerOpen.state.demuxer ?? "none"} format=${playerOpen.state.fileFormat ?? "none"}`,
-      );
-    }
-    if (!playerOpen.controls?.pauseOk) failures.push("pause command did not take effect");
-    if (!playerOpen.controls?.resumeOk) failures.push("resume command did not take effect");
-    if (!playerOpen.controls?.seekForwardOk) failures.push("seek forward command did not move position");
-    if (!playerOpen.controls?.seekBackwardOk) failures.push("seek backward command did not move position back");
     if (!playerOpen.domControls?.ok) {
       failures.push(`player DOM controls missing or invisible: ${(playerOpen.domControls?.missing ?? []).join(", ")}`);
     }
-    if (!frameEvidence?.pixelOk) {
+    if (!expectClearBlock && !frameEvidence?.pixelOk) {
       failures.push(`mpv frame screenshot is missing or visually blank: ${frameEvidence?.error ?? "pixel sample failed"}`);
     }
-    if (!frameEvidence?.pixelOk && nativeFrameEvidence?.error) {
+    if (!expectClearBlock && !frameEvidence?.pixelOk && nativeFrameEvidence?.error) {
       failures.push(`native playback capture failed: ${nativeFrameEvidence.error}`);
+    }
+    if (!playbackWindows.ok) {
+      if (playbackWindows.externalMpv.length > 0) {
+        failures.push("mpv opened a separate top-level window instead of staying embedded");
+      }
+      if (playbackWindows.hillsWindowCount > 1) {
+        failures.push(`multiple Hills Lite top-level windows are visible: ${playbackWindows.hillsWindowCount}`);
+      }
     }
     if (playerOpen.cleanup?.routeAway !== true) failures.push("player cleanup route-away failed or timed out");
     if (playerOpen.cleanup?.hasPlayerAfterWait) failures.push("player cleanup did not unmount PlayerView");
@@ -2612,6 +2715,8 @@ try {
       stateReady,
       domControlsOk: playerOpen.domControls?.ok ?? false,
       framePixelOk: frameEvidence?.pixelOk ?? false,
+      playbackWindowsOk: playbackWindows.ok,
+      clearBlockOk: expectClearBlock && failures.length === 0,
       cleanupHidHost,
       cleanupDetachedHost,
       attached,
@@ -2633,6 +2738,8 @@ try {
         frameEvidence,
         frameEvidenceCandidates,
         nativeFrameEvidence,
+        topLevelPlaybackWindows,
+        playbackWindows,
         visualSmokeLog,
       },
       diagnostics: {

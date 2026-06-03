@@ -197,6 +197,8 @@ const LOCAL_IMAGE_EXTENSIONS: &[(&str, usize)] = &[
 const FOLDER_POSTER_STEMS: &[&str] = &["poster", "cover", "folder"];
 const MAX_LOCAL_FOLDER_VIDEOS: usize = 500;
 const MAX_LOCAL_NFO_BYTES: u64 = 256 * 1024;
+const RANGE_BROKEN_MP4_ERROR: &str = "无法本机直连播放：这个 MP4/MOV 源所在服务器不支持 HTTP Range，且文件开头没有可流式播放的索引。Hills Lite 已阻止黑屏起播，并且不会请求服务器解码/转码。请先下载到本地后播放，或换一个支持 Range/已 faststart 处理的媒体源或线路。";
+const STREAM_PROBE_ERROR: &str = "无法本机直连播放：播放流连接或 Range 探测失败。Hills Lite 已阻止继续进入黑屏起播，并且不会请求服务器解码/转码。请稍后重试、切换线路，或先下载到本地后播放。";
 
 #[derive(Debug, Clone)]
 struct LocalPosterCandidate {
@@ -523,13 +525,42 @@ pub async fn play(
                 "play:range-probe-error {}",
                 sanitize_visual_error(&error.to_string())
             ));
-            true
+            return Err(AppError::InvalidState(STREAM_PROBE_ERROR.into()));
         }
     };
     log_visual_player_stage(&format!("play:range-probe supported={range_supported}"));
+    if !range_supported && source_requires_streamable_mp4_prefix(&source) {
+        log_visual_player_stage("play:mp4-prefix-probe-start");
+        let streamable_prefix = match state
+            .stream_proxy
+            .probe_mp4_streamable_prefix(url.clone(), headers.clone(), user_agent.clone())
+            .await
+        {
+            Ok(streamable) => streamable,
+            Err(error) => {
+                log_visual_player_stage(&format!(
+                    "play:mp4-prefix-probe-error {}",
+                    sanitize_visual_error(&error.to_string())
+                ));
+                false
+            }
+        };
+        log_visual_player_stage(&format!(
+            "play:mp4-prefix-probe streamable={streamable_prefix}"
+        ));
+        if !streamable_prefix {
+            log_visual_player_stage("play:blocked-range-broken-mp4");
+            return Err(AppError::InvalidState(RANGE_BROKEN_MP4_ERROR.into()));
+        }
+    }
     let mpv_url = state
         .stream_proxy
-        .register(url.clone(), headers.clone(), user_agent.clone())
+        .register_with_range_support(
+            url.clone(),
+            headers.clone(),
+            user_agent.clone(),
+            range_supported,
+        )
         .await?;
     log_visual_player_stage("play:stream-proxy-ready");
 
@@ -688,6 +719,20 @@ fn pick_local_media_source(
                 )
             }),
     }
+}
+
+fn source_requires_streamable_mp4_prefix(source: &MediaSource) -> bool {
+    let Some(container) = source.container.as_deref() else {
+        return false;
+    };
+    let ext = container
+        .split(',')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_lowercase();
+    matches!(ext.as_str(), "mp4" | "m4v" | "mov")
 }
 
 fn stream_type(stream: &MediaStream) -> &str {

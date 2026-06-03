@@ -26,6 +26,7 @@ use uuid::Uuid;
 use crate::error::{AppError, AppResult};
 
 const MAX_HEADER_BYTES: usize = 16 * 1024;
+const MAX_MP4_PREFIX_PROBE_BYTES: usize = 2 * 1024 * 1024;
 const ROUTE_TTL: Duration = Duration::from_secs(3 * 60 * 60);
 
 #[derive(Clone)]
@@ -45,6 +46,7 @@ struct ProxyRoute {
     url: Url,
     headers: Vec<(String, String)>,
     user_agent: Option<String>,
+    range_supported: bool,
     expires_at: Instant,
 }
 
@@ -72,6 +74,17 @@ impl StreamProxy {
         headers: Vec<(String, String)>,
         user_agent: Option<String>,
     ) -> AppResult<String> {
+        self.register_with_range_support(url, headers, user_agent, true)
+            .await
+    }
+
+    pub async fn register_with_range_support(
+        &self,
+        url: Url,
+        headers: Vec<(String, String)>,
+        user_agent: Option<String>,
+        range_supported: bool,
+    ) -> AppResult<String> {
         let addr = self.ensure_started().await?;
         self.prune_expired();
         let id = Uuid::new_v4().simple().to_string();
@@ -81,6 +94,7 @@ impl StreamProxy {
                 url,
                 headers,
                 user_agent,
+                range_supported,
                 expires_at: Instant::now() + ROUTE_TTL,
             },
         );
@@ -131,6 +145,65 @@ impl StreamProxy {
             supported
         ));
         Ok(supported)
+    }
+
+    pub async fn probe_mp4_streamable_prefix(
+        &self,
+        url: Url,
+        headers: Vec<(String, String)>,
+        user_agent: Option<String>,
+    ) -> AppResult<bool> {
+        let mut upstream = self.inner.client.get(url);
+        upstream = upstream.header(ACCEPT_ENCODING, "identity");
+        if let Some(ua) = user_agent.as_deref().filter(|ua| !ua.trim().is_empty()) {
+            upstream = upstream.header(USER_AGENT, ua);
+        }
+        for (name, value) in &headers {
+            if name.eq_ignore_ascii_case("host") {
+                continue;
+            }
+            let Ok(header_name) = HeaderName::from_bytes(name.as_bytes()) else {
+                continue;
+            };
+            let Ok(header_value) = HeaderValue::from_str(value) else {
+                continue;
+            };
+            upstream = upstream.header(header_name, header_value);
+        }
+
+        let response = upstream.send().await?;
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(sanitize_proxy_log_value)
+            .unwrap_or_else(|| "none".into());
+        let mut body = response.bytes_stream();
+        let mut prefix = Vec::with_capacity(64 * 1024);
+        while prefix.len() < MAX_MP4_PREFIX_PROBE_BYTES {
+            let Some(chunk) = body.next().await else {
+                break;
+            };
+            let chunk = chunk?;
+            let remaining = MAX_MP4_PREFIX_PROBE_BYTES.saturating_sub(prefix.len());
+            prefix.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+        }
+        let has_moov = prefix.windows(4).any(|window| window == b"moov");
+        let has_moof = prefix.windows(4).any(|window| window == b"moof");
+        let has_mdat = prefix.windows(4).any(|window| window == b"mdat");
+        let streamable = has_moov || has_moof;
+        log_visual_stream_proxy_event(&format!(
+            "mp4-prefix-probe status={} content_type={} bytes={} moov={} moof={} mdat={} streamable={}",
+            status.as_u16(),
+            content_type,
+            prefix.len(),
+            has_moov,
+            has_moof,
+            has_mdat,
+            streamable
+        ));
+        Ok(streamable)
     }
 
     pub fn clear(&self) {
@@ -259,19 +332,32 @@ async fn handle_connection(inner: Arc<StreamProxyInner>, mut stream: TcpStream) 
         };
         upstream = upstream.header(header_name, header_value);
     }
-    if let Some(range) = request.headers.get("range") {
-        upstream = upstream.header(RANGE, range);
+    let requested_range = request.headers.get("range").cloned();
+    if route.range_supported {
+        if let Some(range) = requested_range.as_deref() {
+            upstream = upstream.header(RANGE, range);
+        }
+    } else if let Some(range) = requested_range.as_deref() {
+        log_visual_stream_proxy_event(&format!(
+            "range-suppressed id={} range={}",
+            short_route_id(id),
+            sanitize_proxy_log_value(range)
+        ));
     }
 
-    let has_range = request.headers.contains_key("range");
+    let range_value = requested_range
+        .as_deref()
+        .map(sanitize_proxy_log_value)
+        .unwrap_or_else(|| "none".into());
     let response = match upstream.send().await {
         Ok(response) => response,
         Err(error) => {
             log_visual_stream_proxy_event(&format!(
-                "request id={} method={} range={} upstream_error={}",
+                "request id={} method={} range={} range_supported={} upstream_error={}",
                 short_route_id(id),
                 request.method,
-                has_range,
+                range_value,
+                route.range_supported,
                 sanitize_proxy_log_value(&error.to_string())
             ));
             write_simple_response(
@@ -298,21 +384,29 @@ async fn handle_connection(inner: Arc<StreamProxyInner>, mut stream: TcpStream) 
         .map(sanitize_proxy_log_value)
         .unwrap_or_else(|| "unknown".into());
     log_visual_stream_proxy_event(&format!(
-        "request id={} method={} range={} upstream_status={} content_type={} content_length={}",
+        "request id={} method={} range={} range_supported={} upstream_status={} content_type={} content_length={}",
         short_route_id(id),
         request.method,
-        has_range,
+        range_value,
+        route.range_supported,
         status.as_u16(),
         content_type,
         content_length
     ));
 
-    let bytes = write_upstream_response(&mut stream, response, request.method == "HEAD").await?;
+    let bytes = write_upstream_response(
+        &mut stream,
+        response,
+        request.method == "HEAD",
+        route.range_supported,
+    )
+    .await?;
     log_visual_stream_proxy_event(&format!(
-        "complete id={} method={} range={} status={} bytes={}",
+        "complete id={} method={} range={} range_supported={} status={} bytes={}",
         short_route_id(id),
         request.method,
-        has_range,
+        range_value,
+        route.range_supported,
         status.as_u16(),
         bytes
     ));
@@ -377,6 +471,7 @@ async fn write_upstream_response(
     stream: &mut TcpStream,
     response: reqwest::Response,
     head_only: bool,
+    range_supported: bool,
 ) -> AppResult<u64> {
     let status = response.status();
     let reason = status.canonical_reason().unwrap_or("ok");
@@ -389,6 +484,9 @@ async fn write_upstream_response(
         AUTHORIZATION,
     ] {
         if name == AUTHORIZATION {
+            continue;
+        }
+        if !range_supported && (name == CONTENT_RANGE || name == ACCEPT_RANGES) {
             continue;
         }
         if let Some(value) = response.headers().get(&name) {
