@@ -502,22 +502,22 @@ onUnmounted(() => {
   .hero,
   .hero--cinema {
     width: 100%;
-    aspect-ratio: 16 / 7;
+    aspect-ratio: 3 / 1;
     height: auto;
-    max-height: calc(100dvh - 142px);
-    min-height: 160px;
+    max-height: none;
+    min-height: 0;
   }
   .hero--cinema .hero__content {
     left: clamp(20px, 5vw, 44px);
-    bottom: 18px;
+    bottom: 14px;
     max-width: min(560px, 78%);
   }
   .hero--cinema .hero__logo {
-    max-height: 56px;
+    max-height: 48px;
     margin-bottom: 6px;
   }
   .hero--cinema .hero__title {
-    font-size: clamp(26px, 4vw, 34px);
+    font-size: clamp(24px, 3.8vw, 32px);
   }
   .hero__meta,
   .hero--cinema .hero__desc {
