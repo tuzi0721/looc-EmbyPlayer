@@ -50,6 +50,13 @@ pub fn run() {
             let state = Arc::new(AppState::initialize(handle)?);
             app.manage(state.clone());
 
+            let _ = app.handle().remove_menu();
+            let _ = app.handle().hide_menu();
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.remove_menu();
+                let _ = window.hide_menu();
+            }
+
             // Windows vibrancy (acrylic/mica) is disabled because it requires
             // a transparent webview which causes severe drag-lag on Windows.
             // The CSS .app-backdrop already paints a dark gradient.
