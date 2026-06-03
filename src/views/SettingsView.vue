@@ -8,7 +8,7 @@ import LineStatusDot from "@/components/common/LineStatusDot.vue";
 import ShortcutsPanel from "@/components/settings/ShortcutsPanel.vue";
 import AddServerDialog from "@/components/login/AddServerDialog.vue";
 import { api } from "@/api";
-import { openFileDialog, platformType } from "@/platform";
+import { hasNativeRuntime, hasTauriRuntime, openFileDialog, platformType } from "@/platform";
 import { useAuthStore } from "@/stores/auth";
 import { useLibraryStore } from "@/stores/library";
 import { useLocalFilesStore } from "@/stores/localFiles";
@@ -62,10 +62,9 @@ const backupStatus = ref("");
 const appVersion = "0.1.0";
 const platformLabel = ref("...");
 const isElectronRuntime = typeof window !== "undefined" && Boolean(window.hillsLite);
-const isTauriRuntime =
-  typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
+const isTauriRuntime = hasTauriRuntime();
 const backupAvailable = computed(
-  () => isElectronRuntime || isTauriRuntime || platformLabel.value === "web",
+  () => hasNativeRuntime() || platformLabel.value === "web",
 );
 const activeDownloads = computed(
   () => downloads.tasks.filter((t) => t.status === "running" || t.status === "paused").length,

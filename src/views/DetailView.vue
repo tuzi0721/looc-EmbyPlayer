@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
 
 import { api } from "@/api";
+import { hasNativeRuntime } from "@/platform";
 import { useAuthStore } from "@/stores/auth";
 import { useDownloadsStore } from "@/stores/downloads";
 import { useLibraryStore } from "@/stores/library";
@@ -804,9 +805,7 @@ const playStateBadge = computed(() => {
   return null;
 });
 
-const desktopDownloadAvailable =
-  typeof window !== "undefined" &&
-  Boolean(window.hillsLite || window.__TAURI_INTERNALS__ || window.__TAURI__);
+const desktopDownloadAvailable = hasNativeRuntime();
 
 const downloadTarget = computed(() => (isSeries.value ? continueEpisode.value : item.value));
 const canStartDownload = computed(() => {

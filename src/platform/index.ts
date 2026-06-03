@@ -172,11 +172,15 @@ let webPlaybackSourceState: PlaybackSource | null = null;
 let webPlaybackSnapshot: MpvSnapshot = webDefaultSnapshot();
 loadWebPreviewState();
 
-function hasTauriRuntime(): boolean {
+export function hasTauriRuntime(): boolean {
   if (typeof window === "undefined") return false;
   if (window.__TAURI_INTERNALS__ || window.__TAURI__ || window.__TAURI_IPC__) return true;
   const { hostname, protocol } = window.location;
   return hostname === "tauri.localhost" || protocol === "tauri:";
+}
+
+export function hasNativeRuntime(): boolean {
+  return typeof window !== "undefined" && (Boolean(window.hillsLite) || hasTauriRuntime());
 }
 
 function getWebSettings(): AppSettings {

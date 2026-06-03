@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::process::Stdio;
+use std::process::{Command as StdCommand, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -19,6 +19,9 @@ use crate::mpv::backend::{
 use crate::mpv::paths::resolve_mpv_exe;
 
 use crate::mpv::window_host::{HostWindow, ParentHandle, PlayerRect};
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 /// IPC-based mpv backend: spawns `mpv` and talks JSON over a dedicated IPC
 /// socket. Uses `--input-ipc-server` (named pipe on Windows, unix socket
@@ -907,22 +910,59 @@ impl MpvBackend for MpvIpcBackend {
     async fn shutdown(&self) -> AppResult<()> {
         let inner_opt = self.inner.lock().take();
         if let Some(mut inner) = inner_opt {
+            let pid = inner.child.id();
             // Drop the command channel first so the IO task exits cleanly.
             drop(inner.cmd_tx);
-            let _ = inner.child.start_kill();
+            if let Err(e) = inner.child.start_kill() {
+                tracing::warn!(target = "mpv", error = %e, pid = ?pid, "mpv process kill signal failed during shutdown");
+            }
             match timeout(Duration::from_secs(2), inner.child.wait()).await {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => {
-                    tracing::warn!(target = "mpv", error = %e, "mpv process wait during shutdown failed");
+                    tracing::warn!(target = "mpv", error = %e, pid = ?pid, "mpv process wait during shutdown failed");
                 }
                 Err(_) => {
-                    tracing::warn!(target = "mpv", "mpv process wait during shutdown timed out");
+                    tracing::warn!(target = "mpv", pid = ?pid, "mpv process wait during shutdown timed out");
+                    force_kill_process_tree(pid);
+                    if let Err(e) = inner.child.kill().await {
+                        tracing::warn!(target = "mpv", error = %e, pid = ?pid, "mpv process force kill failed during shutdown");
+                    }
+                    match timeout(Duration::from_secs(2), inner.child.wait()).await {
+                        Ok(Ok(_)) => {}
+                        Ok(Err(e)) => {
+                            tracing::warn!(target = "mpv", error = %e, pid = ?pid, "mpv process wait after force kill failed");
+                        }
+                        Err(_) => {
+                            tracing::error!(target = "mpv", pid = ?pid, "mpv process survived force kill");
+                        }
+                    }
                 }
             }
         }
         Ok(())
     }
 }
+
+#[cfg(windows)]
+fn force_kill_process_tree(pid: Option<u32>) {
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let Some(pid) = pid else {
+        return;
+    };
+    let status = StdCommand::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .status();
+    if let Err(e) = status {
+        tracing::warn!(target = "mpv", error = %e, pid, "taskkill fallback failed");
+    }
+}
+
+#[cfg(not(windows))]
+fn force_kill_process_tree(_pid: Option<u32>) {}
 
 fn parse_tracks(v: &Value) -> Vec<MpvTrackInfo> {
     let Some(arr) = v.as_array() else {

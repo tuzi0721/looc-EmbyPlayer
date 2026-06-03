@@ -10,7 +10,7 @@ import DanmakuOverlay from "@/components/player/DanmakuOverlay.vue";
 import SubtitlePanel from "@/components/player/SubtitlePanel.vue";
 import { api, type PlaybackLineOption, type PlaybackMediaSource } from "@/api";
 import { useKeyboard } from "@/composables/useKeyboard";
-import { openFileDialog } from "@/platform";
+import { hasNativeRuntime, openFileDialog } from "@/platform";
 import { useAuthStore } from "@/stores/auth";
 import { useLibraryStore } from "@/stores/library";
 import { useDownloadsStore } from "@/stores/downloads";
@@ -44,16 +44,12 @@ const routeAccountId = computed(() => {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : auth.activeId;
 });
 
-const desktopBridge =
-  typeof window !== "undefined" && Boolean((window as Window & { hillsLite?: unknown }).hillsLite);
-const tauriBridge =
-  typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
 const nativeMpvDebug =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).get("nativeMpv") === "1";
 const embedVideo =
   typeof window !== "undefined" &&
-  (tauriBridge || desktopBridge || nativeMpvDebug);
+  (hasNativeRuntime() || nativeMpvDebug);
 const useHtmlVideo = !embedVideo;
 
 const errorText = ref<string | null>(null);

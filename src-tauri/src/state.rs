@@ -5,6 +5,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use crate::commands::shortcuts::ShortcutRegistry;
+#[cfg(feature = "mpv-embedded")]
 use crate::config::models::MpvBackendKind;
 use crate::config::ConfigStore;
 use crate::download::DownloadManager;
