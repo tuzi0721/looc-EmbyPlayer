@@ -80,7 +80,7 @@ function open(item: MediaItem) {
           v-for="item in items"
           :key="mediaItemKey(item)"
           :item="item"
-          aspect="backdrop"
+          aspect="portrait"
           :activate-handler="open"
         />
       </div>
@@ -119,7 +119,7 @@ function open(item: MediaItem) {
 }
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 18px;
 }
 .empty {
@@ -162,5 +162,11 @@ function open(item: MediaItem) {
 }
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+@media (max-width: 720px) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+    gap: 14px;
+  }
 }
 </style>

@@ -58,8 +58,8 @@ function gotoHistory() {
   router.push("/history").catch(() => {});
 }
 
-function itemAspect(_item: MediaItem): "backdrop" {
-  return "backdrop";
+function itemAspect(_item: MediaItem): "portrait" {
+  return "portrait";
 }
 
 function emptyMessage() {
@@ -226,7 +226,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
               v-for="item in resumeItems"
               :key="mediaItemKey(item)"
               :item="item"
-              aspect="backdrop"
+              aspect="portrait"
               :activate-handler="openItem"
             />
           </div>
@@ -451,17 +451,17 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
 .row-scroll {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(220px, 260px);
+  grid-auto-columns: minmax(150px, 180px);
   gap: 14px;
   overflow-x: auto;
   padding-bottom: 8px;
 }
 .row-scroll--poster {
-  grid-auto-columns: minmax(220px, 260px);
+  grid-auto-columns: minmax(150px, 180px);
 }
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 18px;
 }
 .empty {
@@ -519,13 +519,13 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
     justify-content: center;
   }
   .row-scroll {
-    grid-auto-columns: minmax(190px, 220px);
+    grid-auto-columns: minmax(124px, 150px);
   }
   .row-scroll--poster {
-    grid-auto-columns: minmax(190px, 220px);
+    grid-auto-columns: minmax(124px, 150px);
   }
   .grid {
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
     gap: 14px;
   }
 }
