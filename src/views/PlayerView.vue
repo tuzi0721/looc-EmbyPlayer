@@ -3086,6 +3086,7 @@ onBeforeUnmount(async () => {
   gap: 12px;
   background: linear-gradient(0deg, rgba(0, 0, 0, 0.75), transparent);
   pointer-events: auto;
+  max-height: min(38dvh, 178px);
 }
 .bar {
   display: grid;
@@ -3105,7 +3106,7 @@ onBeforeUnmount(async () => {
 }
 .bar__slider {
   position: relative;
-  height: 28px;
+  height: 34px;
   display: flex;
   align-items: center;
   min-width: 0;
@@ -3114,7 +3115,7 @@ onBeforeUnmount(async () => {
   position: absolute;
   left: 0;
   right: 0;
-  height: 4px;
+  height: 5px;
   border-radius: 999px;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.18);
@@ -3162,30 +3163,30 @@ onBeforeUnmount(async () => {
   appearance: none;
   background: transparent;
   width: 100%;
-  height: 28px;
+  height: 34px;
   margin: 0;
 }
 .bar__slider input[type="range"]::-webkit-slider-runnable-track {
-  height: 4px;
+  height: 5px;
   background: transparent;
 }
 .bar__slider input[type="range"]::-webkit-slider-thumb {
   appearance: none;
-  width: 13px;
-  height: 13px;
-  margin-top: -4.5px;
+  width: 16px;
+  height: 16px;
+  margin-top: -5.5px;
   border-radius: 999px;
   background: white;
   border: 2px solid var(--accent);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 .bar__slider input[type="range"]::-moz-range-track {
-  height: 4px;
+  height: 5px;
   background: transparent;
 }
 .bar__slider input[type="range"]::-moz-range-thumb {
-  width: 13px;
-  height: 13px;
+  width: 16px;
+  height: 16px;
   border-radius: 999px;
   background: white;
   border: 2px solid var(--accent);
@@ -3199,6 +3200,7 @@ onBeforeUnmount(async () => {
   width: 100%;
   max-width: 1760px;
   margin: 0 auto;
+  min-height: 52px;
 }
 .controls__left,
 .controls__right {
@@ -3206,10 +3208,17 @@ onBeforeUnmount(async () => {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  min-height: 52px;
 }
 .controls__right {
   justify-content: flex-end;
   min-width: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+  scrollbar-width: none;
+}
+.controls__right::-webkit-scrollbar {
+  display: none;
 }
 [data-control] {
   flex: 0 0 auto;
@@ -3538,14 +3547,18 @@ onBeforeUnmount(async () => {
   }
   .controls {
     align-items: center;
-    flex-wrap: wrap;
-    justify-content: center;
+    flex-wrap: nowrap;
+    justify-content: space-between;
     gap: 8px 10px;
   }
   .controls__left,
   .controls__right {
     justify-content: center;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+  }
+  .controls__right {
+    justify-content: flex-start;
+    max-width: 48vw;
   }
 }
 
@@ -3568,7 +3581,8 @@ onBeforeUnmount(async () => {
   }
   .player__bottom {
     gap: 10px;
-    padding-bottom: 14px;
+    padding-top: 10px;
+    padding-bottom: 12px;
   }
 }
 
@@ -3590,13 +3604,14 @@ onBeforeUnmount(async () => {
   .player__bottom {
     gap: 6px;
     padding-top: 8px;
+    max-height: min(46dvh, 138px);
   }
   .bar {
     gap: 7px;
   }
   .bar__slider,
   .bar__slider input[type="range"] {
-    height: 22px;
+    height: 28px;
   }
   [data-hide-below="small"] {
     display: none;
