@@ -1956,8 +1956,11 @@ async function togglePlayed() {
 
 .hero {
   position: relative;
-  height: clamp(560px, calc(100dvh - var(--topbar-h)), 860px);
-  min-height: 0;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  height: auto;
+  min-height: 430px;
+  max-height: min(70dvh, calc(100dvh - 220px));
   color: white;
   isolation: isolate;
   overflow: hidden;
@@ -2522,7 +2525,9 @@ async function togglePlayed() {
 
 @media (max-height: 620px) {
   .hero {
-    height: calc(100dvh - var(--topbar-h));
+    min-height: 0;
+    max-height: none;
+    height: calc(100dvh - var(--topbar-h) - 72px);
   }
   .hero__body {
     top: 48px;
@@ -2545,7 +2550,10 @@ async function togglePlayed() {
 
 @media (max-width: 640px) {
   .hero {
-    height: calc(100dvh - var(--topbar-h));
+    aspect-ratio: 16 / 10;
+    min-height: 0;
+    max-height: none;
+    height: calc(100dvh - var(--topbar-h) - 88px);
   }
   .hero__title {
     font-size: 28px;
