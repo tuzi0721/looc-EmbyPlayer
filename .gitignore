@@ -5,6 +5,7 @@ release-electron
 .electron-user-data
 .electron-builder-cache
 .git_disabled/
+.cunzhi-memory/
 *.local
 
 # Editor

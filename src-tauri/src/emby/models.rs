@@ -236,6 +236,8 @@ pub struct MediaItem {
     pub id: String,
     #[serde(default, deserialize_with = "string_or_default")]
     pub name: String,
+    #[serde(default, rename = "_source", skip_serializing_if = "Option::is_none")]
+    pub source: Option<MediaItemSourceContext>,
     #[serde(default, deserialize_with = "optional_string", rename = "Type")]
     pub item_type: Option<String>,
     #[serde(default, deserialize_with = "optional_string")]
@@ -296,6 +298,15 @@ pub struct MediaItem {
     pub people: Vec<MediaPerson>,
     #[serde(default, deserialize_with = "null_to_default")]
     pub media_sources: Vec<MediaSource>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaItemSourceContext {
+    pub server_id: String,
+    pub account_id: String,
+    pub server_name: Option<String>,
+    pub username: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -460,6 +471,8 @@ pub struct MediaSource {
     pub supports_transcoding: Option<bool>,
     #[serde(default, deserialize_with = "optional_string")]
     pub path: Option<String>,
+    #[serde(default, deserialize_with = "optional_string")]
+    pub direct_stream_url: Option<String>,
     #[serde(default, deserialize_with = "null_to_default")]
     pub media_streams: Vec<MediaStream>,
 }

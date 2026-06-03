@@ -52,6 +52,10 @@ impl MpvIpcBackend {
 
     /// Create a native child window; mpv renders into it via `--wid`.
     pub fn bind_embedded(&self, parent: ParentHandle) -> AppResult<()> {
+        if let Some(mut inner) = self.inner.lock().take() {
+            drop(inner.cmd_tx);
+            let _ = inner.child.start_kill();
+        }
         let mut guard = self.host.lock();
         if let Some(old) = guard.take() {
             let _ = old.destroy();
@@ -699,6 +703,16 @@ impl MpvBackend for MpvIpcBackend {
             .await
             .ok()
             .filter(Value::is_object);
+        let video_out_params = self
+            .get_property("video-out-params")
+            .await
+            .ok()
+            .filter(Value::is_object);
+        let osd_dimensions = self
+            .get_property("osd-dimensions")
+            .await
+            .ok()
+            .filter(Value::is_object);
         let audio_params = self
             .get_property("audio-params")
             .await
@@ -744,6 +758,36 @@ impl MpvBackend for MpvIpcBackend {
             .await
             .ok()
             .and_then(|v| value_as_f64(&v));
+        let keepaspect = self
+            .get_property("keepaspect")
+            .await
+            .ok()
+            .and_then(|v| v.as_bool());
+        let panscan = self
+            .get_property("panscan")
+            .await
+            .ok()
+            .and_then(|v| value_as_f64(&v));
+        let video_zoom = self
+            .get_property("video-zoom")
+            .await
+            .ok()
+            .and_then(|v| value_as_f64(&v));
+        let video_scale_x = self
+            .get_property("video-scale-x")
+            .await
+            .ok()
+            .and_then(|v| value_as_f64(&v));
+        let video_scale_y = self
+            .get_property("video-scale-y")
+            .await
+            .ok()
+            .and_then(|v| value_as_f64(&v));
+        let video_aspect_override = self
+            .get_property("video-aspect-override")
+            .await
+            .ok()
+            .and_then(|v| value_as_f64(&v));
 
         Ok(MpvSnapshot {
             url,
@@ -764,8 +808,16 @@ impl MpvBackend for MpvIpcBackend {
             video_codec,
             audio_codec,
             video_params,
+            video_out_params,
+            osd_dimensions,
             audio_params,
             hwdec_current,
+            keepaspect,
+            panscan,
+            video_zoom,
+            video_scale_x,
+            video_scale_y,
+            video_aspect_override,
             container_fps,
             estimated_vf_fps,
             video_bitrate,
@@ -773,6 +825,7 @@ impl MpvBackend for MpvIpcBackend {
             frame_drop_count,
             decoder_frame_drop_count,
             vo_frame_drop_count,
+            backend_diagnostics: None,
         })
     }
 

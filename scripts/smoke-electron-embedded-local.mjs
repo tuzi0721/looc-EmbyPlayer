@@ -441,19 +441,12 @@ function embeddedRectOk(state, metrics) {
     rect.height >= 1 &&
     rect.y >= topLimit &&
     rect.y + rect.height <= bottomLimit;
-  if (state.mode === "overlay") {
-    return (
-      state.attachCount >= 1 &&
-      state.rectCount >= 1 &&
-      state.visibleCount >= 1 &&
-      state.lastVisible === true &&
-      state.hasRect === true &&
-      state.mpvRunning === true &&
-      rectOk
-    );
-  }
-  if (state.mode !== "wid") return false;
-  const sameHandle = state.hwnd && state.mpvEmbedWindowHandle === state.hwnd;
+  if (state.mode !== "wid" && state.mode !== "reparent") return false;
+  if (state.hostKind !== "native-child") return false;
+  const sameHandle =
+    state.mode === "reparent"
+      ? Boolean(state.attachedMpvWindowHandle && state.attachedMpvProcessId)
+      : state.hwnd && state.mpvEmbedWindowHandle === state.hwnd;
   return (
     state.attachCount >= 1 &&
     state.rectCount >= 1 &&
@@ -501,7 +494,7 @@ function embeddedHostWindowBoundsOk(state, windowInfo) {
 }
 
 function embeddedNativeWindowHandle(state) {
-  return state?.mpvHostWindowHandle ?? state?.hwnd ?? null;
+  return state?.attachedMpvWindowHandle ?? state?.mpvHostWindowHandle ?? state?.hwnd ?? null;
 }
 
 function captureWindowAndAnalyze(processId, name = "embedded-local", windowHandle = null, options = {}) {
@@ -524,17 +517,25 @@ function captureWindowAndAnalyze(processId, name = "embedded-local", windowHandl
         public int Right;
         public int Bottom;
       }
-      public static class Win32 {
+      public struct POINT {
+        public int X;
+        public int Y;
+      }
+        public static class Win32 {
         public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
         [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+        [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc lpEnumFunc, IntPtr lParam);
         [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
         [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
         [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
         [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
         [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+        [DllImport("user32.dll")] public static extern IntPtr GetParent(IntPtr hWnd);
         [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
         [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
         [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+        [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT point);
+        [DllImport("user32.dll")] public static extern bool IsChild(IntPtr hWndParent, IntPtr hWnd);
         [DllImport("user32.dll", EntryPoint="GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
         [DllImport("user32.dll", EntryPoint="GetWindowLongW")] private static extern int GetWindowLong32(IntPtr hWnd, int nIndex);
         public static IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex) {
@@ -563,6 +564,48 @@ function captureWindowAndAnalyze(processId, name = "embedded-local", windowHandl
     $procById = @{}
     foreach ($p in $all) {
       $procById[[int]$p.ProcessId] = $p
+    }
+
+    function Get-WindowInfo([IntPtr]$windowHandle) {
+      $windowPid = 0
+      [Win32]::GetWindowThreadProcessId($windowHandle, [ref]$windowPid) | Out-Null
+      $rect = New-Object RECT
+      if (-not [Win32]::GetWindowRect($windowHandle, [ref]$rect)) { return $null }
+      $width = $rect.Right - $rect.Left
+      $height = $rect.Bottom - $rect.Top
+      $length = [Win32]::GetWindowTextLength($windowHandle)
+      $titleBuilder = New-Object System.Text.StringBuilder([Math]::Max(1, $length + 1))
+      [Win32]::GetWindowText($windowHandle, $titleBuilder, $titleBuilder.Capacity) | Out-Null
+      $style = [Win32]::GetWindowLongPtr($windowHandle, $GWL_STYLE).ToInt64()
+      $proc = $procById[[int]$windowPid]
+      [PSCustomObject]@{
+        hwnd = $windowHandle.ToInt64()
+        parentHwnd = [Win32]::GetParent($windowHandle).ToInt64()
+        processId = [int]$windowPid
+        processName = [string]$proc.Name
+        commandLine = [string]$proc.CommandLine
+        title = $titleBuilder.ToString()
+        visible = [Win32]::IsWindowVisible($windowHandle)
+        isChild = (($style -band $WS_CHILD) -ne 0)
+        x = $rect.Left
+        y = $rect.Top
+        width = $width
+        height = $height
+      }
+    }
+
+    function Get-DescendantWindowInfos([IntPtr]$parentHwnd) {
+      $children = New-Object System.Collections.Generic.List[object]
+      $childCallback = [Win32+EnumWindowsProc]{
+        param([IntPtr]$childHwnd, [IntPtr]$lParam)
+        $info = Get-WindowInfo $childHwnd
+        if ($null -ne $info) {
+          $children.Add($info)
+        }
+        return $true
+      }
+      [Win32]::EnumChildWindows($parentHwnd, $childCallback, [IntPtr]::Zero) | Out-Null
+      return @($children)
     }
 
     $target = $null
@@ -654,23 +697,24 @@ function captureWindowAndAnalyze(processId, name = "embedded-local", windowHandl
     }
 
     $hwnd = [IntPtr]::new([int64]$target.hwnd)
+    $descendants = @(Get-DescendantWindowInfos $hwnd)
     $isChild = if ($null -ne $target.isChild) { [bool]$target.isChild } else { $false }
     if ($isChild) {
       if ($ownerHwnd -eq [IntPtr]::Zero) {
         throw "child window capture requires an owner window handle"
       }
       [Win32]::ShowWindow($ownerHwnd, 9) | Out-Null
+      [Win32]::SetWindowPos($ownerHwnd, [IntPtr](-1), 0, 0, 0, 0, 0x0043) | Out-Null
       [Win32]::SetForegroundWindow($ownerHwnd) | Out-Null
-      [Win32]::SetWindowPos($ownerHwnd, [IntPtr](0), 0, 0, 0, 0, 0x0013) | Out-Null
-      Start-Sleep -Milliseconds 120
+      Start-Sleep -Milliseconds 260
       [Win32]::ShowWindow($hwnd, 5) | Out-Null
-      [Win32]::SetWindowPos($hwnd, [IntPtr](0), 0, 0, 0, 0, 0x0053) | Out-Null
+      [Win32]::SetWindowPos($hwnd, [IntPtr](0), 0, 0, 0, 0, 0x0043) | Out-Null
     } else {
       [Win32]::ShowWindow($hwnd, 9) | Out-Null
       [Win32]::SetWindowPos($hwnd, [IntPtr](-1), 0, 0, 0, 0, 0x0043) | Out-Null
       [Win32]::SetForegroundWindow($hwnd) | Out-Null
     }
-    Start-Sleep -Milliseconds 180
+    Start-Sleep -Milliseconds 260
 
     $rect = New-Object RECT
     [Win32]::GetWindowRect($hwnd, [ref]$rect) | Out-Null
@@ -679,6 +723,20 @@ function captureWindowAndAnalyze(processId, name = "embedded-local", windowHandl
     }
     $width = [Math]::Max(1, $rect.Right - $rect.Left)
     $height = [Math]::Max(1, $rect.Bottom - $rect.Top)
+    $point = New-Object POINT
+    $point.X = [int]($rect.Left + [Math]::Floor($width / 2))
+    $point.Y = [int]($rect.Top + [Math]::Floor($height / 2))
+    $hit = [Win32]::WindowFromPoint($point)
+    $hitPid = 0
+    if ($hit -ne [IntPtr]::Zero) {
+      [Win32]::GetWindowThreadProcessId($hit, [ref]$hitPid) | Out-Null
+    }
+    if (-not $ids.Contains([int]$hitPid)) {
+      throw "native capture center is covered by process $hitPid outside launched process tree $root"
+    }
+    if ($isChild -and $ownerHwnd -ne [IntPtr]::Zero -and $hit -ne $ownerHwnd -and -not [Win32]::IsChild($ownerHwnd, $hit)) {
+      throw "native capture center is not inside the Hills Lite owner window"
+    }
     $bmp = New-Object System.Drawing.Bitmap($width, $height)
     $gfx = [System.Drawing.Graphics]::FromImage($bmp)
     $gfx.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bmp.Size)
@@ -688,6 +746,8 @@ function captureWindowAndAnalyze(processId, name = "embedded-local", windowHandl
 
     if (-not $isChild) {
       [Win32]::SetWindowPos($hwnd, [IntPtr](-2), 0, 0, 0, 0, 0x0043) | Out-Null
+    } elseif ($ownerHwnd -ne [IntPtr]::Zero) {
+      [Win32]::SetWindowPos($ownerHwnd, [IntPtr](-2), 0, 0, 0, 0, 0x0043) | Out-Null
     }
     [PSCustomObject]@{
       hwnd = $target.hwnd
@@ -699,9 +759,13 @@ function captureWindowAndAnalyze(processId, name = "embedded-local", windowHandl
       y = $rect.Top
       width = $width
       height = $height
+      hitHwnd = $hit.ToInt64()
+      hitProcessId = [int]$hitPid
+      descendantCount = $descendants.Count
+      descendants = $descendants
       candidateCount = if ($null -ne $windows) { $windows.Count } else { 1 }
       screenshotPath = ${JSON.stringify(outputPath)}
-    } | ConvertTo-Json -Compress
+    } | ConvertTo-Json -Depth 5 -Compress
   `;
   const result = run("powershell", ["-NoProfile", "-Command", script]);
   const windowInfo = JSON.parse(result.stdout.trim());
@@ -924,11 +988,11 @@ async function capturePageAndAnalyze(ws, name = "embedded-local") {
   return analyzePng(outputPath);
 }
 
-async function captureNativeWindowSample(processId, name, windowHandle) {
+async function captureNativeWindowSample(processId, name, windowHandle, ownerWindowHandle = null) {
   let lastError = null;
   for (let attempt = 0; attempt < 8; attempt += 1) {
     try {
-      return captureWindowAndAnalyze(processId, name, windowHandle);
+      return captureWindowAndAnalyze(processId, name, windowHandle, { ownerWindowHandle });
     } catch (error) {
       lastError = error;
       await wait(300);
@@ -948,11 +1012,17 @@ async function captureVisibleSample(ws, { name, bounds, usingHtmlVideo, processI
     embedState = await readEmbedState(ws).catch(() => null);
     uiPixels = await capturePageAndAnalyze(ws, `${name}-ui`);
     const nativeWindowHandle = embeddedNativeWindowHandle(embedState);
-    pixels = await captureNativeWindowSample(processId, `${name}-mpv-host`, nativeWindowHandle);
+    pixels = await captureNativeWindowSample(
+      processId,
+      `${name}-mpv-host`,
+      nativeWindowHandle,
+      embedState?.hostWindowHandle ?? null,
+    );
     hostBoundsOk =
-      embedState?.mode === "overlay"
-        ? true
-        : embeddedHostWindowBoundsOk(embedState, pixels.windowInfo);
+      (embedState?.mode === "wid" || embedState?.mode === "reparent") &&
+      embedState?.hostKind === "native-child" &&
+      Boolean(nativeWindowHandle) &&
+      embeddedHostWindowBoundsOk(embedState, pixels.windowInfo);
   }
   return {
     name,
@@ -1012,7 +1082,9 @@ const child = spawn(electron, [`--remote-debugging-port=${remotePort}`, "electro
   env: {
     ...process.env,
     HILLS_ELECTRON_DEV_SERVER_URL: devServerUrl,
-    HILLS_ELECTRON_DISABLE_GPU: "1",
+    HILLS_ELECTRON_DISABLE_GPU: process.env.HILLS_ELECTRON_DISABLE_GPU ?? "0",
+    HILLS_ELECTRON_MPV_WID: "1",
+    HILLS_ELECTRON_MPV_NATIVE_CHILD: "1",
     HILLS_ELECTRON_OPEN_DEVTOOLS: "0",
     HILLS_ELECTRON_USER_DATA_DIR: userDataDir,
   },

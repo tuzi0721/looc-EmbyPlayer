@@ -129,7 +129,8 @@ function getEmbeddedMpvState() {
     embedHostWindow && !embedHostWindow.isDestroyed() ? embedHostWindow.getBounds() : null;
   return {
     ...embedHostDiagnostics,
-    mode: useWidEmbedHost() ? "wid" : "overlay",
+    mode: useReparentEmbedHost() ? "reparent" : useWidEmbedHost() ? "wid" : "overlay",
+    reparentTarget: useReparentEmbedHost() ? mpvReparentTarget() : null,
     hostKind: useBrowserWindowEmbedHost()
       ? "browser-window"
       : useNativeChildEmbedHost()
@@ -150,16 +151,25 @@ function getEmbeddedMpvState() {
     hwnd: embedHostHwnd,
     hasRect: Boolean(embedHostRect),
     mpvRunning: mpv.isRunning(),
+    mpvProcessId: mpv.processId ?? null,
     mpvEmbedWindowHandle: mpv.embedWindowHandle ?? null,
   };
 }
 
 function useWidEmbedHost() {
-  return process.env.HILLS_ELECTRON_MPV_WID === "1";
+  return process.env.HILLS_ELECTRON_MPV_WID !== "0";
 }
 
 function useNativeChildEmbedHost() {
-  return useWidEmbedHost() && process.env.HILLS_ELECTRON_MPV_NATIVE_CHILD === "1";
+  return useWidEmbedHost() && process.env.HILLS_ELECTRON_MPV_NATIVE_CHILD !== "0";
+}
+
+function useReparentEmbedHost() {
+  return useNativeChildEmbedHost() && process.env.HILLS_ELECTRON_MPV_REPARENT !== "0";
+}
+
+function mpvReparentTarget() {
+  return process.env.HILLS_ELECTRON_MPV_REPARENT_TARGET === "host" ? "host" : "parent";
 }
 
 function useBrowserWindowEmbedHost() {
@@ -1104,6 +1114,33 @@ function sendEmbedHostCommand(command) {
   embedHostProcess.stdin.write(`${JSON.stringify(command)}\n`);
 }
 
+function handleEmbedHostMessage(message, helperPath) {
+  if (message.type === "ready" && message.hwnd) {
+    embedHostHwnd = String(message.hwnd);
+    markEmbedHostEvent({ helperPath, lastError: null });
+    applyEmbedHostBounds();
+    return "ready";
+  }
+  if (message.type === "attached_mpv" && message.hwnd) {
+    markEmbedHostEvent({
+      attachedMpvWindowHandle: String(message.hwnd),
+      attachedMpvProcessId: Number(message.pid) || null,
+      attachedMpvTarget: message.target ?? null,
+      lastError: null,
+    });
+    return "attached_mpv";
+  }
+  if (message.type === "attach_failed") {
+    markEmbedHostEvent({
+      attachedMpvProcessId: Number(message.pid) || null,
+      attachedMpvTarget: message.target ?? null,
+      lastError: `electron mpv host could not attach mpv window for pid ${message.pid ?? "unknown"}`,
+    });
+    return "attach_failed";
+  }
+  return null;
+}
+
 async function startBrowserWindowEmbedHost(parent) {
   if (embedHostWindow && !embedHostWindow.isDestroyed() && embedHostHwnd) {
     applyBrowserWindowEmbedBounds();
@@ -1190,6 +1227,7 @@ function startEmbedHostProcess(parent) {
   parent.once("closed", destroyEmbedHostWindow);
 
   return new Promise((resolve, reject) => {
+    let resolved = false;
     const timer = setTimeout(() => reject(new Error("electron mpv host helper timed out")), 5000);
     const onData = (chunk) => {
       embedHostStdout += String(chunk);
@@ -1200,19 +1238,16 @@ function startEmbedHostProcess(parent) {
         if (line) {
           try {
             const message = JSON.parse(line);
-            if (message.type === "ready" && message.hwnd) {
+            const kind = handleEmbedHostMessage(message, helperPath);
+            if (kind === "ready" && !resolved) {
+              resolved = true;
               clearTimeout(timer);
-              embedHostProcess?.stdout?.off("data", onData);
-              embedHostHwnd = String(message.hwnd);
-              markEmbedHostEvent({ helperPath, lastError: null });
-              applyEmbedHostBounds();
               resolve(embedHostHwnd);
-              return;
             }
           } catch (error) {
             clearTimeout(timer);
             markEmbedHostEvent({ lastError: error?.message ?? String(error) });
-            reject(error);
+            if (!resolved) reject(error);
             return;
           }
         }
@@ -1236,6 +1271,11 @@ async function destroyEmbedHostWindow() {
   embedHostWindow = null;
   embedHostHwnd = null;
   embedHostRect = null;
+  markEmbedHostEvent({
+    attachedMpvWindowHandle: null,
+    attachedMpvProcessId: null,
+    attachedMpvTarget: null,
+  });
   if (hostWindow && !hostWindow.isDestroyed()) {
     hostWindow.destroy();
   }
@@ -1267,11 +1307,27 @@ async function attachEmbeddedMpvHost() {
     return null;
   }
   await mpv.setOverlayWindowRect(null).catch(() => {});
+  if (useReparentEmbedHost()) {
+    await startEmbedHostProcess(host);
+    await mpv.clearEmbedWindowHandle();
+    return null;
+  }
   const hwnd = useBrowserWindowEmbedHost()
     ? await startBrowserWindowEmbedHost(host)
     : await startEmbedHostProcess(host);
   await mpv.setEmbedWindowHandle(hwnd);
   return null;
+}
+
+async function attachMpvWindowToEmbedHost() {
+  if (!useReparentEmbedHost() || !embedHostProcess || !mpv.processId) return;
+  sendEmbedHostCommand({ type: "attach_mpv", pid: mpv.processId, target: mpvReparentTarget() });
+}
+
+async function prepareMpvWindowForEmbeddedPlayback() {
+  if (!useReparentEmbedHost()) return;
+  await mpv.ensureStarted();
+  await attachMpvWindowToEmbedHost();
 }
 
 async function setEmbeddedMpvRect(rect = {}) {
@@ -1534,6 +1590,7 @@ async function playLocalFilePath(filePath, startMs = null) {
   const resolved = path.resolve(filePath);
   const stat = await fs.promises.stat(resolved).catch(() => null);
   if (!stat?.isFile()) throw new Error(`local file missing: ${resolved}`);
+  await prepareMpvWindowForEmbeddedPlayback();
   await mpv.load({
     url: pathToFileURL(resolved).toString(),
     headers: [],
@@ -1541,6 +1598,7 @@ async function playLocalFilePath(filePath, startMs = null) {
     startMs,
     autoloadSubtitles: false,
   });
+  await attachMpvWindowToEmbedHost();
   await applySubtitleStyle(await store.getSettings()).catch((error) => {
     console.warn("failed to apply subtitle style", error);
   });
@@ -1616,6 +1674,7 @@ async function playWebDavFile(payload = {}) {
     ? payload.title.trim()
     : path.basename(decodedPath);
   const settings = await store.getSettings();
+  await prepareMpvWindowForEmbeddedPlayback();
   await mpv.load({
     url: parsed.toString(),
     headers: webdav.headersFor(payload),
@@ -1623,6 +1682,7 @@ async function playWebDavFile(payload = {}) {
     startMs: payload.startMs ?? null,
     autoloadSubtitles: false,
   });
+  await attachMpvWindowToEmbedHost();
   await applySubtitleStyle(settings).catch((error) => {
     console.warn("failed to apply subtitle style", error);
   });
@@ -1658,6 +1718,7 @@ async function playAlistFile(payload = {}) {
     ? payload.title.trim()
     : path.basename(decodedPath);
   const settings = await store.getSettings();
+  await prepareMpvWindowForEmbeddedPlayback();
   await mpv.load({
     url: parsed.toString(),
     headers: alist.headersFor(payload),
@@ -1665,6 +1726,7 @@ async function playAlistFile(payload = {}) {
     startMs: payload.startMs ?? null,
     autoloadSubtitles: false,
   });
+  await attachMpvWindowToEmbedHost();
   await applySubtitleStyle(settings).catch((error) => {
     console.warn("failed to apply subtitle style", error);
   });
@@ -2224,12 +2286,14 @@ async function runPlayRequest(payload) {
       diagnostics: source.diagnostics,
     });
 
+    await prepareMpvWindowForEmbeddedPlayback();
     const loadResult = await mpv.load({
       url: source.streamUrl,
       headers: source.headers ?? [],
       userAgent: source.userAgent ?? null,
       startMs: payload.startMs ?? null,
     });
+    await attachMpvWindowToEmbedHost();
     await applySubtitleStyle(await store.getSettings()).catch((error) => {
       console.warn("failed to apply subtitle style", error);
     });

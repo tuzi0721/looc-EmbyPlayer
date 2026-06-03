@@ -20,6 +20,7 @@ const settings = useSettingsStore();
 const index = ref(0);
 const logoLoaded = ref(false);
 const logoFailed = ref(false);
+const backgroundIndex = ref(0);
 let timer: number | null = null;
 
 const items = computed(() => {
@@ -49,6 +50,7 @@ function imageUrl(candidate: ImageCandidate | null | undefined, options: { width
   if (!candidate.tag && !candidate.allowUntagged) return null;
   const server = serverStore.byId(acc.serverId);
   return mediaImageUrl(server, candidate.itemId, candidate.imageType, {
+    accountId: acc.id,
     tag: candidate.tag,
     width: options.width,
     maxWidth: options.maxWidth,
@@ -81,8 +83,23 @@ function backgroundCandidates(item: MediaItem): ImageCandidate[] {
   ];
 }
 
-function backgroundUrl(item: MediaItem): string | null {
-  return firstImageUrl(backgroundCandidates(item), { width: heroImageWidth.value });
+const backgroundUrls = computed(() => {
+  const item = current.value;
+  if (!item) return [];
+  return backgroundCandidates(item)
+    .map((candidate) => imageUrl(candidate, { width: heroImageWidth.value }))
+    .filter((url): url is string => Boolean(url));
+});
+
+const activeBackgroundUrl = computed(() => {
+  const urls = backgroundUrls.value;
+  return urls[Math.min(backgroundIndex.value, Math.max(0, urls.length - 1))] ?? null;
+});
+
+function onBackgroundError() {
+  if (backgroundIndex.value < backgroundUrls.value.length - 1) {
+    backgroundIndex.value += 1;
+  }
 }
 
 function titleLogoCandidates(item: MediaItem): ImageCandidate[] {
@@ -140,6 +157,13 @@ watch(titleLogoUrl, () => {
   logoFailed.value = false;
 });
 
+watch(
+  () => `${current.value?.Id ?? ""}:${heroImageWidth.value}`,
+  () => {
+    backgroundIndex.value = 0;
+  },
+);
+
 onMounted(() => {
   timer = window.setInterval(next, 8000);
 });
@@ -159,10 +183,16 @@ onUnmounted(() => {
     @keydown.enter.prevent="openItem"
     @keydown.space.prevent="openItem"
   >
-    <div
-      class="hero__bg"
-      :style="backgroundUrl(current) ? { backgroundImage: `url(${backgroundUrl(current)})` } : undefined"
-    />
+    <div class="hero__bg">
+      <img
+        v-if="activeBackgroundUrl"
+        :src="activeBackgroundUrl"
+        :alt="displayTitle(current)"
+        loading="eager"
+        decoding="async"
+        @error="onBackgroundError"
+      />
+    </div>
     <div class="hero__shade" />
     <button class="hero__nav hero__nav--prev" aria-label="上一张" @click.stop="prev">
       <Icon icon="lucide:chevron-left" width="22" />
@@ -203,9 +233,8 @@ onUnmounted(() => {
 <style scoped>
 .hero {
   position: relative;
-  width: calc(100% - var(--content-pad) * 2);
-  max-width: 1280px;
-  margin: 0 auto;
+  width: 100%;
+  margin: 0;
   aspect-ratio: 16 / 6;
   min-height: 240px;
   border-radius: 0;
@@ -222,6 +251,12 @@ onUnmounted(() => {
   position: absolute;
   inset: 0;
   background: #1a1a1a center/cover no-repeat;
+}
+.hero__bg img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
 .hero__shade {
   position: absolute;
@@ -368,7 +403,7 @@ onUnmounted(() => {
 }
 @media (max-width: 760px) {
   .hero {
-    width: calc(100% - 24px);
+    width: 100%;
     aspect-ratio: 16 / 6;
     min-height: 210px;
   }
@@ -393,9 +428,11 @@ onUnmounted(() => {
     font-size: 28px;
   }
 }
-@media (max-height: 760px) and (min-width: 761px) {
+@media (max-height: 760px) and (min-width: 1101px) {
   .hero {
     aspect-ratio: 16 / 6;
+    width: min(100%, calc((100dvh - 370px) * 2.6667));
+    margin: 0 auto;
   }
   .hero--cinema {
     aspect-ratio: 16 / 6;
@@ -461,6 +498,8 @@ onUnmounted(() => {
 @media (max-height: 480px) {
   .hero,
   .hero--cinema {
+    width: min(100%, calc((100dvh - 155px) * 2.6667));
+    margin: 0 auto;
     aspect-ratio: 16 / 6;
     min-height: 0;
   }

@@ -160,6 +160,10 @@ pub async fn update_settings(
         if let Some(v) = patch.mpv_backend {
             s.mpv_backend = v;
         }
+        #[cfg(feature = "mpv-embedded")]
+        {
+            s.mpv_backend = MpvBackendKind::Embedded;
+        }
         if let Some(v) = patch.external_player_path {
             s.external_player_path = v.and_then(|path| {
                 let path = path.trim().to_string();

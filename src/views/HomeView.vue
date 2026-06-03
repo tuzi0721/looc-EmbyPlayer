@@ -315,23 +315,23 @@ function gotoAddServer() {
 
 @media (max-height: 820px) and (min-width: 1101px) {
   .content__pad {
-    padding-bottom: 8px;
+    padding-bottom: 2px;
   }
   .row-section {
-    margin-bottom: 2px;
+    margin-bottom: 0;
   }
   .row-head {
-    margin-bottom: 8px;
+    margin-bottom: 4px;
   }
   .resume-card {
-    flex-basis: 184px;
+    flex-basis: 168px;
   }
   .resume-card__title,
   .resume-card__sub {
     display: none;
   }
   .lib-thumb {
-    flex-basis: 96px;
+    flex-basis: 88px;
   }
 }
 
@@ -371,13 +371,13 @@ function gotoAddServer() {
 
 @media (max-height: 480px) and (max-width: 760px) {
   .content__pad {
-    padding-bottom: 4px;
+    padding-bottom: 0;
   }
   .row-section {
     margin-bottom: 0;
   }
   .row-head {
-    margin-bottom: 4px;
+    margin-bottom: 0;
   }
   .row-head h2 {
     font-size: 15px;

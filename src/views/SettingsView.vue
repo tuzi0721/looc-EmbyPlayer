@@ -593,6 +593,9 @@ const runtimeLabel = computed(() =>
 );
 
 const activeAccountLabel = computed(() => auth.activeAccount?.username ?? "未登录");
+const mpvBackendLabel = computed(() =>
+  settings.settings.mpvBackend === "embedded" ? "Embedded mpv" : "IPC mpv",
+);
 const isWindowsPlatform = computed(() => platformLabel.value.toLowerCase().includes("windows"));
 
 type CapabilityStatus = "available" | "disabled";
@@ -802,7 +805,7 @@ const danmakuSummary = computed(() => {
           </div>
           <div class="about-cell">
             <span>播放核心</span>
-            <strong>{{ settings.settings.mpvBackend }}</strong>
+            <strong>{{ mpvBackendLabel }}</strong>
           </div>
           <div class="about-cell">
             <span>打包产物</span>
@@ -1168,25 +1171,10 @@ const danmakuSummary = computed(() => {
         <Icon icon="lucide:chevron-right" width="16" class="chev" />
       </button>
       <div v-if="openPanel === 'player'" class="panel glass">
-        <label class="field">
+        <div class="field field--readonly">
           <span>MPV 后端</span>
-          <div class="seg">
-            <button
-              type="button"
-              :class="{ active: settings.settings.mpvBackend === 'ipc' }"
-              @click="save('mpvBackend', 'ipc')"
-            >
-              IPC
-            </button>
-            <button
-              type="button"
-              :class="{ active: settings.settings.mpvBackend === 'embedded' }"
-              @click="save('mpvBackend', 'embedded')"
-            >
-              内嵌
-            </button>
-          </div>
-        </label>
+          <strong>{{ mpvBackendLabel }}</strong>
+        </div>
         <label class="field">
           <span>硬件解码</span>
           <div class="seg">
@@ -1927,6 +1915,11 @@ const danmakuSummary = computed(() => {
 .field > span {
   font-size: 12px;
   color: var(--fg-secondary);
+}
+.field--readonly strong {
+  color: var(--fg-primary);
+  font-size: 13px;
+  font-weight: 700;
 }
 .plain-input,
 .plain-textarea {

@@ -312,7 +312,14 @@ pub enum MpvBackendKind {
 
 impl Default for MpvBackendKind {
     fn default() -> Self {
-        Self::Ipc
+        #[cfg(feature = "mpv-embedded")]
+        {
+            Self::Embedded
+        }
+        #[cfg(not(feature = "mpv-embedded"))]
+        {
+            Self::Ipc
+        }
     }
 }
 

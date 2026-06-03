@@ -247,6 +247,20 @@ export interface MpvAudioParams {
   format?: string;
 }
 
+export interface MpvBackendDiagnostics {
+  loadGeneration?: number;
+  eventCount?: number;
+  fileLoadedCount?: number;
+  videoReconfigCount?: number;
+  audioReconfigCount?: number;
+  playbackRestartCount?: number;
+  lastEvent?: string | null;
+  lastError?: string | null;
+  lastProperty?: string | null;
+  lastLog?: string | null;
+  fileLoadedAfterLastLoad?: boolean;
+}
+
 export interface MpvSnapshot {
   url?: string | null;
   paused: boolean;
@@ -286,6 +300,7 @@ export interface MpvSnapshot {
   frameDropCount?: number | null;
   decoderFrameDropCount?: number | null;
   voFrameDropCount?: number | null;
+  backendDiagnostics?: MpvBackendDiagnostics | null;
 }
 
 export type DanmakuMode = "scroll" | "top" | "bottom" | "reverse";

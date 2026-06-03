@@ -8,6 +8,7 @@ mod mpv;
 mod network;
 mod notifications;
 mod state;
+mod stream_proxy;
 mod system_media;
 mod tray;
 
@@ -23,6 +24,9 @@ pub use state::AppState;
 pub fn run() {
     install_crash_logger();
 
+    let mut context = tauri::generate_context!();
+    apply_visual_smoke_browser_args(&mut context);
+
     // tokio-tungstenite (Emby WebSocket) uses rustls 0.23 which requires an
     // explicit process-wide CryptoProvider before any TLS connection.
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -35,7 +39,7 @@ pub fn run() {
         .with_target(false)
         .init();
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
@@ -93,17 +97,21 @@ pub fn run() {
             commands::server::set_active_line,
             commands::media::list_views,
             commands::media::list_items,
+            commands::media::list_items_all_accounts,
             commands::media::get_item_detail,
             commands::media::set_item_favorite,
             commands::media::set_item_played,
             commands::media::search,
+            commands::media::search_all_accounts,
             commands::media::resume_items,
+            commands::media::resume_items_all_accounts,
             commands::media::list_seasons,
             commands::media::list_episodes,
             commands::media::similar_items,
             commands::media::special_features,
             commands::media::report_playback_progress,
             commands::media::report_playback_stopped,
+            commands::player::get_playback_source,
             commands::player::play,
             commands::player::play_external,
             commands::player::pause,
@@ -175,13 +183,90 @@ pub fn run() {
             commands::system_media::set_now_playing_position,
             commands::system_media::clear_now_playing,
         ])
-        .run(tauri::generate_context!())
+        .build(context)
         .unwrap_or_else(|e| {
-            let msg = format!("tauri::run failed: {e}");
+            let msg = format!("tauri::build failed: {e}");
             log_crash_line(&msg);
             // Panic so the OS terminates the process with the message visible.
             panic!("{msg}");
         });
+    app.run(|app, event| match event {
+        tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+            cleanup_playback_on_exit(app);
+        }
+        tauri::RunEvent::WindowEvent {
+            label,
+            event: tauri::WindowEvent::CloseRequested { .. },
+            ..
+        } if label == "main" => {
+            cleanup_playback_on_exit(app);
+        }
+        _ => {}
+    });
+}
+
+fn cleanup_playback_on_exit(app: &tauri::AppHandle) {
+    let Some(state) = app.try_state::<Arc<AppState>>() else {
+        return;
+    };
+    tauri::async_runtime::block_on(state.shutdown_playback());
+}
+
+#[cfg(target_os = "windows")]
+fn apply_visual_smoke_browser_args<R: tauri::Runtime>(context: &mut tauri::Context<R>) {
+    let Ok(port) = std::env::var("HILLS_TAURI_CDP_PORT") else {
+        return;
+    };
+    let Ok(port) = port.parse::<u16>() else {
+        return;
+    };
+    if port == 0 {
+        return;
+    }
+
+    let data_dir = std::env::var_os("HILLS_TAURI_WEBVIEW_DATA_DIR").map(std::path::PathBuf::from);
+    let defaults = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required";
+    for window in &mut context.config_mut().app.windows {
+        let mut args = window
+            .additional_browser_args
+            .clone()
+            .unwrap_or_else(|| defaults.to_string());
+        if !args.contains("--remote-debugging-port=") {
+            args.push_str(&format!(" --remote-debugging-port={port}"));
+        }
+        window.additional_browser_args = Some(args);
+        if let Some(data_dir) = data_dir.as_ref() {
+            window.data_directory = Some(data_dir.clone());
+        }
+    }
+
+    log_visual_smoke_line(&format!(
+        "cdp port {port} configured; webview data dir: {}",
+        data_dir
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<default>".to_string())
+    ));
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_visual_smoke_browser_args<R: tauri::Runtime>(_context: &mut tauri::Context<R>) {}
+
+fn log_visual_smoke_line(msg: &str) {
+    let path = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs_next())
+        .unwrap_or_else(std::env::temp_dir);
+    let dir = path.join("EmbyPlayer");
+    let _ = std::fs::create_dir_all(&dir);
+    let file = dir.join("visual-smoke.log");
+    let when = chrono::Utc::now().to_rfc3339();
+    let line = format!("{when} {msg}\n");
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file)
+        .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
 }
 
 fn log_crash_line(msg: &str) {

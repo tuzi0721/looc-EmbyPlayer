@@ -69,13 +69,13 @@ export function mediaImageUrl(
   return `${line.baseUrl}${sep}Items/${encodeURIComponent(itemId)}/Images/${imageType}${query ? `?${query}` : ""}`;
 }
 
-export function mediaItemImageUrl(
+export function mediaItemImageUrls(
   server: Server | null | undefined,
   item: MediaItem | null | undefined,
   imageType: MediaImageType = "Backdrop",
   maxWidth = 1600,
-): string | null {
-  if (!item) return null;
+): string[] {
+  if (!item) return [];
   const allowParent = item.Type === "Episode";
   const parentBackdropId = item.ParentBackdropItemId ?? item.SeriesId;
   const parentBackdropTag = item.ParentBackdropImageTags?.[0] ?? item.BackdropImageTags?.[0];
@@ -120,14 +120,24 @@ export function mediaItemImageUrl(
     add({ itemId: parentBackdropId, imageType: "Backdrop", tag: parentBackdropTag, allowUntagged: allowParent });
   }
 
-  const candidate = candidates[0];
-  if (!candidate) return null;
+  return candidates
+    .map((candidate) =>
+      mediaImageUrl(server, candidate.itemId, candidate.imageType, {
+        accountId: item._source?.accountId,
+        maxWidth,
+        quality: 82,
+        format: "webp",
+        tag: candidate.tag,
+      }),
+    )
+    .filter((url): url is string => Boolean(url));
+}
 
-  return mediaImageUrl(server, candidate.itemId, candidate.imageType, {
-    accountId: item._source?.accountId,
-    maxWidth,
-    quality: 82,
-    format: "webp",
-    tag: candidate.tag,
-  });
+export function mediaItemImageUrl(
+  server: Server | null | undefined,
+  item: MediaItem | null | undefined,
+  imageType: MediaImageType = "Backdrop",
+  maxWidth = 1600,
+): string | null {
+  return mediaItemImageUrls(server, item, imageType, maxWidth)[0] ?? null;
 }

@@ -13,7 +13,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   theme: "dark",
   blurStrength: 24,
   enableWindowVibrancy: true,
-  mpvBackend: "ipc",
+  mpvBackend: "embedded",
   externalPlayerPath: null,
   externalPlayerArgs: "",
   hardwareDecoding: true,

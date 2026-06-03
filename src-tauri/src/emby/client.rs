@@ -640,17 +640,36 @@ impl EmbyClient {
         line_id: Option<&str>,
     ) -> AppResult<Url> {
         let line = self.pick_line(server, line_id)?;
-        let settings = self.config.settings();
-        let path = format!("Videos/{}/stream", item.id);
-        let mut url = endpoints::join(&line.base_url, &path)?;
+        let mut url = if let Some(direct_url) = source
+            .direct_stream_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
         {
+            Url::parse(direct_url)
+                .or_else(|_| endpoints::join(&line.base_url, direct_url.trim_start_matches('/')))?
+        } else {
+            let path = format!("Videos/{}/stream", item.id);
+            endpoints::join(&line.base_url, &path)?
+        };
+        {
+            let existing_keys = url
+                .query_pairs()
+                .map(|(key, _)| key.to_string())
+                .collect::<std::collections::HashSet<_>>();
             let mut q = url.query_pairs_mut();
-            q.append_pair("MediaSourceId", &source.id);
-            q.append_pair("PlaySessionId", play_session_id);
-            if settings.append_auth_query {
+            if !existing_keys.contains("MediaSourceId") {
+                q.append_pair("MediaSourceId", &source.id);
+            }
+            if !existing_keys.contains("PlaySessionId") {
+                q.append_pair("PlaySessionId", play_session_id);
+            }
+            if !existing_keys.contains("api_key") {
                 q.append_pair("api_key", &account.access_token);
             }
-            q.append_pair("Static", "true");
+            if !existing_keys.contains("Static") {
+                q.append_pair("Static", "true");
+            }
         }
         Ok(url)
     }

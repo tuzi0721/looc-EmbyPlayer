@@ -5,13 +5,15 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use crate::commands::shortcuts::ShortcutRegistry;
+use crate::config::models::MpvBackendKind;
 use crate::config::ConfigStore;
 use crate::download::DownloadManager;
 use crate::emby::{EmbyClient, EmbySocket, SessionController};
 use crate::error::AppResult;
-use crate::mpv::MpvManager;
+use crate::mpv::{MpvCommand, MpvManager};
 use crate::network::{build_client, HealthScheduler, HeartbeatScheduler};
 use crate::notifications::NotificationCenter;
+use crate::stream_proxy::StreamProxy;
 use crate::system_media::SystemMediaController;
 
 /// Global, cloneable app state held inside Tauri's managed state.
@@ -22,6 +24,7 @@ pub struct AppState {
     pub mpv: MpvManager,
     pub downloads: DownloadManager,
     pub notifications: NotificationCenter,
+    pub stream_proxy: StreamProxy,
     pub session_controller: Arc<SessionController>,
     pub shortcuts: ShortcutRegistry,
     pub system_media: Arc<SystemMediaController>,
@@ -50,11 +53,16 @@ pub struct CurrentPlaySession {
 impl AppState {
     pub fn initialize(handle: AppHandle) -> AppResult<Self> {
         let config = ConfigStore::load(&handle)?;
+        #[cfg(feature = "mpv-embedded")]
+        config.update_settings(|s| {
+            s.mpv_backend = MpvBackendKind::Embedded;
+        })?;
         let settings = config.settings();
         let http = build_client(settings.request_timeout_ms)?;
         let emby = EmbyClient::new(http, config.clone());
         let mpv = MpvManager::new(&settings)?;
         let notifications = NotificationCenter::new(config.clone(), handle.clone());
+        let stream_proxy = StreamProxy::new()?;
         let downloads = DownloadManager::new(
             config.clone(),
             emby.clone(),
@@ -76,6 +84,7 @@ impl AppState {
             mpv,
             downloads,
             notifications,
+            stream_proxy,
             session_controller,
             shortcuts: ShortcutRegistry::default(),
             system_media: Arc::new(SystemMediaController::new()),
@@ -109,6 +118,19 @@ impl AppState {
         self.downloads.resume_persisted();
 
         let _ = self.restart_socket().await;
+    }
+
+    pub async fn shutdown_playback(&self) {
+        let backend = self.mpv.backend();
+        if let Err(e) = backend.execute(MpvCommand::Stop).await {
+            tracing::debug!(target = "mpv", error = %e, "mpv stop during shutdown failed");
+        }
+        if let Err(e) = backend.shutdown().await {
+            tracing::warn!(target = "mpv", error = %e, "mpv shutdown during app exit failed");
+        }
+        let _ = self.current_play_session.lock().await.take();
+        self.stream_proxy.clear();
+        self.system_media.clear();
     }
 
     /// (Re)start the Emby WebSocket session bound to the active account. If

@@ -1600,31 +1600,15 @@ function currentEmbedRect() {
   const el = stageEl.value;
   if (!el) return null;
   const rect = el.getBoundingClientRect();
-  const controls = embedControlInsets(rect);
-  const height = Math.max(1, Math.round(rect.height - controls.top - controls.bottom));
   const width = Math.max(1, Math.round(rect.width));
+  const height = Math.max(1, Math.round(rect.height));
   return {
     x: Math.round(rect.left),
-    y: Math.round(rect.top + controls.top),
+    y: Math.round(rect.top),
     width,
     height,
     scale: window.devicePixelRatio || 1,
   };
-}
-
-function embedControlInsets(stageRect: DOMRect) {
-  if (!showControls.value) return { top: 0, bottom: 0 };
-  const topEl = document.querySelector<HTMLElement>(".player__top");
-  const bottomEl = document.querySelector<HTMLElement>(".player__bottom");
-  const topRect = topEl?.getBoundingClientRect();
-  const bottomRect = bottomEl?.getBoundingClientRect();
-  const top = topRect
-    ? Math.max(0, Math.min(stageRect.height - 1, Math.ceil(topRect.bottom - stageRect.top)))
-    : 0;
-  const bottom = bottomRect
-    ? Math.max(0, Math.min(stageRect.height - top - 1, Math.ceil(stageRect.bottom - bottomRect.top)))
-    : 0;
-  return { top, bottom };
 }
 
 async function syncEmbedRect() {
@@ -1648,6 +1632,22 @@ function scheduleEmbedRectSync() {
 function nextAnimationFrame() {
   return new Promise<void>((resolve) => {
     window.requestAnimationFrame(() => resolve());
+  });
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: number | null = null;
+  return new Promise<T>((resolve, reject) => {
+    timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => resolve(value),
+      (error) => reject(error),
+    ).finally(() => {
+      if (timer != null) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
+    });
   });
 }
 
@@ -1683,7 +1683,7 @@ async function prepareScreenshotFrame() {
 
 async function setupEmbeddedVideoHost() {
   if (!embedVideo) return;
-  await api.embedAttach();
+  await withTimeout(api.embedAttach(), 8000, "embedded mpv host attach timed out");
   if (typeof ResizeObserver !== "undefined" && stageEl.value) {
     embedResizeObserver = new ResizeObserver(scheduleEmbedRectSync);
     embedResizeObserver.observe(stageEl.value);
@@ -1691,7 +1691,7 @@ async function setupEmbeddedVideoHost() {
   window.addEventListener("resize", scheduleEmbedRectSync, { passive: true });
   scheduleEmbedRectSync();
   await syncEmbedRect();
-  await api.embedSetVisible(true);
+  await withTimeout(api.embedSetVisible(true), 3000, "embedded mpv host show timed out");
   scheduleEmbedRectLayoutSync();
 }
 
@@ -2071,8 +2071,8 @@ async function takeScreenshot() {
 onMounted(async () => {
   document.addEventListener("fullscreenchange", onFullscreenChange);
   document.addEventListener("webkitfullscreenchange", onFullscreenChange);
-  await setupEmbeddedVideoHost().catch((error) => console.warn(error));
   try {
+    await setupEmbeddedVideoHost();
     await startCurrentPlayback();
   } catch (e) {
     errorText.value = String(e);
@@ -2093,13 +2093,13 @@ onBeforeUnmount(async () => {
     destroyHtmlPlayback();
   }
   const cleanupTasks: Promise<unknown>[] = [];
-  teardownEmbeddedVideoHost(cleanupTasks);
   if (alwaysOnTop.value) cleanupTasks.push(api.setAlwaysOnTop(false));
   if (secondaryBlackoutActive.value || settings.settings.blackoutOtherDisplays) {
     secondaryBlackoutActive.value = false;
     cleanupTasks.push(api.setSecondaryDisplayBlackout(false));
   }
-  cleanupTasks.push(player.stop());
+  await player.stop().catch((error) => console.warn(error));
+  teardownEmbeddedVideoHost(cleanupTasks);
   await Promise.allSettled(cleanupTasks);
 });
 </script>

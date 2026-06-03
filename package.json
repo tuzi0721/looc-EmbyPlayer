@@ -24,7 +24,7 @@
     "electron:dist": "set ELECTRON_BUILDER_CACHE=.electron-builder-cache&& npm run check:electron-commands && npm run build && npm run build:electron-helper && electron-builder --win portable && npm run check:electron-package && npm run check:electron-dist",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build && npm run check:tauri-package"
+    "tauri:build": "tauri build --features mpv-embedded && npm run check:tauri-package"
   },
   "dependencies": {},
   "devDependencies": {

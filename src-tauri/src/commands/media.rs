@@ -3,7 +3,10 @@ use std::sync::Arc;
 use serde::Deserialize;
 use tauri::State;
 
-use crate::emby::models::{ItemsResponse, MediaItem, PlaybackProgress, UserData, ViewsResponse};
+use crate::config::models::{Account, Server};
+use crate::emby::models::{
+    ItemsResponse, MediaItem, MediaItemSourceContext, PlaybackProgress, UserData, ViewsResponse,
+};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -39,7 +42,7 @@ fn sanitize_play_method(value: &str) -> &'static str {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListItemsPayload {
     pub parent_id: Option<String>,
@@ -85,6 +88,14 @@ pub async fn list_items(
             &payload.params,
         )
         .await
+}
+
+#[tauri::command]
+pub async fn list_items_all_accounts(
+    state: State<'_, Arc<AppState>>,
+    payload: ListItemsPayload,
+) -> AppResult<ItemsResponse> {
+    all_account_items(&state, AllAccountMediaQuery::ListItems(payload)).await
 }
 
 #[tauri::command]
@@ -134,9 +145,24 @@ pub async fn search(state: State<'_, Arc<AppState>>, term: String) -> AppResult<
 }
 
 #[tauri::command]
+pub async fn search_all_accounts(
+    state: State<'_, Arc<AppState>>,
+    term: String,
+) -> AppResult<ItemsResponse> {
+    all_account_items(&state, AllAccountMediaQuery::Search(term)).await
+}
+
+#[tauri::command]
 pub async fn resume_items(state: State<'_, Arc<AppState>>) -> AppResult<ItemsResponse> {
     let (server, account) = active_pair(&state)?;
     state.emby.resume_items(&server, &account).await
+}
+
+#[tauri::command]
+pub async fn resume_items_all_accounts(
+    state: State<'_, Arc<AppState>>,
+) -> AppResult<ItemsResponse> {
+    all_account_items(&state, AllAccountMediaQuery::Resume).await
 }
 
 #[tauri::command]
@@ -237,4 +263,104 @@ pub async fn report_playback_stopped(
             payload.position_ticks,
         )
         .await
+}
+
+enum AllAccountMediaQuery {
+    ListItems(ListItemsPayload),
+    Search(String),
+    Resume,
+}
+
+async fn all_account_items(
+    state: &AppState,
+    query: AllAccountMediaQuery,
+) -> AppResult<ItemsResponse> {
+    let accounts = state.config.accounts();
+    let servers = state.config.servers();
+    if accounts.is_empty() {
+        return Ok(ItemsResponse {
+            items: vec![],
+            total_record_count: 0,
+        });
+    }
+
+    let mut first_error: Option<AppError> = None;
+    let mut fulfilled = Vec::new();
+    for account in accounts {
+        let Some(server) = servers
+            .iter()
+            .find(|server| server.id == account.server_id)
+            .cloned()
+        else {
+            continue;
+        };
+        let result = match &query {
+            AllAccountMediaQuery::ListItems(payload) => {
+                state
+                    .emby
+                    .list_items(
+                        &server,
+                        &account,
+                        payload.parent_id.as_deref(),
+                        &payload.params,
+                    )
+                    .await
+            }
+            AllAccountMediaQuery::Search(term) => state.emby.search(&server, &account, term).await,
+            AllAccountMediaQuery::Resume => state.emby.resume_items(&server, &account).await,
+        };
+        match result {
+            Ok(response) => fulfilled.push(annotate_media_response(response, &server, &account)),
+            Err(error) if first_error.is_none() => first_error = Some(error),
+            Err(_) => {}
+        }
+    }
+
+    if fulfilled.is_empty() {
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+        return Ok(ItemsResponse {
+            items: vec![],
+            total_record_count: 0,
+        });
+    }
+
+    let total_record_count = fulfilled
+        .iter()
+        .map(|response| response.total_record_count)
+        .sum();
+    let items = fulfilled
+        .into_iter()
+        .flat_map(|response| response.items)
+        .collect();
+    Ok(ItemsResponse {
+        items,
+        total_record_count,
+    })
+}
+
+fn annotate_media_response(
+    response: ItemsResponse,
+    server: &Server,
+    account: &Account,
+) -> ItemsResponse {
+    let source = MediaItemSourceContext {
+        server_id: server.id.clone(),
+        account_id: account.id.clone(),
+        server_name: Some(server.name.clone()),
+        username: Some(account.username.clone()),
+    };
+    let items = response
+        .items
+        .into_iter()
+        .map(|mut item| {
+            item.source = Some(source.clone());
+            item
+        })
+        .collect();
+    ItemsResponse {
+        items,
+        total_record_count: response.total_record_count,
+    }
 }

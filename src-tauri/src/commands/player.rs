@@ -7,11 +7,14 @@ use std::{
 
 use chrono::Local;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 use uuid::Uuid;
 
+use crate::emby::models::{MediaSource, MediaStream, PlaybackInfo};
 use crate::error::{AppError, AppResult};
 use crate::mpv::backend::MpvBackend;
+use crate::mpv::backend::{MpvTrackInfo, TrackKind};
 use crate::mpv::{MpvCommand, MpvSnapshot, PictureMode, SubtitleStyle};
 use crate::state::{AppState, CurrentPlaySession};
 
@@ -35,6 +38,73 @@ pub struct PlayPayload {
     /// Forwarded to the download task: pretend a normal playback session.
     #[serde(default = "default_true_payload")]
     pub stealth_when_recording: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackSourcePayload {
+    pub item_id: String,
+    #[serde(default)]
+    pub start_ms: Option<i64>,
+    #[serde(default)]
+    pub line_id: Option<String>,
+    #[serde(default)]
+    pub media_source_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackSourceResult {
+    pub item_id: String,
+    pub play_session_id: String,
+    pub media_source_id: String,
+    pub play_method: String,
+    pub line_id: String,
+    pub line_name: String,
+    pub stream_url: String,
+    pub duration_ms: Option<i64>,
+    pub tracks: Vec<MpvTrackInfo>,
+    pub media_sources: Vec<PlaybackMediaSourceResult>,
+    pub lines: Vec<PlaybackLineOptionResult>,
+    pub headers: Vec<(String, String)>,
+    pub user_agent: Option<String>,
+    pub diagnostics: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackMediaSourceResult {
+    pub id: String,
+    pub name: Option<String>,
+    pub display_name: String,
+    pub container: Option<String>,
+    pub protocol: Option<String>,
+    pub path: Option<String>,
+    pub bitrate: Option<i64>,
+    pub size: Option<i64>,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub video_codec: Option<String>,
+    pub audio_codec: Option<String>,
+    pub audio_language: Option<String>,
+    pub supports_direct_play: Option<bool>,
+    pub supports_direct_stream: Option<bool>,
+    pub play_method: Option<String>,
+    pub supports_transcoding: Option<bool>,
+    pub is_remote: Option<bool>,
+    pub selected: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackLineOptionResult {
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    pub enabled: bool,
+    pub status: Option<crate::config::models::LineStatus>,
+    pub latency_ms: Option<u32>,
+    pub selected: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -166,6 +236,42 @@ fn default_stats_osd_page() -> u8 {
     1
 }
 
+fn log_visual_player_stage(msg: &str) {
+    if std::env::var_os("HILLS_TAURI_CDP_PORT").is_none() {
+        return;
+    }
+    let path = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("USERPROFILE")
+                .map(std::path::PathBuf::from)
+                .map(|p| p.join("AppData").join("Local"))
+        })
+        .unwrap_or_else(std::env::temp_dir);
+    let dir = path.join("EmbyPlayer");
+    let _ = std::fs::create_dir_all(&dir);
+    let file = dir.join("visual-smoke.log");
+    let when = chrono::Utc::now().to_rfc3339();
+    let line = format!("{when} player {msg}\n");
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file)
+        .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
+}
+
+fn sanitize_visual_error(input: &str) -> String {
+    let mut text = input.replace(['\r', '\n', '\t'], " ");
+    if text.contains("://") {
+        text = "[url]".into();
+    }
+    if text.len() > 180 {
+        text.truncate(180);
+        text.push_str("...");
+    }
+    text
+}
+
 fn close_secondary_blackout_windows(app: &tauri::AppHandle) {
     for (label, window) in app.webview_windows() {
         if label.starts_with(SECONDARY_BLACKOUT_LABEL_PREFIX) {
@@ -175,7 +281,10 @@ fn close_secondary_blackout_windows(app: &tauri::AppHandle) {
 }
 
 #[tauri::command]
-pub async fn play(state: State<'_, Arc<AppState>>, payload: PlayPayload) -> AppResult<String> {
+pub async fn get_playback_source(
+    state: State<'_, Arc<AppState>>,
+    payload: PlaybackSourcePayload,
+) -> AppResult<PlaybackSourceResult> {
     let account = state
         .config
         .active_account()
@@ -196,6 +305,142 @@ pub async fn play(state: State<'_, Arc<AppState>>, payload: PlayPayload) -> AppR
         .emby
         .playback_info_for_line(&server, &account, &payload.item_id, start_ticks, line_id)
         .await?;
+    let source = pick_local_media_source(&pb, payload.media_source_id.as_deref())?;
+    let play_method = source.local_decode_play_method().to_string();
+    let url = state.emby.build_stream_url_for_line(
+        &server,
+        &account,
+        &item,
+        &source,
+        &pb.play_session_id,
+        true,
+        line_id,
+    )?;
+    let line = state.emby.pick_line(&server, line_id)?;
+
+    let user_agent = line
+        .user_agent
+        .clone()
+        .or_else(|| server.default_user_agent.clone());
+    let mut headers = line.headers.clone();
+    headers.push(("X-Emby-Token".into(), account.access_token.clone()));
+    headers.push((
+        "Authorization".into(),
+        format!("MediaBrowser Token=\"{}\"", account.access_token),
+    ));
+    let proxy_url = state
+        .stream_proxy
+        .register(url.clone(), headers.clone(), user_agent.clone())
+        .await?;
+    let tracks = source.media_streams.iter().map(stream_to_track).collect();
+    let media_sources = pb
+        .media_sources
+        .iter()
+        .enumerate()
+        .map(|(index, candidate)| media_source_result(candidate, index, &source.id))
+        .collect();
+    let lines = server
+        .lines
+        .iter()
+        .map(|candidate| PlaybackLineOptionResult {
+            id: candidate.id.clone(),
+            name: candidate.name.clone(),
+            base_url: candidate.base_url.clone(),
+            enabled: candidate.enabled,
+            status: candidate.last_status,
+            latency_ms: candidate.last_latency_ms,
+            selected: candidate.id == line.id,
+        })
+        .collect();
+
+    let item_id = payload.item_id;
+    let play_session_id = pb.play_session_id;
+    let duration_ms = item.run_time_ticks.map(|ticks| (ticks / 10_000).max(0));
+    let media_source_count = pb.media_sources.len();
+    let diagnostics = json!({
+        "sourceKind": if source.supports_direct_play == Some(true) { "direct-play" } else { "direct-stream" },
+        "streamKind": "local-proxy",
+        "mediaSourceCount": media_source_count,
+        "serverTranscodingAllowed": false,
+        "line": {
+            "id": line.id.clone(),
+            "name": line.name.clone(),
+            "baseUrl": line.base_url.clone(),
+        },
+    });
+
+    Ok(PlaybackSourceResult {
+        item_id,
+        play_session_id,
+        media_source_id: source.id.clone(),
+        play_method,
+        line_id: line.id.clone(),
+        line_name: line.name.clone(),
+        stream_url: proxy_url,
+        duration_ms,
+        tracks,
+        media_sources,
+        lines,
+        headers: Vec::new(),
+        user_agent: None,
+        diagnostics,
+    })
+}
+
+#[tauri::command]
+pub async fn play(
+    state: State<'_, Arc<AppState>>,
+    payload: PlayPayload,
+) -> AppResult<PlaybackSourceResult> {
+    log_visual_player_stage("play:start");
+    let account = state
+        .config
+        .active_account()
+        .ok_or_else(|| AppError::InvalidState("no active account".into()))?;
+    log_visual_player_stage("play:active-account");
+    let server = state
+        .config
+        .server(&account.server_id)
+        .ok_or_else(|| AppError::NotFound(account.server_id.clone()))?;
+    log_visual_player_stage("play:server-ready");
+
+    let item = state
+        .emby
+        .get_item(&server, &account, &payload.item_id)
+        .await?;
+    log_visual_player_stage("play:item-ready");
+
+    let start_ticks = payload.start_ms.map(|ms| ms * 10_000);
+    let line_id = payload.line_id.as_deref();
+    match state.emby.pick_line(&server, line_id) {
+        Ok(line) => log_visual_player_stage(&format!(
+            "play:playback-info-line id={} status={:?}",
+            line.id, line.last_status
+        )),
+        Err(error) => log_visual_player_stage(&format!(
+            "play:playback-info-line-error {}",
+            sanitize_visual_error(&error.to_string())
+        )),
+    }
+    log_visual_player_stage("play:playback-info-start");
+    let pb = match state
+        .emby
+        .playback_info_for_line(&server, &account, &payload.item_id, start_ticks, line_id)
+        .await
+    {
+        Ok(pb) => pb,
+        Err(error) => {
+            log_visual_player_stage(&format!(
+                "play:playback-info-error {}",
+                sanitize_visual_error(&error.to_string())
+            ));
+            return Err(error);
+        }
+    };
+    log_visual_player_stage(&format!(
+        "play:playback-info media_sources={}",
+        pb.media_sources.len()
+    ));
     let source = match payload.media_source_id.as_deref() {
         Some(id) => {
             let source = pb
@@ -221,6 +466,7 @@ pub async fn play(state: State<'_, Arc<AppState>>, payload: PlayPayload) -> AppR
             })?
             .clone(),
     };
+    log_visual_player_stage("play:source-selected");
 
     let url = state.emby.build_stream_url_for_line(
         &server,
@@ -231,10 +477,32 @@ pub async fn play(state: State<'_, Arc<AppState>>, payload: PlayPayload) -> AppR
         payload.prefer_direct,
         line_id,
     )?;
+    log_visual_player_stage("play:stream-url-ready");
 
     let line = state.emby.pick_line(&server, line_id)?;
+    let play_method = source.local_decode_play_method().to_string();
+    let tracks = source.media_streams.iter().map(stream_to_track).collect();
+    let media_sources = pb
+        .media_sources
+        .iter()
+        .enumerate()
+        .map(|(index, candidate)| media_source_result(candidate, index, &source.id))
+        .collect();
+    let lines = server
+        .lines
+        .iter()
+        .map(|candidate| PlaybackLineOptionResult {
+            id: candidate.id.clone(),
+            name: candidate.name.clone(),
+            base_url: candidate.base_url.clone(),
+            enabled: candidate.enabled,
+            status: candidate.last_status,
+            latency_ms: candidate.last_latency_ms,
+            selected: candidate.id == line.id,
+        })
+        .collect();
 
-    let ua = line
+    let user_agent = line
         .user_agent
         .clone()
         .or_else(|| server.default_user_agent.clone());
@@ -244,6 +512,11 @@ pub async fn play(state: State<'_, Arc<AppState>>, payload: PlayPayload) -> AppR
         "Authorization".into(),
         format!("MediaBrowser Token=\"{}\"", account.access_token),
     ));
+    let mpv_url = state
+        .stream_proxy
+        .register(url.clone(), headers.clone(), user_agent.clone())
+        .await?;
+    log_visual_player_stage("play:stream-proxy-ready");
 
     let mut record_task_id: Option<String> = None;
     let stream_record_path = if payload.record_while_playing {
@@ -291,16 +564,18 @@ pub async fn play(state: State<'_, Arc<AppState>>, payload: PlayPayload) -> AppR
     };
 
     let backend = state.mpv.backend();
+    log_visual_player_stage("play:mpv-load-start");
     backend
         .execute(MpvCommand::Load {
-            url: url.to_string(),
-            headers,
-            user_agent: ua,
+            url: mpv_url.clone(),
+            headers: Vec::new(),
+            user_agent: None,
             start_ms: payload.start_ms,
             stream_record_path,
             autoload_subtitles: true,
         })
         .await?;
+    log_visual_player_stage("play:mpv-load-complete");
 
     let settings = state.config.settings();
     let subtitle_style = SubtitleStyle {
@@ -318,6 +593,7 @@ pub async fn play(state: State<'_, Arc<AppState>>, payload: PlayPayload) -> AppR
     {
         tracing::warn!(target = "player", error = %error, "failed to apply subtitle style");
     }
+    log_visual_player_stage("play:subtitle-style-complete");
 
     *state.current_play_session.lock().await = Some(CurrentPlaySession {
         server_id: server.id.clone(),
@@ -325,12 +601,165 @@ pub async fn play(state: State<'_, Arc<AppState>>, payload: PlayPayload) -> AppR
         item_id: item.id.clone(),
         play_session_id: pb.play_session_id.clone(),
         media_source_id: source.id.clone(),
-        play_method: source.local_decode_play_method().into(),
+        play_method: play_method.clone(),
         line_id: line.id.clone(),
         record_task_id,
     });
+    log_visual_player_stage("play:session-stored");
 
-    Ok(pb.play_session_id)
+    let duration_ms = item.run_time_ticks.map(|ticks| (ticks / 10_000).max(0));
+    let item_id = item.id;
+    let play_session_id = pb.play_session_id;
+    let media_source_count = pb.media_sources.len();
+    let diagnostics = json!({
+        "sourceKind": if source.supports_direct_play == Some(true) { "direct-play" } else { "direct-stream" },
+        "streamKind": "local-proxy",
+        "mediaSourceCount": media_source_count,
+        "serverTranscodingAllowed": false,
+        "line": {
+            "id": line.id.clone(),
+            "name": line.name.clone(),
+            "baseUrl": line.base_url.clone(),
+        },
+    });
+
+    let result = PlaybackSourceResult {
+        item_id,
+        play_session_id,
+        media_source_id: source.id.clone(),
+        play_method,
+        line_id: line.id.clone(),
+        line_name: line.name.clone(),
+        stream_url: mpv_url,
+        duration_ms,
+        tracks,
+        media_sources,
+        lines,
+        headers: Vec::new(),
+        user_agent: None,
+        diagnostics,
+    };
+    log_visual_player_stage("play:return");
+    Ok(result)
+}
+
+fn pick_local_media_source(
+    pb: &PlaybackInfo,
+    media_source_id: Option<&str>,
+) -> AppResult<MediaSource> {
+    match media_source_id.filter(|id| !id.trim().is_empty()) {
+        Some(id) => {
+            let source = pb
+                .media_sources
+                .iter()
+                .find(|source| source.id == id)
+                .ok_or_else(|| AppError::InvalidState(format!("media source not found: {id}")))?;
+            if !source.supports_local_decode() {
+                return Err(AppError::InvalidState(
+                    "已阻止播放：所选媒体源不支持本机直连或本机直流。Hills Lite 不允许服务端解码/转码，请换一个可本机解码的版本或线路。".into(),
+                ));
+            }
+            Ok(source.clone())
+        }
+        None => pb
+            .media_sources
+            .iter()
+            .find(|source| source.supports_local_decode())
+            .cloned()
+            .ok_or_else(|| {
+                AppError::InvalidState(
+                    "已阻止播放：服务端没有返回可本机直连或本机直流的媒体源。Hills Lite 不允许服务端解码/转码，以避免压垮 NAS、路由器或 VPS。".into(),
+                )
+            }),
+    }
+}
+
+fn stream_type(stream: &MediaStream) -> &str {
+    stream.stream_type.as_deref().unwrap_or_default()
+}
+
+fn first_stream<'a>(source: &'a MediaSource, kind: &str) -> Option<&'a MediaStream> {
+    source
+        .media_streams
+        .iter()
+        .find(|stream| stream_type(stream).eq_ignore_ascii_case(kind))
+}
+
+fn stream_to_track(stream: &MediaStream) -> MpvTrackInfo {
+    let kind = if stream_type(stream).eq_ignore_ascii_case("audio") {
+        TrackKind::Audio
+    } else if stream_type(stream).eq_ignore_ascii_case("subtitle") {
+        TrackKind::Subtitle
+    } else {
+        TrackKind::Video
+    };
+    MpvTrackInfo {
+        id: i64::from(stream.index),
+        kind,
+        title: stream
+            .display_title
+            .clone()
+            .or_else(|| stream.title.clone()),
+        lang: stream.language.clone(),
+        codec: stream.codec.clone(),
+        external: Some(stream.is_external),
+        default_track: Some(stream.is_default),
+        forced: Some(stream.is_forced),
+        selected: stream.is_default,
+    }
+}
+
+fn media_source_label(source: &MediaSource, index: usize) -> String {
+    if let Some(path) = source.path.as_ref().filter(|path| !path.trim().is_empty()) {
+        let file_name = path
+            .replace('\\', "/")
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .last()
+            .map(ToString::to_string);
+        return file_name.unwrap_or_else(|| path.clone());
+    }
+    if source.id.trim().is_empty() {
+        format!("媒体源 {}", index + 1)
+    } else {
+        format!("媒体源 {}", source.id)
+    }
+}
+
+fn media_source_result(
+    source: &MediaSource,
+    index: usize,
+    selected_id: &str,
+) -> PlaybackMediaSourceResult {
+    let video = first_stream(source, "video");
+    let audio = first_stream(source, "audio");
+    PlaybackMediaSourceResult {
+        id: if source.id.trim().is_empty() {
+            format!("source-{index}")
+        } else {
+            source.id.clone()
+        },
+        name: None,
+        display_name: media_source_label(source, index),
+        container: source.container.clone(),
+        protocol: None,
+        path: source.path.clone(),
+        bitrate: source.bitrate,
+        size: source.size,
+        width: video.and_then(|stream| stream.width),
+        height: video.and_then(|stream| stream.height),
+        video_codec: video.and_then(|stream| stream.codec.clone()),
+        audio_codec: audio.and_then(|stream| stream.codec.clone()),
+        audio_language: audio.and_then(|stream| stream.language.clone()),
+        supports_direct_play: source.supports_direct_play,
+        supports_direct_stream: source.supports_direct_stream,
+        play_method: source
+            .supports_local_decode()
+            .then(|| source.local_decode_play_method().to_string()),
+        supports_transcoding: source.supports_transcoding,
+        is_remote: None,
+        selected: source.id == selected_id,
+    }
 }
 
 fn sidecar_subtitle_ext_rank(ext: &str) -> Option<usize> {
@@ -1253,7 +1682,14 @@ pub async fn take_screenshot(
 
 #[tauri::command]
 pub async fn get_state(state: State<'_, Arc<AppState>>) -> AppResult<MpvSnapshot> {
-    state.mpv.backend().snapshot().await
+    log_visual_player_stage("get_state:start");
+    let snapshot = state.mpv.backend().snapshot().await;
+    log_visual_player_stage(if snapshot.is_ok() {
+        "get_state:complete"
+    } else {
+        "get_state:error"
+    });
+    snapshot
 }
 
 #[tauri::command]
@@ -1276,8 +1712,25 @@ use crate::mpv::{ParentHandle, PlayerRect};
 
 #[tauri::command]
 pub async fn embed_attach(state: State<'_, Arc<AppState>>, window: tauri::Window) -> AppResult<()> {
+    log_visual_player_stage("embed_attach:start");
     let parent = native_parent_handle(&window)?;
-    state.mpv.bind_embedded(parent)
+    log_visual_player_stage("embed_attach:parent-ready");
+    let mpv = state.mpv.clone();
+    log_visual_player_stage("embed_attach:bind-start");
+    let bind_task = tauri::async_runtime::spawn_blocking(move || mpv.bind_embedded(parent));
+    let result = match tokio::time::timeout(std::time::Duration::from_secs(8), bind_task).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(error)) => Err(AppError::Mpv(format!("embed attach task: {error}"))),
+        Err(_) => Err(AppError::Mpv("embed attach timed out".into())),
+    };
+    log_visual_player_stage(if result.is_ok() {
+        "embed_attach:complete"
+    } else if matches!(&result, Err(AppError::Mpv(message)) if message.contains("timed out")) {
+        "embed_attach:timeout"
+    } else {
+        "embed_attach:error"
+    });
+    result
 }
 
 #[tauri::command]
@@ -1287,12 +1740,24 @@ pub async fn embed_set_rect(state: State<'_, Arc<AppState>>, rect: PlayerRect) -
 
 #[tauri::command]
 pub async fn embed_set_visible(state: State<'_, Arc<AppState>>, visible: bool) -> AppResult<()> {
+    log_visual_player_stage(if visible {
+        "embed_visible:show"
+    } else {
+        "embed_visible:hide"
+    });
     state.mpv.embed_show(visible)
 }
 
 #[tauri::command]
 pub async fn embed_detach(state: State<'_, Arc<AppState>>) -> AppResult<()> {
-    state.mpv.detach_embedded().await
+    log_visual_player_stage("embed_detach:start");
+    let result = state.mpv.detach_embedded().await;
+    log_visual_player_stage(if result.is_ok() {
+        "embed_detach:complete"
+    } else {
+        "embed_detach:error"
+    });
+    result
 }
 
 #[cfg(target_os = "windows")]

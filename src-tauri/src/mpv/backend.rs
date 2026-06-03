@@ -69,9 +69,25 @@ pub struct MpvSnapshot {
     #[serde(default)]
     pub video_params: Option<Value>,
     #[serde(default)]
+    pub video_out_params: Option<Value>,
+    #[serde(default)]
+    pub osd_dimensions: Option<Value>,
+    #[serde(default)]
     pub audio_params: Option<Value>,
     #[serde(default)]
     pub hwdec_current: Option<String>,
+    #[serde(default)]
+    pub keepaspect: Option<bool>,
+    #[serde(default)]
+    pub panscan: Option<f64>,
+    #[serde(default)]
+    pub video_zoom: Option<f64>,
+    #[serde(default)]
+    pub video_scale_x: Option<f64>,
+    #[serde(default)]
+    pub video_scale_y: Option<f64>,
+    #[serde(default)]
+    pub video_aspect_override: Option<f64>,
     #[serde(default)]
     pub container_fps: Option<f64>,
     #[serde(default)]
@@ -86,6 +102,8 @@ pub struct MpvSnapshot {
     pub decoder_frame_drop_count: Option<f64>,
     #[serde(default)]
     pub vo_frame_drop_count: Option<f64>,
+    #[serde(default)]
+    pub backend_diagnostics: Option<Value>,
 }
 
 fn default_sub_scale() -> f64 {

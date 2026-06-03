@@ -57,6 +57,33 @@ declare global {
   }
 }
 
+export function installTauriCompatBridge(): void {
+  if (typeof window === "undefined" || window.hillsLite || !hasTauriRuntime()) return;
+  window.hillsLite = {
+    async invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+      const tauri = await import("@tauri-apps/api/core");
+      return tauri.invoke<T>(command, args);
+    },
+    async listen<T>(
+      event: string,
+      handler: (event: PlatformEvent<T>) => void,
+    ): Promise<UnlistenFn> {
+      const tauri = await import("@tauri-apps/api/event");
+      return tauri.listen<T>(event, handler);
+    },
+    async openFileDialog(
+      options?: OpenFileDialogOptions,
+    ): Promise<string | string[] | null> {
+      const dialog = await import("@tauri-apps/plugin-dialog");
+      return dialog.open(options);
+    },
+    async platformType(): Promise<string> {
+      const os = await import("@tauri-apps/plugin-os");
+      return os.type();
+    },
+  };
+}
+
 const WEB_DEFAULT_SETTINGS: AppSettings = {
   heartbeatIntervalSecs: 180,
   healthCheckIntervalSecs: 60,

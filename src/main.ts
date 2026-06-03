@@ -3,6 +3,7 @@ import { createPinia } from "pinia";
 
 import App from "./App.vue";
 import { router } from "./router";
+import { installTauriCompatBridge } from "./platform";
 
 import "./styles/theme.css";
 import "./styles/glass.css";
@@ -18,6 +19,7 @@ function initialMemoryRoute(): string | null {
 }
 
 const app = createApp(App);
+installTauriCompatBridge();
 app.use(createPinia());
 app.use(router);
 const initialRoute = initialMemoryRoute();

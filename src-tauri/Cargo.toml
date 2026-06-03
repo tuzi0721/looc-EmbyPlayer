@@ -5,6 +5,7 @@ description = "An iOS-styled Emby/Jellyfin desktop client with MPV core."
 authors = ["you"]
 edition = "2021"
 rust-version = "1.77"
+default-run = "emby-player"
 
 [lib]
 name = "emby_player_lib"
@@ -46,7 +47,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # MPV embedded (optional, gated)
-libmpv2 = { version = "4", optional = true }
+libmpv2 = { version = "5", optional = true }
 
 # Window visual effects (Mica/Acrylic on Windows, Vibrancy on macOS)
 window-vibrancy = "0.5"

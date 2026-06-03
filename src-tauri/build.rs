@@ -21,16 +21,25 @@ fn ensure_mpv_windows() -> io::Result<()> {
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").map_err(|e| io::Error::other(e))?);
     let bundled = manifest_dir.join("resources").join("mpv");
     let mpv_exe = bundled.join("mpv.exe");
+    let mpv_lib = bundled.join("mpv.lib");
 
     println!("cargo:rerun-if-changed=resources/mpv/mpv.exe");
     println!("cargo:rerun-if-changed=resources/mpv/libmpv-2.dll");
+    println!("cargo:rerun-if-changed=resources/mpv/mpv.lib");
     println!("cargo:rerun-if-changed=resources/mpv/d3dcompiler_43.dll");
     println!("cargo:rerun-if-changed=resources/mpv/mpv/fonts.conf");
+    println!("cargo:rustc-link-search=native={}", bundled.display());
 
     if !mpv_exe.is_file() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
             format!("bundled mpv.exe missing: {}", mpv_exe.display()),
+        ));
+    }
+    if !mpv_lib.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("MSVC mpv import library missing: {}", mpv_lib.display()),
         ));
     }
 
@@ -42,9 +51,23 @@ fn ensure_mpv_windows() -> io::Result<()> {
                 fs::remove_dir_all(&dest)?;
             }
             copy_tree(&bundled, &dest)?;
+            copy_runtime_dll(&bundled, target_dir, "libmpv-2.dll")?;
+            copy_runtime_dll(&bundled, target_dir, "d3dcompiler_43.dll")?;
         }
     }
 
+    Ok(())
+}
+
+fn copy_runtime_dll(src_dir: &Path, dest_dir: &Path, file_name: &str) -> io::Result<()> {
+    let from = src_dir.join(file_name);
+    if !from.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("runtime DLL missing: {}", from.display()),
+        ));
+    }
+    fs::copy(&from, dest_dir.join(file_name))?;
     Ok(())
 }
 

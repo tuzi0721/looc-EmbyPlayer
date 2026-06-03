@@ -1,0 +1,352 @@
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
+
+use dashmap::DashMap;
+use futures::StreamExt;
+use reqwest::{
+    header::{
+        HeaderName, HeaderValue, ACCEPT_ENCODING, ACCEPT_RANGES, AUTHORIZATION, CONTENT_LENGTH,
+        CONTENT_RANGE, CONTENT_TYPE, RANGE, USER_AGENT,
+    },
+    Client, Method, StatusCode, Url,
+};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
+};
+use uuid::Uuid;
+
+use crate::error::{AppError, AppResult};
+
+const MAX_HEADER_BYTES: usize = 16 * 1024;
+const ROUTE_TTL: Duration = Duration::from_secs(3 * 60 * 60);
+
+#[derive(Clone)]
+pub struct StreamProxy {
+    inner: Arc<StreamProxyInner>,
+}
+
+struct StreamProxyInner {
+    client: Client,
+    routes: DashMap<String, ProxyRoute>,
+    listener_started: AtomicBool,
+    addr: parking_lot::Mutex<Option<SocketAddr>>,
+}
+
+#[derive(Clone)]
+struct ProxyRoute {
+    url: Url,
+    headers: Vec<(String, String)>,
+    user_agent: Option<String>,
+    expires_at: Instant,
+}
+
+impl StreamProxy {
+    pub fn new() -> AppResult<Self> {
+        let client = Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .pool_max_idle_per_host(8)
+            .no_gzip()
+            .no_brotli()
+            .build()?;
+        Ok(Self {
+            inner: Arc::new(StreamProxyInner {
+                client,
+                routes: DashMap::new(),
+                listener_started: AtomicBool::new(false),
+                addr: parking_lot::Mutex::new(None),
+            }),
+        })
+    }
+
+    pub async fn register(
+        &self,
+        url: Url,
+        headers: Vec<(String, String)>,
+        user_agent: Option<String>,
+    ) -> AppResult<String> {
+        let addr = self.ensure_started().await?;
+        self.prune_expired();
+        let id = Uuid::new_v4().simple().to_string();
+        self.inner.routes.insert(
+            id.clone(),
+            ProxyRoute {
+                url,
+                headers,
+                user_agent,
+                expires_at: Instant::now() + ROUTE_TTL,
+            },
+        );
+        Ok(format!("http://{addr}/stream/{id}"))
+    }
+
+    pub fn clear(&self) {
+        self.inner.routes.clear();
+    }
+
+    fn prune_expired(&self) {
+        let now = Instant::now();
+        self.inner.routes.retain(|_, route| route.expires_at > now);
+    }
+
+    async fn ensure_started(&self) -> AppResult<SocketAddr> {
+        if let Some(addr) = *self.inner.addr.lock() {
+            return Ok(addr);
+        }
+
+        if self
+            .inner
+            .listener_started
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
+            let addr = listener.local_addr()?;
+            *self.inner.addr.lock() = Some(addr);
+            let inner = self.inner.clone();
+            tokio::spawn(async move {
+                accept_loop(inner, listener).await;
+            });
+            return Ok(addr);
+        }
+
+        let started = Instant::now();
+        loop {
+            if let Some(addr) = *self.inner.addr.lock() {
+                return Ok(addr);
+            }
+            if started.elapsed() > Duration::from_secs(2) {
+                return Err(AppError::InvalidState(
+                    "stream proxy did not become ready".into(),
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+}
+
+async fn accept_loop(inner: Arc<StreamProxyInner>, listener: TcpListener) {
+    loop {
+        match listener.accept().await {
+            Ok((stream, _)) => {
+                let inner = inner.clone();
+                tokio::spawn(async move {
+                    if let Err(error) = handle_connection(inner, stream).await {
+                        tracing::debug!(target = "stream-proxy", error = %error, "proxy request ended");
+                    }
+                });
+            }
+            Err(error) => {
+                tracing::warn!(target = "stream-proxy", error = %error, "proxy accept failed");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    }
+}
+
+async fn handle_connection(inner: Arc<StreamProxyInner>, mut stream: TcpStream) -> AppResult<()> {
+    let request = match read_request(&mut stream).await {
+        Ok(request) => request,
+        Err(error) => {
+            let _ = write_simple_response(
+                &mut stream,
+                StatusCode::BAD_REQUEST,
+                "bad request",
+                error.to_string().as_bytes(),
+            )
+            .await;
+            return Err(error);
+        }
+    };
+
+    if request.method != "GET" && request.method != "HEAD" {
+        write_simple_response(
+            &mut stream,
+            StatusCode::METHOD_NOT_ALLOWED,
+            "method not allowed",
+            b"",
+        )
+        .await?;
+        return Ok(());
+    }
+
+    let Some(id) = request.path.strip_prefix("/stream/") else {
+        write_simple_response(&mut stream, StatusCode::NOT_FOUND, "not found", b"").await?;
+        return Ok(());
+    };
+    let id = id.split('?').next().unwrap_or(id);
+    let Some(route) = inner.routes.get(id).map(|route| route.clone()) else {
+        write_simple_response(&mut stream, StatusCode::NOT_FOUND, "not found", b"").await?;
+        return Ok(());
+    };
+    if route.expires_at <= Instant::now() {
+        inner.routes.remove(id);
+        write_simple_response(&mut stream, StatusCode::NOT_FOUND, "not found", b"").await?;
+        return Ok(());
+    }
+
+    let mut upstream = inner.client.request(Method::GET, route.url.clone());
+    upstream = upstream.header(ACCEPT_ENCODING, "identity");
+    if let Some(ua) = route
+        .user_agent
+        .as_deref()
+        .filter(|ua| !ua.trim().is_empty())
+    {
+        upstream = upstream.header(USER_AGENT, ua);
+    }
+    for (name, value) in &route.headers {
+        if name.eq_ignore_ascii_case("host") {
+            continue;
+        }
+        let Ok(header_name) = HeaderName::from_bytes(name.as_bytes()) else {
+            continue;
+        };
+        let Ok(header_value) = HeaderValue::from_str(value) else {
+            continue;
+        };
+        upstream = upstream.header(header_name, header_value);
+    }
+    if let Some(range) = request.headers.get("range") {
+        upstream = upstream.header(RANGE, range);
+    }
+
+    let response = match upstream.send().await {
+        Ok(response) => response,
+        Err(error) => {
+            write_simple_response(
+                &mut stream,
+                StatusCode::BAD_GATEWAY,
+                "bad gateway",
+                b"upstream failed",
+            )
+            .await?;
+            return Err(AppError::Network(error));
+        }
+    };
+
+    write_upstream_response(&mut stream, response, request.method == "HEAD").await
+}
+
+#[derive(Debug)]
+struct ProxyRequest {
+    method: String,
+    path: String,
+    headers: HashMap<String, String>,
+}
+
+async fn read_request(stream: &mut TcpStream) -> AppResult<ProxyRequest> {
+    let mut buf = Vec::with_capacity(1024);
+    let mut chunk = [0_u8; 512];
+    loop {
+        let n = stream.read(&mut chunk).await?;
+        if n == 0 {
+            return Err(AppError::InvalidState("empty proxy request".into()));
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
+        if buf.len() > MAX_HEADER_BYTES {
+            return Err(AppError::InvalidState("proxy request too large".into()));
+        }
+    }
+
+    let text = String::from_utf8_lossy(&buf);
+    let mut lines = text.split("\r\n");
+    let first = lines
+        .next()
+        .ok_or_else(|| AppError::InvalidState("missing request line".into()))?;
+    let mut parts = first.split_whitespace();
+    let method = parts
+        .next()
+        .ok_or_else(|| AppError::InvalidState("missing request method".into()))?
+        .to_string();
+    let path = parts
+        .next()
+        .ok_or_else(|| AppError::InvalidState("missing request path".into()))?
+        .to_string();
+    let mut headers = HashMap::new();
+    for line in lines {
+        if line.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = line.split_once(':') {
+            headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
+        }
+    }
+    Ok(ProxyRequest {
+        method,
+        path,
+        headers,
+    })
+}
+
+async fn write_upstream_response(
+    stream: &mut TcpStream,
+    response: reqwest::Response,
+    head_only: bool,
+) -> AppResult<()> {
+    let status = response.status();
+    let reason = status.canonical_reason().unwrap_or("ok");
+    let mut head = format!("HTTP/1.1 {} {}\r\n", status.as_u16(), reason);
+    for name in [
+        CONTENT_TYPE,
+        CONTENT_LENGTH,
+        CONTENT_RANGE,
+        ACCEPT_RANGES,
+        AUTHORIZATION,
+    ] {
+        if name == AUTHORIZATION {
+            continue;
+        }
+        if let Some(value) = response.headers().get(&name) {
+            if let Ok(value) = value.to_str() {
+                head.push_str(name.as_str());
+                head.push_str(": ");
+                head.push_str(value);
+                head.push_str("\r\n");
+            }
+        }
+    }
+    head.push_str("Connection: close\r\n\r\n");
+    stream.write_all(head.as_bytes()).await?;
+    if head_only {
+        stream.shutdown().await?;
+        return Ok(());
+    }
+
+    let mut body = response.bytes_stream();
+    while let Some(chunk) = body.next().await {
+        let chunk = chunk?;
+        if stream.write_all(&chunk).await.is_err() {
+            break;
+        }
+    }
+    let _ = stream.shutdown().await;
+    Ok(())
+}
+
+async fn write_simple_response(
+    stream: &mut TcpStream,
+    status: StatusCode,
+    reason: &str,
+    body: &[u8],
+) -> AppResult<()> {
+    let head = format!(
+        "HTTP/1.1 {} {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        status.as_u16(),
+        reason,
+        body.len()
+    );
+    stream.write_all(head.as_bytes()).await?;
+    stream.write_all(body).await?;
+    let _ = stream.shutdown().await;
+    Ok(())
+}

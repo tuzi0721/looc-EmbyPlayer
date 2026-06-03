@@ -94,6 +94,14 @@ function parseTrackKind(value) {
   return null;
 }
 
+function useReparentEmbed() {
+  return (
+    process.env.HILLS_ELECTRON_MPV_WID !== "0" &&
+    process.env.HILLS_ELECTRON_MPV_NATIVE_CHILD !== "0" &&
+    process.env.HILLS_ELECTRON_MPV_REPARENT !== "0"
+  );
+}
+
 function numberFrom(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -170,6 +178,10 @@ export class MpvController {
     return Boolean(this.child && !this.child.killed && this.socket && !this.socket.destroyed);
   }
 
+  get processId() {
+    return this.child?.pid ?? null;
+  }
+
   async ensureStarted() {
     if (this.isRunning()) return;
     if (!this.starting) {
@@ -244,7 +256,7 @@ export class MpvController {
     ];
     if (this.embedWindowHandle) {
       args.push(`--wid=${this.embedWindowHandle}`);
-      args.push("--force-window=no");
+      args.push("--force-window=yes");
       if (process.env.HILLS_ELECTRON_MPV_NATIVE_CHILD === "1") {
         args.push("--vo=direct3d");
       } else {
@@ -257,9 +269,13 @@ export class MpvController {
       args.push("--background-color=#FF000000");
       args.push("--d3d11-flip=no");
     } else {
-      args.push("--force-window=yes");
+      const reparentEmbed = useReparentEmbed();
+      args.push(reparentEmbed ? "--force-window=immediate" : "--force-window=yes");
       args.push("--no-border");
-      args.push("--ontop=yes");
+      if (!reparentEmbed) args.push("--ontop=yes");
+      if (reparentEmbed) {
+        args.push(`--vo=${process.env.HILLS_ELECTRON_MPV_REPARENT_VO?.trim() || "direct3d"}`);
+      }
       args.push("--d3d11-flip=no");
       args.push("--no-osc");
       args.push("--cursor-autohide=always");
@@ -267,6 +283,8 @@ export class MpvController {
       if (this.overlayWindowRect) {
         const rect = this.overlayWindowRect;
         args.push(`--geometry=${rect.width}x${rect.height}+${rect.x}+${rect.y}`);
+      } else if (reparentEmbed) {
+        args.push("--geometry=320x180+-32000+-32000");
       }
     }
     if (this.logDir) {
@@ -274,14 +292,16 @@ export class MpvController {
       args.push(`--log-file=${path.join(this.logDir, "mpv.log")}`);
     }
 
-    if (settings.hardwareDecoding) args.push("--hwdec=auto-safe");
+    const hwdecOverride = process.env.HILLS_ELECTRON_MPV_HWDEC?.trim();
+    if (hwdecOverride) args.push(`--hwdec=${hwdecOverride}`);
+    else if (settings.hardwareDecoding) args.push("--hwdec=auto-safe");
     if ((settings.mpvCacheMb ?? 0) > 0) {
       args.push("--cache=yes");
       args.push(`--demuxer-max-bytes=${settings.mpvCacheMb}MiB`);
     }
 
     this.child = spawn(detected.path, args, {
-      windowsHide: true,
+      windowsHide: !useReparentEmbed(),
       stdio: "ignore",
     });
     this.child.once("exit", () => {

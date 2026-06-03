@@ -10,8 +10,15 @@ const forceNativeMpv = process.env.HILLS_REAL_NATIVE_MPV === "1";
 const remotePort = process.env.HILLS_SMOKE_CDP_PORT
   ? Number(process.env.HILLS_SMOKE_CDP_PORT)
   : 9400 + Math.floor(Math.random() * 500);
+const appMode = process.env.HILLS_REAL_APP_MODE ?? "electron";
+const commandOnly = process.env.HILLS_REAL_COMMAND_ONLY === "1";
+const isTauriMode = appMode.startsWith("tauri");
+const appExe = process.env.HILLS_REAL_APP_EXE ? path.resolve(process.env.HILLS_REAL_APP_EXE) : null;
 const tmpDir = path.join(os.tmpdir(), `hills-lite-real-visual-${Date.now()}`);
 const userDataDir = path.join(tmpDir, "user-data");
+const appDataDir = path.join(tmpDir, "app-data");
+const localAppDataDir = path.join(tmpDir, "local-app-data");
+const webviewDataDir = path.join(tmpDir, "webview2-data");
 const screenshotsDir = path.join(tmpDir, "screenshots");
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const sensitiveValues = new Set();
@@ -53,6 +60,21 @@ function readInput() {
   if (envValues.every((value) => typeof value === "string" && value.length > 0)) {
     return envValues;
   }
+  const inputFile = process.env.HILLS_REAL_INPUT_FILE;
+  if (inputFile) {
+    try {
+      const values = fs.readFileSync(inputFile, "utf8").split(/\r?\n/).map((line) => line.trim());
+      return [values[0], values[1], values[2], values[3]];
+    } finally {
+      if (process.env.HILLS_REAL_INPUT_FILE_KEEP !== "1") {
+        try {
+          fs.rmSync(inputFile, { force: true });
+        } catch {
+          // Best-effort cleanup; the script must still report the real failure.
+        }
+      }
+    }
+  }
   const values = fs.readFileSync(0, "utf8").split(/\r?\n/).map((line) => line.trim());
   return [values[0], values[1], values[2], values[3]];
 }
@@ -70,6 +92,58 @@ function run(command, args, options = {}) {
   return result;
 }
 
+function tailTextFile(filePath, maxChars = 4000) {
+  try {
+    const text = fs.readFileSync(filePath, "utf8");
+    return text.slice(Math.max(0, text.length - maxChars));
+  } catch {
+    return null;
+  }
+}
+
+function netstatLinesForPort(port) {
+  const result = spawnSync("netstat", ["-ano"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  const text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  return text.split(/\r?\n/).filter((line) => line.includes(`:${port}`)).slice(0, 12);
+}
+
+function tasklistImageCount(imageName) {
+  if (process.platform !== "win32") return null;
+  const result = spawnSync("tasklist", ["/FI", `IMAGENAME eq ${imageName}`, "/FO", "CSV"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  const text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  return (text.match(new RegExp(`(^|\\n)"?${imageName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "gi")) ?? []).length;
+}
+
+function earlyCdpDiagnostics(child, childError, stdout, stderr) {
+  const crashLog = path.join(localAppDataDir, "EmbyPlayer", "crash.log");
+  const visualSmokeLog = path.join(localAppDataDir, "EmbyPlayer", "visual-smoke.log");
+  return {
+    tmpDir,
+    remotePort,
+    webviewDataDir,
+    child: {
+      pid: child?.pid ?? null,
+      exitCode: child?.exitCode ?? null,
+      signalCode: child?.signalCode ?? null,
+      killed: child?.killed ?? null,
+      error: childError,
+    },
+    portLines: netstatLinesForPort(remotePort),
+    stdout,
+    stderr,
+    visualSmokeLog: tailTextFile(visualSmokeLog),
+    crashLog: tailTextFile(crashLog),
+  };
+}
+
 async function ensureDevServer() {
   try {
     const response = await fetch(devServerUrl);
@@ -81,7 +155,7 @@ async function ensureDevServer() {
 }
 
 async function getTargets() {
-  for (let index = 0; index < 90; index += 1) {
+  for (let index = 0; index < 240; index += 1) {
     try {
       const response = await fetch(`http://127.0.0.1:${remotePort}/json`);
       if (response.ok) return response.json();
@@ -91,6 +165,58 @@ async function getTargets() {
     await wait(250);
   }
   throw new Error("CDP target timeout");
+}
+
+function summarizePageTargets(targets) {
+  return targets.filter((item) => item.type === "page").map((item) => ({
+    id: item.id ?? null,
+    title: item.title ?? null,
+    url: item.url ?? null,
+    hasWebSocket: Boolean(item.webSocketDebuggerUrl),
+  }));
+}
+
+function selectPageTarget(targets) {
+  const devServerAlternates = [
+    devServerUrl,
+    devServerUrl.replace("127.0.0.1", "localhost"),
+    devServerUrl.replace("localhost", "127.0.0.1"),
+  ];
+  const pages = targets.filter((item) => item.type === "page");
+  const devTarget = pages.find((item) => devServerAlternates.some((prefix) => item.url?.startsWith(prefix)));
+  const releaseTarget = pages.find((item) => {
+    const url = item.url ?? "";
+    return item.webSocketDebuggerUrl && url && url !== "about:blank" && !url.startsWith("devtools://");
+  });
+  return devTarget ?? releaseTarget ?? pages.find((item) => item.webSocketDebuggerUrl) ?? null;
+}
+
+async function getPageTarget(initialTargets = []) {
+  let lastPages = summarizePageTargets(initialTargets);
+  let target = selectPageTarget(initialTargets);
+  if (isTauriMode && target?.webSocketDebuggerUrl) {
+    return { target, pages: lastPages };
+  }
+  if (target?.webSocketDebuggerUrl && target.url !== "about:blank") {
+    return { target, pages: lastPages };
+  }
+  for (let index = 0; index < 80; index += 1) {
+    let targets;
+    try {
+      targets = await getTargets();
+    } catch (error) {
+      if (target?.webSocketDebuggerUrl) return { target, pages: lastPages, requeryError: error.message };
+      throw error;
+    }
+    lastPages = summarizePageTargets(targets);
+    target = selectPageTarget(targets) ?? target;
+    if (target?.webSocketDebuggerUrl && target.url !== "about:blank") return { target, pages: lastPages };
+    await wait(250);
+  }
+  return {
+    target,
+    pages: lastPages,
+  };
 }
 
 async function cdpMessageText(event) {
@@ -363,6 +489,299 @@ function playbackAspectEvidence(metrics) {
   };
 }
 
+async function bridgeInvoke(ws, command, args = {}, timeoutMs = 30000) {
+  const result = await cdpEvalAfterContextReset(ws, `
+    (async () => {
+      const invoke = window.hillsLite?.invoke?.bind(window.hillsLite);
+      if (!invoke) return { ok: false, error: "window.hillsLite.invoke missing" };
+      const timeout = new Promise((resolve) => setTimeout(() => resolve({ __timeout: true }), ${Number(timeoutMs)}));
+      return Promise.race([
+        invoke(${JSON.stringify(command)}, ${JSON.stringify(args)})
+          .then((value) => ({ ok: true, value }))
+          .catch((error) => ({ ok: false, error: error?.message ?? String(error) })),
+        timeout,
+      ]);
+    })()
+  `);
+  if (result?.__timeout) throw new Error(`${command} timed out in page bridge`);
+  if (!result?.ok) throw new Error(`${command} failed: ${result?.error ?? "unknown error"}`);
+  return result.value;
+}
+
+async function pushRoute(ws, route, timeoutMs = 10000) {
+  const result = await cdpEvalAfterContextReset(ws, `
+    (async () => {
+      const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+      if (!appRouter) return { ok: false, error: "mounted Vue router not found" };
+      const timeout = new Promise((resolve) => setTimeout(() => resolve({ __timeout: true }), ${Number(timeoutMs)}));
+      return Promise.race([
+        appRouter.push(${JSON.stringify(route)})
+          .then(() => ({ ok: true, route: location.hash || location.pathname }))
+          .catch((error) => ({ ok: false, error: error?.message ?? String(error) })),
+        timeout,
+      ]);
+    })()
+  `);
+  if (result?.__timeout) throw new Error(`router push timed out: ${route}`);
+  if (!result?.ok) throw new Error(`router push failed: ${result?.error ?? "unknown error"}`);
+  return result;
+}
+
+async function setupRealAccountCommandOnly(ws) {
+  stage("setup-bridge-ready-start");
+  const ready = await cdpEvalAfterContextReset(ws, `
+    (async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      let last = null;
+      for (let index = 0; index < 80; index += 1) {
+        last = {
+          hasBridge: Boolean(window.hillsLite?.invoke),
+          hasRouter: Boolean(document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router),
+          readyState: document.readyState,
+          route: location.hash || location.pathname,
+          href: location.href,
+          appHtmlLength: document.querySelector("#app")?.innerHTML?.length ?? null,
+          title: document.title,
+        };
+        if (last.hasBridge && last.hasRouter) return last;
+        await wait(250);
+      }
+      return last;
+    })()
+  `);
+  stage("setup-bridge-ready-complete", ready);
+  if (!ready?.hasBridge) throw new Error("window.hillsLite.invoke missing");
+  if (!ready?.hasRouter) throw new Error("mounted Vue router not found");
+
+  stage("setup-settings-start");
+  await bridgeInvoke(ws, "update_settings", { patch: { theme: "light", mpvBackend: "embedded" } });
+  const currentSettings = await bridgeInvoke(ws, "get_settings");
+  if (isTauriMode && currentSettings.mpvBackend !== "embedded") {
+    throw new Error("Tauri real smoke requires embedded mpv backend");
+  }
+  stage("setup-settings-complete", { mpvBackend: currentSettings.mpvBackend });
+
+  const lines = [
+    { id: "real-line-1", name: "Line 1", baseUrl: line1, userAgent: null, headers: [], priority: 0, enabled: true },
+    { id: "real-line-2", name: "Line 2", baseUrl: line2, userAgent: null, headers: [], priority: 1, enabled: true },
+  ];
+
+  let detected = null;
+  let detectError = null;
+  stage("setup-detect-start");
+  try {
+    detected = await bridgeInvoke(ws, "detect_server", { payload: { defaultUserAgent: null, lines } }, 30000);
+  } catch (error) {
+    detectError = error instanceof Error ? error.message : String(error);
+  }
+  stage("setup-detect-complete", {
+    detected: Boolean(detected),
+    kind: detected?.kind ?? null,
+    winningLineId: detected?.winningLineId ?? null,
+    detectError: detectError ? redactSensitiveText(detectError) : null,
+  });
+
+  stage("setup-add-server-start");
+  const server = await bridgeInvoke(ws, "add_server", {
+    payload: {
+      name: detected?.serverName || "Real Visual Smoke",
+      kind: detected?.kind || "emby",
+      activeLineId: detected?.winningLineId || "real-line-1",
+      defaultUserAgent: null,
+      lines,
+    },
+  });
+  stage("setup-add-server-complete", { serverIdPresent: Boolean(server?.id) });
+
+  stage("setup-login-start");
+  const login = await bridgeInvoke(ws, "login", {
+    payload: { serverId: server.id, username, password },
+  }, 30000);
+  const accounts = await bridgeInvoke(ws, "list_accounts");
+  stage("setup-login-complete", {
+    accountCount: Array.isArray(accounts) ? accounts.length : null,
+    winningLineId: login?.winningLineId ?? null,
+  });
+
+  stage("setup-route-home-start");
+  await pushRoute(ws, "/home");
+  stage("setup-route-home-complete");
+
+  const heroFields = "PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo,RunTimeTicks,CommunityRating,OfficialRating,ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,ParentLogoItemId,ParentLogoImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag";
+  const imageParams = [
+    ["EnableUserData", "true"],
+    ["EnableImages", "true"],
+    ["ImageTypeLimit", "4"],
+    ["EnableImageTypes", "Primary,Backdrop,Thumb,Logo"],
+  ];
+  const preferVisualHeroItems = (items) => {
+    const visual = items.filter((item) => item.BackdropImageTags?.length || item.ImageTags?.Primary || item.Overview?.trim());
+    return visual.length > 0 ? visual : items;
+  };
+  const listItems = (params, timeoutMs = 30000) => bridgeInvoke(ws, "list_items", { payload: { params } }, timeoutMs);
+
+  stage("setup-views-start");
+  const viewsResp = await bridgeInvoke(ws, "list_views", {}, 30000);
+  stage("setup-views-complete", { viewCount: viewsResp?.Items?.length ?? 0 });
+
+  stage("setup-resume-start");
+  const resumeResp = await bridgeInvoke(ws, "resume_items", {}, 30000);
+  stage("setup-resume-complete", { resumeCount: resumeResp?.Items?.length ?? 0 });
+
+  stage("setup-hero-start");
+  const heroResp = await listItems([
+    ["Recursive", "true"],
+    ["IncludeItemTypes", "Movie,Series"],
+    ["Fields", heroFields],
+    ["SortBy", "DateCreated"],
+    ["SortOrder", "Descending"],
+    ["Limit", "36"],
+    ...imageParams,
+  ]);
+  const heroFallbackResp = (heroResp.Items ?? []).length > 0
+    ? heroResp
+    : await listItems([
+        ["Recursive", "true"],
+        ["IncludeItemTypes", "Movie,Series,Episode"],
+        ["Fields", heroFields],
+        ["SortBy", "DateCreated"],
+        ["SortOrder", "Descending"],
+        ["Limit", "18"],
+        ...imageParams,
+      ]);
+  const views = viewsResp.Items ?? [];
+  const resume = resumeResp.Items ?? [];
+  const heroItems = preferVisualHeroItems(heroFallbackResp.Items ?? []);
+  stage("setup-hero-complete", { heroCount: heroItems.length });
+
+  const mediaFields = "PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks,ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,ParentLogoItemId,ParentLogoImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag";
+  stage("setup-media-start");
+  const mediaResp = await listItems([
+    ["Recursive", "true"],
+    ["IncludeItemTypes", "Movie,Episode"],
+    ["Fields", mediaFields],
+    ["SortBy", "DateCreated"],
+    ["SortOrder", "Descending"],
+    ["Limit", "24"],
+    ["EnableUserData", "true"],
+    ["EnableImages", "true"],
+    ["ImageTypeLimit", "4"],
+    ["EnableImageTypes", "Primary,Backdrop,Thumb,Logo"],
+  ]);
+  stage("setup-media-complete", { mediaCount: mediaResp?.Items?.length ?? 0 });
+
+  stage("setup-series-start");
+  const seriesResp = await listItems([
+    ["Recursive", "true"],
+    ["IncludeItemTypes", "Series"],
+    ["Fields", mediaFields],
+    ["SortBy", "DateCreated"],
+    ["SortOrder", "Descending"],
+    ["Limit", "24"],
+    ["EnableUserData", "true"],
+    ["EnableImages", "true"],
+    ["ImageTypeLimit", "4"],
+    ["EnableImageTypes", "Primary,Backdrop,Thumb,Logo"],
+  ]);
+  stage("setup-series-complete", { seriesCount: seriesResp?.Items?.length ?? 0 });
+
+  const candidates = [
+    ...resume,
+    ...heroItems.filter((item) => item.Type === "Movie" || item.Type === "Episode"),
+    ...(mediaResp.Items ?? []),
+  ];
+  const seriesCandidates = [
+    ...heroItems.filter((item) => item.Type === "Series"),
+    ...(seriesResp.Items ?? []),
+  ];
+  const selected = candidates.find((item) => item?.Id && (item.Type === "Movie" || item.Type === "Episode"));
+  if (!selected) throw new Error("real server has no Movie/Episode candidate for playback smoke");
+  const selectedSeries = seriesCandidates.find((item) => item?.Id && item.Type === "Series") ?? null;
+
+  stage("setup-playback-source-start");
+  const source = await bridgeInvoke(ws, "get_playback_source", {
+    payload: { itemId: selected.Id, startMs: 0 },
+  }, 30000);
+  stage("setup-playback-source-complete", {
+    mediaSourceCount: source.mediaSources?.length ?? 0,
+    playMethod: source.playMethod ?? null,
+  });
+
+  await cdpEvalAfterContextReset(ws, `
+    (() => {
+      window.__hillsRealSmokeSelectedName = ${JSON.stringify(selected.Name ?? "")};
+      window.__hillsRealSmokeSeriesName = ${JSON.stringify(selectedSeries?.Name ?? "")};
+      return true;
+    })()
+  `);
+
+  const selectedMediaSource = source.mediaSources?.find((item) => item.selected) ?? null;
+  const playbackSummary = {
+    playMethod: source.playMethod,
+    mediaSourceCount: source.mediaSources?.length ?? 0,
+    lineCount: source.lines?.length ?? 0,
+    selectedMediaSource: selectedMediaSource ? {
+      container: selectedMediaSource.container ?? null,
+      protocol: selectedMediaSource.protocol ?? null,
+      width: selectedMediaSource.width ?? null,
+      height: selectedMediaSource.height ?? null,
+      videoCodec: selectedMediaSource.videoCodec ?? null,
+      audioCodec: selectedMediaSource.audioCodec ?? null,
+      supportsDirectPlay: selectedMediaSource.supportsDirectPlay ?? null,
+      supportsDirectStream: selectedMediaSource.supportsDirectStream ?? null,
+      playMethod: selectedMediaSource.playMethod ?? null,
+      supportsTranscoding: selectedMediaSource.supportsTranscoding ?? null,
+      isRemote: selectedMediaSource.isRemote ?? null,
+      selected: selectedMediaSource.selected === true,
+    } : null,
+    tracks: {
+      video: (source.tracks ?? []).filter((track) => track.kind === "video").length,
+      audio: (source.tracks ?? []).filter((track) => track.kind === "audio").length,
+      subtitle: (source.tracks ?? []).filter((track) => track.kind === "subtitle").length,
+    },
+  };
+
+  return {
+    detected: detected ? {
+      kind: detected.kind,
+      winningLineId: detected.winningLineId,
+      serverNamePresent: Boolean(detected.serverName),
+      reportStatuses: (detected.reports ?? []).map((report) => ({
+        lineId: report.lineId,
+        status: report.status,
+        kind: report.kind ?? null,
+        latencyPresent: report.latencyMs != null,
+        errorPresent: Boolean(report.error),
+      })),
+    } : null,
+    detectError,
+    accountCount: Array.isArray(accounts) ? accounts.length : 0,
+    viewCount: views.length,
+    resumeCount: resume.length,
+    heroCount: heroItems.length,
+    selected: {
+      id: selected.Id,
+      type: selected.Type,
+      hasOverview: Boolean(selected.Overview),
+      hasBackdrop: Boolean(selected.BackdropImageTags?.length),
+      hasPrimary: Boolean(selected.ImageTags?.Primary),
+      hasParentImage: Boolean(selected.ParentThumbItemId || selected.ParentBackdropItemId || selected.ParentPrimaryImageItemId),
+      nameLength: String(selected.Name ?? "").length,
+    },
+    series: selectedSeries ? {
+      id: selectedSeries.Id,
+      type: selectedSeries.Type,
+      hasOverview: Boolean(selectedSeries.Overview),
+      hasBackdrop: Boolean(selectedSeries.BackdropImageTags?.length),
+      hasPrimary: Boolean(selectedSeries.ImageTags?.Primary),
+      nameLength: String(selectedSeries.Name ?? "").length,
+    } : null,
+    seriesCandidateCount: seriesCandidates.filter((item) => item?.Id && item.Type === "Series").length,
+    playbackSummary,
+    loginWinningLineId: login.winningLineId,
+  };
+}
+
 async function readEmbedState(ws) {
   return cdpEval(ws, `
     (async () => {
@@ -373,21 +792,42 @@ async function readEmbedState(ws) {
 }
 
 async function capturePlaybackNativeLayer(ws, rootPid, name) {
+  if (isTauriMode) {
+    return {
+      embedState: {
+        mode: "embedded",
+        hostKind: "native-child",
+        runtime: appMode,
+      },
+      capture: captureNativeWindowAndAnalyze(rootPid, null, name),
+      usedHandle: false,
+    };
+  }
   const embedState = await readEmbedState(ws).catch((error) => ({
     error: error instanceof Error ? error.message : String(error),
   }));
-  const nativeWindowHandle = embedState?.mpvHostWindowHandle ?? embedState?.hwnd ?? null;
+  if ((embedState?.mode !== "wid" && embedState?.mode !== "reparent") || embedState?.hostKind !== "native-child") {
+    throw new Error(`mpv is not using the native child host: ${embedState?.mode ?? "unknown"}/${embedState?.hostKind ?? "unknown"}`);
+  }
+  const nativeWindowHandle = embedState?.attachedMpvWindowHandle ?? embedState?.hwnd ?? null;
+  if (!nativeWindowHandle) {
+    throw new Error("native child host did not expose a hwnd");
+  }
   return {
     embedState,
-    capture: captureNativeWindowAndAnalyze(rootPid, nativeWindowHandle, name),
-    usedHandle: Boolean(nativeWindowHandle),
+    capture: captureNativeWindowAndAnalyze(rootPid, nativeWindowHandle, name, {
+      ownerWindowHandle: embedState?.hostWindowHandle ?? null,
+    }),
+    usedHandle: true,
   };
 }
 
-function captureNativeWindowAndAnalyze(rootPid, windowHandle, name) {
+function captureNativeWindowAndAnalyze(rootPid, windowHandle, name, options = {}) {
   const pid = Number(rootPid) || 0;
   if (!pid) throw new Error("missing Electron process id for native window capture");
   const hwndValue = windowHandle == null ? "0" : String(windowHandle).replace(/[^\d]/g, "");
+  const ownerHwndValue =
+    options.ownerWindowHandle == null ? "0" : String(options.ownerWindowHandle).replace(/[^\d]/g, "");
   const outputPath = path.join(screenshotsDir, `${name}.png`);
   const script = `
     Add-Type -AssemblyName System.Drawing
@@ -401,6 +841,10 @@ function captureNativeWindowAndAnalyze(rootPid, windowHandle, name) {
         public int Right;
         public int Bottom;
       }
+      public struct POINT {
+        public int X;
+        public int Y;
+      }
       public static class Win32 {
         public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
         [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
@@ -409,8 +853,11 @@ function captureNativeWindowAndAnalyze(rootPid, windowHandle, name) {
         [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
         [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
         [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+        [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
         [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
         [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+        [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT point);
+        [DllImport("user32.dll")] public static extern bool IsChild(IntPtr hWndParent, IntPtr hWnd);
       }
 "@
     $root = ${pid}
@@ -436,6 +883,16 @@ function captureNativeWindowAndAnalyze(rootPid, windowHandle, name) {
     }
 
     $target = $null
+    $ownerRequestedHwnd = ${JSON.stringify(ownerHwndValue || "0")}
+    $ownerHwnd = [IntPtr]::Zero
+    if ($ownerRequestedHwnd -ne "0") {
+      $ownerHwnd = [IntPtr]::new([int64]$ownerRequestedHwnd)
+      $ownerPid = 0
+      [Win32]::GetWindowThreadProcessId($ownerHwnd, [ref]$ownerPid) | Out-Null
+      if (-not $ids.Contains([int]$ownerPid)) {
+        throw "owner window handle $ownerRequestedHwnd belongs to process $ownerPid outside launched process tree $root"
+      }
+    }
     $requestedHwnd = ${JSON.stringify(hwndValue)}
     if ($requestedHwnd -ne "0") {
       $hWnd = [IntPtr]::new([int64]$requestedHwnd)
@@ -504,9 +961,15 @@ function captureNativeWindowAndAnalyze(rootPid, windowHandle, name) {
       }
     }
     $hWnd = [IntPtr]::new([int64]$target.hwnd)
+    if ($ownerHwnd -ne [IntPtr]::Zero) {
+      [Win32]::ShowWindow($ownerHwnd, 9) | Out-Null
+      [Win32]::SetWindowPos($ownerHwnd, [IntPtr](-1), 0, 0, 0, 0, 0x0043) | Out-Null
+      [Win32]::SetForegroundWindow($ownerHwnd) | Out-Null
+      Start-Sleep -Milliseconds 260
+    }
     [Win32]::ShowWindow($hWnd, 5) | Out-Null
-    [Win32]::SetWindowPos($hWnd, [IntPtr](-1), 0, 0, 0, 0, 0x0043) | Out-Null
-    Start-Sleep -Milliseconds 220
+    [Win32]::SetWindowPos($hWnd, [IntPtr](0), 0, 0, 0, 0, 0x0043) | Out-Null
+    Start-Sleep -Milliseconds 260
     $rect = New-Object RECT
     if (-not [Win32]::GetWindowRect($hWnd, [ref]$rect)) {
       throw "failed to read native window rect"
@@ -516,13 +979,29 @@ function captureNativeWindowAndAnalyze(rootPid, windowHandle, name) {
     if ($width -lt 16 -or $height -lt 16) {
       throw "native window has invalid capture bounds $($width)x$($height)"
     }
+    $point = New-Object POINT
+    $point.X = [int]($rect.Left + [Math]::Floor($width / 2))
+    $point.Y = [int]($rect.Top + [Math]::Floor($height / 2))
+    $hit = [Win32]::WindowFromPoint($point)
+    $hitPid = 0
+    if ($hit -ne [IntPtr]::Zero) {
+      [Win32]::GetWindowThreadProcessId($hit, [ref]$hitPid) | Out-Null
+    }
+    if (-not $ids.Contains([int]$hitPid)) {
+      throw "native capture center is covered by process $hitPid outside launched process tree $root"
+    }
+    if ($ownerHwnd -ne [IntPtr]::Zero -and $hit -ne $ownerHwnd -and -not [Win32]::IsChild($ownerHwnd, $hit)) {
+      throw "native capture center is not inside the Hills Lite owner window"
+    }
     $bmp = New-Object System.Drawing.Bitmap($width, $height)
     $gfx = [System.Drawing.Graphics]::FromImage($bmp)
     $gfx.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bmp.Size)
     $bmp.Save(${JSON.stringify(outputPath)}, [System.Drawing.Imaging.ImageFormat]::Png)
     $gfx.Dispose()
     $bmp.Dispose()
-    [Win32]::SetWindowPos($hWnd, [IntPtr](-2), 0, 0, 0, 0, 0x0043) | Out-Null
+    if ($ownerHwnd -ne [IntPtr]::Zero) {
+      [Win32]::SetWindowPos($ownerHwnd, [IntPtr](-2), 0, 0, 0, 0, 0x0043) | Out-Null
+    }
     $length = [Win32]::GetWindowTextLength($hWnd)
     $titleBuilder = New-Object System.Text.StringBuilder([Math]::Max(1, $length + 1))
     [Win32]::GetWindowText($hWnd, $titleBuilder, $titleBuilder.Capacity) | Out-Null
@@ -536,6 +1015,8 @@ function captureNativeWindowAndAnalyze(rootPid, windowHandle, name) {
       y = $rect.Top
       width = $width
       height = $height
+      hitHwnd = $hit.ToInt64()
+      hitProcessId = [int]$hitPid
       screenshotPath = ${JSON.stringify(outputPath)}
     } | ConvertTo-Json -Compress
   `;
@@ -649,12 +1130,31 @@ function metricsExpression() {
       const hero = rect(".hero.hero--cinema");
       const detailHero = rect(".detail .hero");
       const detailTitle = rect(".detail .hero__title");
+      const detailOverview = rect(".overview-block");
+      const detailMediaInfo = rect(".media-info");
       const playerStage = rect(".player__stage");
       const playerBottom = rect(".player__bottom");
       const video = document.querySelector("video");
-      const mpvState = !video && window.hillsLite
-        ? await window.hillsLite.invoke("get_state").catch(() => null)
-        : null;
+      let mpvState = null;
+      let mpvStateTimedOut = false;
+      const withTimeout = (promise, ms) => Promise.race([
+        promise,
+        new Promise((resolve) => setTimeout(() => resolve({ __hillsTimeout: true }), ms)),
+      ]);
+      if (!video && window.hillsLite) {
+        const result = await withTimeout(window.hillsLite.invoke("get_state").catch(() => null), 2500);
+        if (result?.__hillsTimeout) mpvStateTimedOut = true;
+        else mpvState = result;
+      } else if (!video) {
+        try {
+          const { api } = await import("/src/api/index.ts");
+          const result = await withTimeout(api.getState(), 2500);
+          if (result?.__hillsTimeout) mpvStateTimedOut = true;
+          else mpvState = result;
+        } catch {
+          mpvState = null;
+        }
+      }
       const root = document.documentElement;
       const style = getComputedStyle(root);
       const colorAvg = (value) => {
@@ -679,6 +1179,7 @@ function metricsExpression() {
         detailHeroAspect: detailHero ? detailHero.width / detailHero.height : null,
         detailTitle,
         detailTitleClipped: Boolean(detailTitle && (detailTitle.top < -1 || detailTitle.bottom > window.innerHeight + 1)),
+        detailBelowVisible: visibleHeight(detailOverview) + visibleHeight(detailMediaInfo),
         detailPanel: rect(".hero__playback-panel"),
         appSidebarVisible: Boolean(document.querySelector(".app-sidebar")),
         topbarVisible: Boolean(document.querySelector(".topbar")),
@@ -694,6 +1195,7 @@ function metricsExpression() {
           seekBack: rect('[data-control="seek-back"]'),
           fullscreen: rect('[data-control="fullscreen"]'),
         },
+        mpvStateTimedOut,
         htmlVideo: video ? {
           readyState: video.readyState,
           paused: video.paused,
@@ -748,7 +1250,8 @@ async function resizeAndInspect(ws, route, size, name) {
 async function waitForPlaybackVisualReady(ws) {
   let previousPosition = null;
   let lastMetrics = null;
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  const startedAt = Date.now();
+  for (let attempt = 0; attempt < 12; attempt += 1) {
     await wait(250);
     lastMetrics = await cdpEvalAfterContextReset(ws, metricsExpression());
     const state = lastMetrics.htmlVideo ?? lastMetrics.mpvState;
@@ -768,13 +1271,14 @@ async function waitForPlaybackVisualReady(ws) {
     if (htmlReady || (mpvReady && (advancing || attempt >= 8))) {
       return {
         ready: true,
-        waitedMs: (attempt + 1) * 250,
+        waitedMs: Date.now() - startedAt,
         advancing,
         state: {
           durationMs: state?.durationMs ?? 0,
           positionMs: state?.positionMs ?? 0,
           trackCount: state?.trackCount ?? null,
           hasVideoParams: Boolean(lastMetrics.mpvState?.videoParams || lastMetrics.htmlVideo?.videoWidth),
+          mpvStateTimedOut: lastMetrics.mpvStateTimedOut === true,
         },
       };
     }
@@ -782,7 +1286,7 @@ async function waitForPlaybackVisualReady(ws) {
   const state = lastMetrics?.htmlVideo ?? lastMetrics?.mpvState;
   return {
     ready: false,
-    waitedMs: 25000,
+    waitedMs: Date.now() - startedAt,
     advancing: false,
     state: state
       ? {
@@ -790,6 +1294,7 @@ async function waitForPlaybackVisualReady(ws) {
           positionMs: state.positionMs ?? 0,
           trackCount: state.trackCount ?? null,
           hasVideoParams: Boolean(lastMetrics?.mpvState?.videoParams || lastMetrics?.htmlVideo?.videoWidth),
+          mpvStateTimedOut: lastMetrics?.mpvStateTimedOut === true,
         }
       : null,
   };
@@ -812,27 +1317,83 @@ if (!line1 || !line2 || !username || !password) {
   throw new Error("Provide line1, line2, username, password via stdin or HILLS_REAL_* env vars.");
 }
 
-stage("dev-server-check", { devServerUrl, forceNativeMpv });
-await ensureDevServer();
-stage("dev-server-ready");
 await fsp.mkdir(screenshotsDir, { recursive: true });
+await fsp.mkdir(appDataDir, { recursive: true });
+await fsp.mkdir(localAppDataDir, { recursive: true });
+await fsp.mkdir(webviewDataDir, { recursive: true });
 
-const electron = path.resolve("node_modules/electron/dist/electron.exe");
-stage("electron-launch", { remotePort });
-const child = spawn(electron, [`--remote-debugging-port=${remotePort}`, "electron/main.mjs"], {
-  cwd: process.cwd(),
-  env: {
-    ...process.env,
-    HILLS_ELECTRON_DEV_SERVER_URL: devServerUrl,
-    HILLS_ELECTRON_DISABLE_GPU: "1",
-    HILLS_ELECTRON_OPEN_DEVTOOLS: "0",
-    HILLS_ELECTRON_USER_DATA_DIR: userDataDir,
-  },
-  stdio: ["ignore", "pipe", "pipe"],
-  windowsHide: true,
-});
+if (appMode === "electron") {
+  stage("dev-server-check", { devServerUrl, forceNativeMpv, appMode });
+  await ensureDevServer();
+  stage("dev-server-ready");
+} else if (appMode === "tauri-release") {
+  if (!appExe) throw new Error("HILLS_REAL_APP_EXE is required for tauri-release mode");
+} else if (appMode !== "tauri-dev") {
+  throw new Error(`Unsupported HILLS_REAL_APP_MODE: ${appMode}`);
+}
+
+let child;
+if (appMode === "electron") {
+  const electron = path.resolve("node_modules/electron/dist/electron.exe");
+  stage("electron-launch", { remotePort });
+  child = spawn(electron, [`--remote-debugging-port=${remotePort}`, "electron/main.mjs"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      HILLS_ELECTRON_DEV_SERVER_URL: devServerUrl,
+      HILLS_ELECTRON_DISABLE_GPU: process.env.HILLS_ELECTRON_DISABLE_GPU ?? "0",
+      HILLS_ELECTRON_MPV_WID: "1",
+      HILLS_ELECTRON_MPV_NATIVE_CHILD: "1",
+      HILLS_ELECTRON_OPEN_DEVTOOLS: "0",
+      HILLS_ELECTRON_USER_DATA_DIR: userDataDir,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+} else if (appMode === "tauri-dev") {
+  stage("tauri-dev-launch", { remotePort });
+  const command = process.platform === "win32" ? "cmd.exe" : "npm";
+  const args = process.platform === "win32"
+    ? ["/d", "/s", "/c", "npm.cmd run tauri -- dev --features mpv-embedded"]
+    : ["run", "tauri", "--", "dev", "--features", "mpv-embedded"];
+  child = spawn(command, args, {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      APPDATA: appDataDir,
+      LOCALAPPDATA: localAppDataDir,
+      HILLS_TAURI_CDP_PORT: String(remotePort),
+      HILLS_TAURI_WEBVIEW_DATA_DIR: webviewDataDir,
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${remotePort}`,
+      WEBVIEW2_USER_DATA_FOLDER: webviewDataDir,
+      NO_COLOR: "1",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+} else {
+  stage("tauri-release-launch", { remotePort });
+  child = spawn(appExe, [], {
+    cwd: path.dirname(appExe),
+    env: {
+      ...process.env,
+      APPDATA: appDataDir,
+      LOCALAPPDATA: localAppDataDir,
+      HILLS_TAURI_CDP_PORT: String(remotePort),
+      HILLS_TAURI_WEBVIEW_DATA_DIR: webviewDataDir,
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${remotePort}`,
+      WEBVIEW2_USER_DATA_FOLDER: webviewDataDir,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+}
 const electronStdout = [];
 const electronStderr = [];
+let childError = null;
+child.on("error", (error) => {
+  childError = error?.message ?? String(error);
+});
 child.stdout?.on("data", (chunk) => {
   const text = String(chunk).trim();
   if (text) electronStdout.push(text.slice(0, 500));
@@ -845,11 +1406,22 @@ child.stderr?.on("data", (chunk) => {
 let ws;
 try {
   stage("cdp-targets-wait");
-  const targets = await getTargets();
+  let targets;
+  try {
+    targets = await getTargets();
+  } catch (error) {
+    stage("cdp-targets-failed", earlyCdpDiagnostics(child, childError, electronStdout, electronStderr));
+    throw error;
+  }
   stage("cdp-targets-ready", { count: targets.length });
-  const target =
-    targets.find((item) => item.type === "page" && item.url.startsWith(devServerUrl)) ??
-    targets.find((item) => item.type === "page");
+  const selected = await getPageTarget(targets);
+  const target = selected.target;
+  stage("cdp-page-target-selected", {
+    selectedUrl: target?.url ?? null,
+    selectedTitle: target?.title ?? null,
+    requeryError: selected.requeryError ?? null,
+    pages: selected.pages,
+  });
   if (!target?.webSocketDebuggerUrl) throw new Error("page target not found");
 
   stage("cdp-connect");
@@ -874,22 +1446,36 @@ try {
   });
 
   stage("setup-start");
-  const setup = await cdpEval(ws, `
+  let setup;
+  if (commandOnly && isTauriMode) {
+    setup = await setupRealAccountCommandOnly(ws);
+  } else {
+  setup = await cdpEvalAfterContextReset(ws, `
     (async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       await wait(1200);
-      const { api } = await import("/src/api/index.ts");
-      const { useAuthStore } = await import("/src/stores/auth.ts");
-      const { useLibraryStore } = await import("/src/stores/library.ts");
-      const { useServerStore } = await import("/src/stores/server.ts");
-      const { useSettingsStore } = await import("/src/stores/settings.ts");
-      const auth = useAuthStore();
-      const lib = useLibraryStore();
-      const serverStore = useServerStore();
-      const settings = useSettingsStore();
+      const runtimeInvoke = window.hillsLite?.invoke?.bind(window.hillsLite) ?? null;
+      const api = runtimeInvoke
+        ? {
+            getSettings: () => runtimeInvoke("get_settings"),
+            updateSettings: (patch) => runtimeInvoke("update_settings", { patch }),
+            detectServer: (payload) => runtimeInvoke("detect_server", { payload }),
+            addServer: (payload) => runtimeInvoke("add_server", { payload }),
+            login: (payload) => runtimeInvoke("login", { payload }),
+            listAccounts: () => runtimeInvoke("list_accounts"),
+            listViews: () => runtimeInvoke("list_views"),
+            resumeItems: () => runtimeInvoke("resume_items"),
+            listItems: (payload) => runtimeInvoke("list_items", { payload }),
+            getPlaybackSource: (payload) => runtimeInvoke("get_playback_source", { payload }),
+          }
+        : (await import("/src/api/index.ts")).api;
       const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
       if (!appRouter) throw new Error("mounted Vue router not found");
-      await settings.update({ theme: "light" });
+      await api.updateSettings({ theme: "light", mpvBackend: "embedded" });
+      const currentSettings = await api.getSettings();
+      if (${JSON.stringify(appMode === "tauri-release" || appMode === "tauri-dev")} && currentSettings.mpvBackend !== "embedded") {
+        throw new Error("Tauri real smoke requires embedded mpv backend");
+      }
       const lines = [
         { id: "real-line-1", name: "Line 1", baseUrl: ${JSON.stringify(line1)}, userAgent: null, headers: [], priority: 0, enabled: true },
         { id: "real-line-2", name: "Line 2", baseUrl: ${JSON.stringify(line2)}, userAgent: null, headers: [], priority: 1, enabled: true },
@@ -897,21 +1483,62 @@ try {
       let detected = null;
       let detectError = null;
       try {
-        detected = await serverStore.detectServer({ defaultUserAgent: null, lines });
+        detected = await api.detectServer({ defaultUserAgent: null, lines });
       } catch (error) {
         detectError = error?.message ?? String(error);
       }
-      const server = await serverStore.addServer({
+      const server = await api.addServer({
         name: detected?.serverName || "Real Visual Smoke",
         kind: detected?.kind || "emby",
         activeLineId: detected?.winningLineId || "real-line-1",
         defaultUserAgent: null,
         lines,
       });
-      const login = await auth.login({ serverId: server.id, username: ${JSON.stringify(username)}, password: ${JSON.stringify(password)} });
-      lib.reset();
+      const login = await api.login({ serverId: server.id, username: ${JSON.stringify(username)}, password: ${JSON.stringify(password)} });
+      const accounts = await api.listAccounts();
       await appRouter.push("/home");
-      await lib.refreshHome();
+      const heroFields = "PrimaryImageAspectRatio,Overview,ProductionYear,UserData,SeriesInfo,RunTimeTicks,CommunityRating,OfficialRating,ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,ParentLogoItemId,ParentLogoImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag";
+      const imageParams = [
+        ["EnableUserData", "true"],
+        ["EnableImages", "true"],
+        ["ImageTypeLimit", "4"],
+        ["EnableImageTypes", "Primary,Backdrop,Thumb,Logo"],
+      ];
+      const preferVisualHeroItems = (items) => {
+        const visual = items.filter((item) => item.BackdropImageTags?.length || item.ImageTags?.Primary || item.Overview?.trim());
+        return visual.length > 0 ? visual : items;
+      };
+      const [viewsResp, resumeResp, heroResp] = await Promise.all([
+        api.listViews(),
+        api.resumeItems(),
+        api.listItems({
+          params: [
+            ["Recursive", "true"],
+            ["IncludeItemTypes", "Movie,Series"],
+            ["Fields", heroFields],
+            ["SortBy", "DateCreated"],
+            ["SortOrder", "Descending"],
+            ["Limit", "36"],
+            ...imageParams,
+          ],
+        }),
+      ]);
+      const heroFallbackResp = (heroResp.Items ?? []).length > 0
+        ? heroResp
+        : await api.listItems({
+            params: [
+              ["Recursive", "true"],
+              ["IncludeItemTypes", "Movie,Series,Episode"],
+              ["Fields", heroFields],
+              ["SortBy", "DateCreated"],
+              ["SortOrder", "Descending"],
+              ["Limit", "18"],
+              ...imageParams,
+            ],
+          });
+      const views = viewsResp.Items ?? [];
+      const resume = resumeResp.Items ?? [];
+      const heroItems = preferVisualHeroItems(heroFallbackResp.Items ?? []);
       const mediaResp = await api.listItems({
         params: [
           ["Recursive", "true"],
@@ -941,12 +1568,12 @@ try {
         ],
       });
       const candidates = [
-        ...lib.resume,
-        ...lib.heroItems.filter((item) => item.Type === "Movie" || item.Type === "Episode"),
+        ...resume,
+        ...heroItems.filter((item) => item.Type === "Movie" || item.Type === "Episode"),
         ...(mediaResp.Items ?? []),
       ];
       const seriesCandidates = [
-        ...lib.heroItems.filter((item) => item.Type === "Series"),
+        ...heroItems.filter((item) => item.Type === "Series"),
         ...(seriesResp.Items ?? []),
       ];
       const selected = candidates.find((item) => item?.Id && (item.Type === "Movie" || item.Type === "Episode"));
@@ -994,10 +1621,10 @@ try {
           })),
         } : null,
         detectError,
-        accountCount: auth.accounts.length,
-        viewCount: lib.views.length,
-        resumeCount: lib.resume.length,
-        heroCount: lib.heroItems.length,
+        accountCount: accounts.length,
+        viewCount: views.length,
+        resumeCount: resume.length,
+        heroCount: heroItems.length,
         selected: {
           id: selected.Id,
           type: selected.Type,
@@ -1020,7 +1647,8 @@ try {
         loginWinningLineId: login.winningLineId,
       };
     })()
-  `);
+  `, 12);
+  }
   stage("setup-complete", {
     viewCount: setup.viewCount,
     resumeCount: setup.resumeCount,
@@ -1028,6 +1656,163 @@ try {
     mediaSourceCount: setup.playbackSummary?.mediaSourceCount ?? null,
   });
 
+  if (commandOnly) {
+    stage("command-only-start");
+    const playerOpen = await cdpEvalAfterContextReset(ws, `
+      (async () => {
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const timeout = (ms) => new Promise((resolve) => setTimeout(() => resolve({ __timeout: true }), ms));
+        const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+        if (!appRouter) throw new Error("mounted Vue router not found");
+        await appRouter.push(${JSON.stringify(`/player/${setup.selected.id}?start=0`)});
+        await wait(500);
+        const runtimeInvoke = window.hillsLite?.invoke?.bind(window.hillsLite) ?? null;
+        const api = runtimeInvoke
+          ? {
+              getState: () => runtimeInvoke("get_state"),
+              stop: () => runtimeInvoke("stop"),
+              embedSetVisible: (visible) => runtimeInvoke("embed_set_visible", { visible }),
+              embedDetach: () => runtimeInvoke("embed_detach"),
+            }
+          : (await import("/src/api/index.ts")).api;
+        const settle = async (promise, ms) => {
+          const result = await Promise.race([
+            promise.then(() => true, () => false),
+            timeout(ms),
+          ]);
+          return result?.__timeout ? false : result === true;
+        };
+        let lastState = null;
+        let stateError = null;
+        let timedOut = false;
+        let lastSummary = null;
+        const summarizeState = (state) => {
+          const tracks = Array.isArray(state?.tracks) ? state.tracks : [];
+          const videoTracks = tracks.filter((track) => track?.kind === "video");
+          const videoTrackCodecs = videoTracks.map((track) => track?.codec).filter(Boolean);
+          return {
+            durationMs: state?.durationMs ?? 0,
+            positionMs: state?.positionMs ?? 0,
+            paused: state?.paused === true,
+            trackCount: tracks.length,
+            videoTrackCount: videoTracks.length,
+            videoTrackCodecs,
+            videoCodec: state?.videoCodec ?? null,
+            audioCodec: state?.audioCodec ?? null,
+            hasVideoParams: Boolean(state?.videoParams),
+            hasVideoOutParams: Boolean(state?.videoOutParams),
+            hasVideoEvidence: Boolean(
+              state?.videoCodec ||
+              state?.videoParams ||
+              state?.videoOutParams ||
+              videoTrackCodecs.length > 0
+            ),
+            backendDiagnostics: state?.backendDiagnostics ?? null,
+          };
+        };
+        for (let attempt = 0; attempt < 45; attempt += 1) {
+          const result = await Promise.race([
+            api.getState().catch((error) => ({ __error: error?.message ?? String(error) })),
+            timeout(1200),
+          ]);
+          if (result?.__timeout) {
+            timedOut = true;
+            break;
+          }
+          if (result?.__error) {
+            stateError = result.__error;
+          } else if (result) {
+            lastState = result;
+            lastSummary = summarizeState(result);
+            const strictVideoReady = Boolean(
+              lastSummary.durationMs > 0 &&
+              lastSummary.videoTrackCount > 0 &&
+              (lastSummary.hasVideoParams ||
+                lastSummary.hasVideoOutParams ||
+                lastSummary.videoCodec ||
+                lastSummary.positionMs >= 3000)
+            );
+            if (strictVideoReady) break;
+          }
+          await wait(700);
+        }
+        const errorText = document.querySelector(".player__error")?.innerText ?? null;
+        const cleanup = {
+          stop: await settle(api.stop(), 2500),
+          hide: api.embedSetVisible ? await settle(api.embedSetVisible(false), 1500) : null,
+          detach: api.embedDetach ? await settle(api.embedDetach(), 1500) : null,
+        };
+        return {
+          route: location.hash || location.pathname,
+          hasPlayer: Boolean(document.querySelector(".player")),
+          errorText,
+          stateTimedOut: timedOut,
+          stateError,
+          state: lastState ? lastSummary ?? summarizeState(lastState) : null,
+          cleanup,
+        };
+      })()
+    `, 3);
+    const visualSmokeLog = tailTextFile(path.join(localAppDataDir, "EmbyPlayer", "visual-smoke.log"), 6000);
+    const mpvProcessCount = tasklistImageCount("mpv.exe");
+    const backendReachedLoad = /play:mpv-load-start/.test(visualSmokeLog ?? "");
+    const backendCompletedLoad = /play:mpv-load-complete/.test(visualSmokeLog ?? "");
+    const attached = /embed_attach:complete/.test(visualSmokeLog ?? "");
+    const stateReady = Boolean(
+      playerOpen.state &&
+        (playerOpen.state.durationMs ?? 0) > 0 &&
+        (playerOpen.state.videoTrackCount ?? 0) > 0 &&
+        (playerOpen.state.hasVideoParams ||
+          playerOpen.state.hasVideoOutParams ||
+          playerOpen.state.videoCodec ||
+          (playerOpen.state.positionMs ?? 0) >= 3000),
+    );
+    const failures = [];
+    if (!playerOpen.hasPlayer) failures.push("player route did not mount");
+    if (playerOpen.stateTimedOut) failures.push("player get_state timed out");
+    if (playerOpen.errorText) failures.push("player displayed an error");
+    if (!attached) failures.push("embedded host did not attach");
+    if (!backendReachedLoad) failures.push("backend play did not reach mpv load");
+    if (!backendCompletedLoad) failures.push("backend mpv load did not complete");
+    if (!stateReady) failures.push("mpv video state did not become ready");
+    if (!stateReady && playerOpen.state?.backendDiagnostics?.lastError) {
+      failures.push(`mpv diagnostic error: ${playerOpen.state.backendDiagnostics.lastError}`);
+    }
+    if ((mpvProcessCount ?? 0) > 0) failures.push("independent mpv.exe process is running");
+    stage("command-only-complete", {
+      ok: failures.length === 0,
+      failures,
+      mpvProcessCount,
+      stateReady,
+      attached,
+      backendReachedLoad,
+      backendCompletedLoad,
+      backendDiagnostics: playerOpen.state?.backendDiagnostics ?? null,
+    });
+    const output = {
+      ok: failures.length === 0,
+      failures,
+      tmpDir,
+      setup,
+      commandOnly: {
+        playerOpen,
+        mpvProcessCount,
+        attached,
+        backendReachedLoad,
+        backendCompletedLoad,
+        visualSmokeLog,
+      },
+      diagnostics: {
+        electronStdout,
+        electronStderr,
+        pageConsole: pageConsole.slice(-12),
+        pageExceptions,
+      },
+    };
+    const redactedOutput = JSON.parse(redactSensitiveText(JSON.stringify(output)));
+    console.log(JSON.stringify(redactedOutput, null, 2));
+    if (!output.ok) process.exitCode = 1;
+  } else {
   const homeSizes = [
     { width: 1920, height: 1080 },
     { width: 1366, height: 768 },
@@ -1352,6 +2137,7 @@ try {
   stage("player-metrics-captured", {
     hasHtmlVideo: Boolean(playerInitial.htmlVideo),
     hasMpvState: Boolean(playerInitial.mpvState),
+    mpvStateTimedOut: playerInitial.mpvStateTimedOut === true,
   });
   const playerAspectEvidence = playbackAspectEvidence(playerInitial);
   stage("player-aspect-evidence", playerAspectEvidence);
@@ -1366,6 +2152,10 @@ try {
           const video = document.querySelector("video");
           if (video && Number.isFinite(video.duration)) video.currentTime = Math.min(15, Math.max(0, video.duration - 1));
           else if (window.hillsLite) await window.hillsLite.invoke("seek", { payload: { positionMs: 15000 } });
+          else {
+            const { api } = await import("/src/api/index.ts");
+            await api.seek(15000);
+          }
           return true;
         })()
       `);
@@ -1406,6 +2196,10 @@ try {
       (async () => {
         if (document.fullscreenElement && document.exitFullscreen) await document.exitFullscreen();
         else if (window.hillsLite) await window.hillsLite.invoke("set_fullscreen", { enabled: false });
+        else {
+          const { api } = await import("/src/api/index.ts");
+          await api.setFullscreen(false);
+        }
         return true;
       })()
     `);
@@ -1430,6 +2224,9 @@ try {
           await video.play().catch(() => {});
         } else if (window.hillsLite) {
           await window.hillsLite.invoke("seek", { payload: { positionMs: targetMs } });
+        } else {
+          const { api } = await import("/src/api/index.ts");
+          await api.seek(targetMs);
         }
         return true;
       })()
@@ -1513,8 +2310,11 @@ try {
     if (m.detailHero && (Math.abs(m.detailHero.x) > 2 || Math.abs(m.detailHero.y) > 2)) {
       failures.push(`detail ${entry.size.width}x${entry.size.height}: hero not anchored to window origin`);
     }
-    if (m.detailHero && m.detailHero.height < m.viewport.height * 0.88) {
-      failures.push(`detail ${entry.size.width}x${entry.size.height}: hero does not fill viewport`);
+    if (m.detailHero && m.detailHero.height < m.viewport.height * 0.68) {
+      failures.push(`detail ${entry.size.width}x${entry.size.height}: hero is too short for immersive layout`);
+    }
+    if (entry.size.height >= 760 && (m.detailBelowVisible ?? 0) < 32) {
+      failures.push(`detail ${entry.size.width}x${entry.size.height}: below-hero content is not exposed`);
     }
     if (!m.detailTitle) failures.push(`detail ${entry.size.width}x${entry.size.height}: title missing`);
     if (m.detailTitleClipped) failures.push(`detail ${entry.size.width}x${entry.size.height}: title clipped outside viewport`);
@@ -1528,8 +2328,11 @@ try {
     if (m.detailHero && (Math.abs(m.detailHero.x) > 2 || Math.abs(m.detailHero.y) > 2)) {
       failures.push(`series detail ${entry.size.width}x${entry.size.height}: hero not anchored to window origin`);
     }
-    if (m.detailHero && m.detailHero.height < m.viewport.height * 0.88) {
-      failures.push(`series detail ${entry.size.width}x${entry.size.height}: hero does not fill viewport`);
+    if (m.detailHero && m.detailHero.height < m.viewport.height * 0.68) {
+      failures.push(`series detail ${entry.size.width}x${entry.size.height}: hero is too short for immersive layout`);
+    }
+    if (entry.size.height >= 760 && (m.detailBelowVisible ?? 0) < 32) {
+      failures.push(`series detail ${entry.size.width}x${entry.size.height}: below-hero content is not exposed`);
     }
     if (!m.detailTitle) failures.push(`series detail ${entry.size.width}x${entry.size.height}: title missing`);
     if (m.detailTitleClipped) failures.push(`series detail ${entry.size.width}x${entry.size.height}: title clipped outside viewport`);
@@ -1576,6 +2379,20 @@ try {
   if (playerInitial.mpvState && !playerNativeCapture?.capture) {
     failures.push("native mpv playback capture missing; page screenshot is not valid video evidence");
   }
+  if (
+    playerInitial.mpvState &&
+    playerNativeCapture?.embedState?.mode !== "wid" &&
+    playerNativeCapture?.embedState?.mode !== "reparent" &&
+    playerNativeCapture?.embedState?.mode !== "embedded"
+  ) {
+    failures.push(`mpv playback is not using embedded mpv mode: ${playerNativeCapture?.embedState?.mode ?? "unknown"}`);
+  }
+  if (playerInitial.mpvState && playerNativeCapture?.embedState?.hostKind !== "native-child") {
+    failures.push(`mpv playback is not using the native child host: ${playerNativeCapture?.embedState?.hostKind ?? "unknown"}`);
+  }
+  if (playerInitial.mpvState && playerNativeCapture?.embedState?.mode !== "embedded" && playerNativeCapture?.usedHandle !== true) {
+    failures.push("native mpv playback capture did not use the app-owned child hwnd");
+  }
   if (!pixelSampleOk(playerVisiblePixels)) failures.push("player screenshot is visually black/blank");
   if (!playerAspectEvidence.ok) {
     failures.push(
@@ -1608,6 +2425,20 @@ try {
     }
     if (entry.nativeCapture?.error) {
       failures.push(`player ${entry.size.width}x${entry.size.height}: native capture failed: ${entry.nativeCapture.error}`);
+    }
+    if (
+      m.mpvState &&
+      entry.nativeCapture?.embedState?.mode !== "wid" &&
+      entry.nativeCapture?.embedState?.mode !== "reparent" &&
+      entry.nativeCapture?.embedState?.mode !== "embedded"
+    ) {
+      failures.push(`player ${entry.size.width}x${entry.size.height}: mpv is not using embedded mpv mode`);
+    }
+    if (m.mpvState && entry.nativeCapture?.embedState?.hostKind !== "native-child") {
+      failures.push(`player ${entry.size.width}x${entry.size.height}: mpv is not using the native child host`);
+    }
+    if (m.mpvState && entry.nativeCapture?.embedState?.mode !== "embedded" && entry.nativeCapture?.usedHandle !== true) {
+      failures.push(`player ${entry.size.width}x${entry.size.height}: native capture did not use the app-owned child hwnd`);
     }
     if (!pixelSampleOk(entry.visiblePixels)) {
       failures.push(`player ${entry.size.width}x${entry.size.height}: resize screenshot is visually black/blank`);
@@ -1661,6 +2492,7 @@ try {
   const redactedOutput = JSON.parse(redactSensitiveText(JSON.stringify(output)));
   console.log(JSON.stringify(redactedOutput, null, 2));
   if (!output.ok) process.exitCode = 1;
+  }
 } finally {
   ws?.close();
   if (child.exitCode == null && !child.killed) child.kill();

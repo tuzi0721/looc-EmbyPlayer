@@ -134,6 +134,7 @@ fn handle_menu_event(app: &AppHandle, state: &Arc<AppState>, id: &str) {
             let _ = app.emit("nav:goto", "/settings");
         }
         "tray:quit" => {
+            tauri::async_runtime::block_on(state.shutdown_playback());
             app.exit(0);
         }
         other => tracing::debug!(target = "tray", "unknown menu id: {other}"),

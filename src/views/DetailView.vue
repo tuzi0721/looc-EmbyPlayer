@@ -13,7 +13,7 @@ import { useSettingsStore } from "@/stores/settings";
 import type { MediaItem, MediaPerson, MediaSourceInfo, MediaStreamInfo, NameIdPair, UserData } from "@/types/models";
 import { writeTextToClipboard } from "@/utils/clipboard";
 import { filterJavItems } from "@/utils/javFilter";
-import { mediaImageUrl, mediaItemImageUrl, type MediaImageType } from "@/utils/mediaImages";
+import { mediaImageUrl, mediaItemImageUrl, mediaItemImageUrls, type MediaImageType } from "@/utils/mediaImages";
 
 const props = defineProps<{ id: string }>();
 const router = useRouter();
@@ -34,6 +34,7 @@ const userDataUpdating = ref<"favorite" | "played" | null>(null);
 const playNavigating = ref(false);
 const downloadStarting = ref(false);
 const showStudioPopover = ref(false);
+const heroBackdropIndex = ref(0);
 let shareStatusTimer: number | null = null;
 
 const STUDIO_VISIBLE_LIMIT = 3;
@@ -244,7 +245,19 @@ function imageUrl(
   return mediaItemImageUrl(activeServer.value, target, imageType, maxWidth);
 }
 
-const backdropUrl = computed(() => (item.value ? imageUrl(item.value) : null));
+const backdropUrls = computed(() =>
+  item.value ? mediaItemImageUrls(activeServer.value, item.value, "Backdrop", 2200) : [],
+);
+const backdropUrl = computed(() => {
+  const urls = backdropUrls.value;
+  return urls[Math.min(heroBackdropIndex.value, Math.max(0, urls.length - 1))] ?? null;
+});
+
+function onHeroBackdropError() {
+  if (heroBackdropIndex.value < backdropUrls.value.length - 1) {
+    heroBackdropIndex.value += 1;
+  }
+}
 
 const runtimeText = computed(() => {
   const ticks = item.value?.RunTimeTicks ?? 0;
@@ -811,6 +824,12 @@ onBeforeUnmount(() => {
   clearDetailOpenTimer();
 });
 watch(() => props.id, () => void loadDetail());
+watch(
+  () => `${item.value?.Id ?? ""}:${backdropUrls.value.length}`,
+  () => {
+    heroBackdropIndex.value = 0;
+  },
+);
 watch(studioEntries, () => {
   showStudioPopover.value = false;
 });
@@ -1421,11 +1440,15 @@ async function togglePlayed() {
 
     <template v-else-if="item">
       <section class="hero">
-        <div
-          v-if="backdropUrl"
-          class="hero__bg"
-          :style="{ backgroundImage: `url(${backdropUrl})` }"
-        />
+        <div v-if="backdropUrl" class="hero__bg">
+          <img
+            :src="backdropUrl"
+            :alt="item.Name"
+            loading="eager"
+            decoding="async"
+            @error="onHeroBackdropError"
+          />
+        </div>
         <div class="hero__shade" />
 
         <button class="hero__back" aria-label="返回" @click="goBack">
@@ -1924,22 +1947,29 @@ async function togglePlayed() {
 
 .hero {
   position: relative;
-  min-height: 100dvh;
+  min-height: clamp(560px, 74dvh, 840px);
   color: white;
   isolation: isolate;
+  overflow: hidden;
 }
 .hero__bg {
   position: absolute;
   inset: 0;
-  background-size: cover;
-  background-position: center;
+  background: #08080a;
+}
+.hero__bg img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  object-position: center;
 }
 .hero__shade {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(90deg, rgba(10, 10, 12, 0.86) 0%, rgba(10, 10, 12, 0.38) 43%, rgba(10, 10, 12, 0.24) 100%),
-    linear-gradient(0deg, rgba(10, 10, 12, 0.96) 0%, rgba(10, 10, 12, 0.5) 34%, rgba(10, 10, 12, 0.08) 72%);
+    linear-gradient(90deg, rgba(10, 10, 12, 0.82) 0%, rgba(10, 10, 12, 0.3) 43%, rgba(10, 10, 12, 0.14) 100%),
+    linear-gradient(0deg, rgba(10, 10, 12, 0.9) 0%, rgba(10, 10, 12, 0.42) 34%, rgba(10, 10, 12, 0.05) 72%);
 }
 .hero__back {
   position: absolute;
@@ -2481,6 +2511,9 @@ async function togglePlayed() {
 }
 
 @media (max-height: 620px) {
+  .hero {
+    min-height: 100dvh;
+  }
   .hero__body {
     top: 48px;
   }

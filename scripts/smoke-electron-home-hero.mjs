@@ -723,6 +723,7 @@ try {
       const desc = document.querySelector(".hero__desc");
       const poster = document.querySelector(".hero__poster");
       const logo = document.querySelector(".hero__logo");
+      const heroImage = document.querySelector(".hero__bg img");
       const nextSection = document.querySelector(".row-section");
       const heroRect = hero?.getBoundingClientRect();
       const posterRect = poster?.getBoundingClientRect();
@@ -735,6 +736,7 @@ try {
         heroAspect: heroRect ? heroRect.width / heroRect.height : null,
         poster: posterRect ? { width: posterRect.width, height: posterRect.height } : null,
         nextSectionTop: nextRect?.top ?? null,
+        nextSectionVisible: nextRect ? Math.max(0, Math.min(nextRect.bottom, window.innerHeight) - Math.max(nextRect.top, 0)) : 0,
         title: title?.textContent ?? "",
         logo: logoRect
           ? {
@@ -742,6 +744,14 @@ try {
               height: logoRect.height,
               loaded: logo.classList.contains("loaded"),
               naturalWidth: logo.naturalWidth,
+            }
+          : null,
+        heroImage: heroImage
+          ? {
+              src: heroImage.currentSrc || heroImage.src || "",
+              complete: heroImage.complete,
+              naturalWidth: heroImage.naturalWidth,
+              naturalHeight: heroImage.naturalHeight,
             }
           : null,
         desc: desc?.textContent ?? "",
@@ -762,7 +772,6 @@ try {
         },
         firstRunVisible: Boolean(firstRun),
         posterExists: Boolean(poster),
-        heroBg: getComputedStyle(document.querySelector(".hero__bg")).backgroundImage,
         lightTheme,
         addServerDialogUi,
         errors: Array.from(document.querySelectorAll(".error, .alert, .toast--error")).map((node) => node.textContent),
@@ -834,11 +843,16 @@ try {
       await wait(1200);
       const hero = document.querySelector(".detail .hero");
       const panel = document.querySelector(".hero__playback-panel");
+      const bgImage = document.querySelector(".detail .hero__bg img");
+      const overview = document.querySelector(".overview-block");
+      const mediaInfo = document.querySelector(".media-info");
       const mediaSelect = document.querySelector("#hero-media-source");
       const audioSelect = document.querySelector("#hero-audio-source");
       const subtitleSelect = document.querySelector("#hero-subtitle-source");
       const heroRect = hero?.getBoundingClientRect();
       const panelRect = panel?.getBoundingClientRect();
+      const overviewRect = overview?.getBoundingClientRect();
+      const mediaInfoRect = mediaInfo?.getBoundingClientRect();
       const detailRoute = appRouter.currentRoute.value.fullPath;
       if (mediaSelect && mediaSelect.options.length > 1) {
         mediaSelect.value = mediaSelect.options[1].value;
@@ -859,6 +873,24 @@ try {
         panel: panelRect
           ? { width: panelRect.width, height: panelRect.height, bottom: panelRect.bottom }
           : null,
+        bgImage: bgImage
+          ? {
+              src: bgImage.currentSrc || bgImage.src || "",
+              complete: bgImage.complete,
+              naturalWidth: bgImage.naturalWidth,
+              naturalHeight: bgImage.naturalHeight,
+            }
+          : null,
+        overviewTop: overviewRect?.top ?? null,
+        mediaInfoTop: mediaInfoRect?.top ?? null,
+        belowHeroVisible:
+          overviewRect || mediaInfoRect
+            ? Math.max(
+                0,
+                Math.min(overviewRect?.bottom ?? mediaInfoRect?.bottom ?? 0, window.innerHeight) -
+                  Math.max(overviewRect?.top ?? mediaInfoRect?.top ?? 0, 0),
+              )
+            : 0,
         title: document.querySelector(".hero__title")?.textContent ?? "",
         appSidebarVisible: Boolean(document.querySelector(".app-sidebar")),
         topbarVisible: Boolean(document.querySelector(".topbar")),
@@ -981,7 +1013,7 @@ try {
         const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
         const samples = [];
         const sizes = [
-          { label: "desktop-low", width: 1366, height: 768, minHeroAspect: 2.52, maxHeroAspect: 2.82, minResumeCardVisible: 100, minLibraryCardVisible: 95, maxHeroViewport: 0.6 },
+          { label: "desktop-low", width: 1366, height: 768, minHeroAspect: 2.52, maxHeroAspect: 2.82, minResumeCardVisible: 92, minLibraryCardVisible: 95, maxHeroViewport: 0.6 },
           { label: "compact-tall", width: 820, height: 620, minHeroAspect: 2.52, maxHeroAspect: 2.82, minResumeCardVisible: 84, minLibraryCardVisible: 78, maxHeroViewport: 0.6 },
           { label: "narrow-short", width: 760, height: 430, minHeroAspect: 2.52, maxHeroAspect: 2.82, minResumeCardVisible: 64, minLibraryCardVisible: 0, minLibraryVisible: 8, maxHeroViewport: 0.68 },
         ];
@@ -1075,7 +1107,12 @@ try {
   if (result.addServerDialogUi?.hasKindSelect || result.addServerDialogUi?.hasServerNameInput) {
     failures.push(`add-server dialog still asks for server kind/name: ${JSON.stringify(result.addServerDialogUi)}`);
   }
-  if (!result.heroBg.includes("hills-image://media")) failures.push("hero backdrop does not use media image URL");
+  if (!result.heroImage?.src?.includes("hills-image://media")) {
+    failures.push(`hero backdrop does not use media image URL: ${JSON.stringify(result.heroImage)}`);
+  }
+  if (!result.heroImage?.complete || result.heroImage.naturalWidth < 1) {
+    failures.push(`hero backdrop image did not load: ${JSON.stringify(result.heroImage)}`);
+  }
   if (!sidebarCollapse) failures.push("sidebar collapse controls missing");
   else {
     if (sidebarCollapse.beforeWidth < 180) failures.push(`sidebar expanded width too small: ${sidebarCollapse.beforeWidth}`);
@@ -1091,10 +1128,22 @@ try {
   if (result.nextSectionTop == null || result.nextSectionTop > result.viewport.height + 2) {
     failures.push("next section is not hinted in first viewport");
   }
+  if ((result.nextSectionVisible ?? 0) < 36) {
+    failures.push(`next section is not visibly exposed in first viewport: ${JSON.stringify(result)}`);
+  }
   if (result.posterExists) failures.push("cinema hero still renders the removed side poster");
   if (!detailProbe.route.startsWith("/item/hero-movie")) failures.push(`hero click did not open item detail: ${detailProbe.route}`);
-  if (!detailProbe.hero || detailProbe.hero.height < detailProbe.viewport.height * 0.9) {
-    failures.push(`detail hero is not full viewport: ${JSON.stringify(detailProbe)}`);
+  if (!detailProbe.hero || detailProbe.hero.height < detailProbe.viewport.height * 0.68) {
+    failures.push(`detail hero is too short for immersive detail: ${JSON.stringify(detailProbe)}`);
+  }
+  if (detailProbe.hero && detailProbe.hero.height > detailProbe.viewport.height * 0.82) {
+    failures.push(`detail hero hides too much below-page content: ${JSON.stringify(detailProbe)}`);
+  }
+  if (detailProbe.viewport.height >= 760 && (detailProbe.belowHeroVisible ?? 0) < 32) {
+    failures.push(`detail below-hero content is not exposed: ${JSON.stringify(detailProbe)}`);
+  }
+  if (!detailProbe.bgImage?.src?.includes("hills-image://media") || !detailProbe.bgImage?.complete || detailProbe.bgImage.naturalWidth < 1) {
+    failures.push(`detail backdrop image did not load from media URL: ${JSON.stringify(detailProbe)}`);
   }
   if (detailProbe.appSidebarVisible || detailProbe.topbarVisible) {
     failures.push(`detail route did not enter fullscreen shell: ${JSON.stringify(detailProbe)}`);

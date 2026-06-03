@@ -5,6 +5,9 @@ const projectRoot = process.cwd();
 const sourceMpvDir = path.join(projectRoot, "src-tauri", "resources", "mpv");
 const packagedRoot = path.join(projectRoot, "src-tauri", "target", "release");
 const packagedMpvDir = path.join(packagedRoot, "resources", "mpv");
+const tauriConfigPath = path.join(projectRoot, "src-tauri", "tauri.conf.json");
+const distRoot = path.join(projectRoot, "dist");
+const distIndexPath = path.join(distRoot, "index.html");
 
 const requiredRuntimeFiles = new Map([
   ["mpv.exe", 50 * 1024 * 1024],
@@ -42,7 +45,34 @@ function listFiles(root, prefix = "") {
   });
 }
 
-assertFile(path.join(packagedRoot, "emby-player.exe"), "Tauri release executable", 1024 * 1024);
+const releaseExe = assertFile(path.join(packagedRoot, "emby-player.exe"), "Tauri release executable", 1024 * 1024);
+assertFile(path.join(packagedRoot, "electron_mpv_host.exe"), "Electron mpv helper executable", 128 * 1024);
+const config = JSON.parse(fs.readFileSync(tauriConfigPath, "utf8"));
+const configStat = assertFile(tauriConfigPath, "Tauri config", 100);
+const packageStat = assertFile(path.join(projectRoot, "package.json"), "package manifest", 100);
+if (releaseExe.mtimeMs + 1000 < configStat.mtimeMs) {
+  fail("Tauri release executable is older than tauri.conf.json; rebuild with npm.cmd run tauri:build");
+}
+if (releaseExe.mtimeMs + 1000 < packageStat.mtimeMs) {
+  fail("Tauri release executable is older than package.json; rebuild with npm.cmd run tauri:build");
+}
+if (config?.mainBinaryName !== "emby-player") {
+  fail(`tauri.conf.json mainBinaryName must be "emby-player", got ${JSON.stringify(config?.mainBinaryName)}`);
+}
+if (config?.build?.frontendDist !== "../dist") {
+  fail(`tauri.conf.json build.frontendDist must be "../dist", got ${JSON.stringify(config?.build?.frontendDist)}`);
+}
+const distIndexStat = assertFile(distIndexPath, "frontend dist index", 100);
+if (releaseExe.mtimeMs + 1000 < distIndexStat.mtimeMs) {
+  fail("Tauri release executable is older than dist/index.html; rebuild with npm.cmd run tauri:build");
+}
+const distIndex = fs.readFileSync(distIndexPath, "utf8");
+if (!distIndex.includes('<div id="app"></div>')) fail("frontend dist index does not contain the Vue app mount");
+if (!distIndex.includes("./assets/")) fail("frontend dist index does not reference local built assets");
+const distAssetsDir = path.join(distRoot, "assets");
+const distAssets = listFiles(distAssetsDir);
+if (!distAssets.some((file) => /^index-.*\.js$/.test(file))) fail("frontend dist assets do not include a built index js chunk");
+if (!distAssets.some((file) => /^index-.*\.css$/.test(file))) fail("frontend dist assets do not include a built index css chunk");
 
 const sourceFiles = listFiles(sourceMpvDir);
 if (sourceFiles.length === 0) fail("bundled mpv source directory is empty");
@@ -66,5 +96,5 @@ console.log(
   `Tauri package integrity ok: ${sourceFiles.length} bundled mpv files copied to ${path.relative(
     projectRoot,
     packagedMpvDir,
-  )} (${totalMiB} MiB), release executable present.`,
+  )} (${totalMiB} MiB), release executable and frontend dist present.`,
 );

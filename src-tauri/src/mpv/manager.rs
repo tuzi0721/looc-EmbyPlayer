@@ -9,7 +9,7 @@ use crate::mpv::ipc::MpvIpcBackend;
 use crate::mpv::window_host::{ParentHandle, PlayerRect};
 
 #[cfg(feature = "mpv-embedded")]
-use crate::mpv::embedded::{EmbeddedHandle, MpvEmbeddedBackend};
+use crate::mpv::embedded::{log_visual_mpv_event, EmbeddedHandle, MpvEmbeddedBackend};
 
 #[derive(Clone)]
 pub struct MpvManager {
@@ -22,6 +22,8 @@ struct Slot {
     ipc: Option<Arc<MpvIpcBackend>>,
     #[cfg(feature = "mpv-embedded")]
     embedded: Option<Arc<MpvEmbeddedBackend>>,
+    #[cfg(feature = "mpv-embedded")]
+    prefer_embedded: bool,
 }
 
 impl MpvManager {
@@ -44,11 +46,42 @@ impl MpvManager {
     }
 
     pub fn bind_embedded(&self, parent: ParentHandle) -> AppResult<()> {
-        let g = self.inner.read();
         #[cfg(feature = "mpv-embedded")]
-        if let Some(e) = g.embedded.as_ref() {
-            return e.bind(parent);
+        {
+            let (existing, prefer_embedded) = {
+                let g = self.inner.read();
+                (g.embedded.clone(), g.prefer_embedded)
+            };
+            if let Some(e) = existing {
+                log_visual_mpv_event("manager:bind-existing-start");
+                let result = e.bind(parent);
+                log_visual_mpv_event(if result.is_ok() {
+                    "manager:bind-existing-complete"
+                } else {
+                    "manager:bind-existing-error"
+                });
+                return result;
+            }
+            if prefer_embedded {
+                log_visual_mpv_event("manager:lazy-new-start");
+                let embedded = Arc::new(MpvEmbeddedBackend::new()?);
+                log_visual_mpv_event("manager:lazy-new-complete");
+                log_visual_mpv_event("manager:lazy-bind-start");
+                embedded.bind(parent)?;
+                log_visual_mpv_event("manager:lazy-bind-complete");
+                let mut g = self.inner.write();
+                if let Some(existing) = g.embedded.as_ref() {
+                    log_visual_mpv_event("manager:lazy-race-existing-start");
+                    return existing.bind(parent);
+                }
+                g.backend = embedded.clone();
+                g.embedded = Some(embedded);
+                g.ipc = None;
+                log_visual_mpv_event("manager:lazy-installed");
+                return Ok(());
+            }
         }
+        let g = self.inner.read();
         if let Some(ipc) = g.ipc.as_ref() {
             return ipc.bind_embedded(parent);
         }
@@ -88,7 +121,7 @@ impl MpvManager {
         {
             let embedded = self.inner.read().embedded.clone();
             if let Some(e) = embedded {
-                return e.set_visible(false);
+                return e.detach();
             }
         }
         if let Some(ipc) = ipc {
@@ -107,17 +140,22 @@ fn build_slot(settings: &AppSettings) -> AppResult<Slot> {
                 ipc: Some(ipc),
                 #[cfg(feature = "mpv-embedded")]
                 embedded: None,
+                #[cfg(feature = "mpv-embedded")]
+                prefer_embedded: false,
             })
         }
         MpvBackendKind::Embedded => {
             #[cfg(feature = "mpv-embedded")]
             {
-                let e = Arc::new(MpvEmbeddedBackend::new()?);
-                let backend: Arc<dyn MpvBackend> = e.clone();
+                // Creating libmpv during Tauri setup can block the WebView from
+                // ever navigating away from about:blank on some Windows hosts.
+                // Keep startup light and instantiate libmpv on embed_attach.
+                let ipc = Arc::new(MpvIpcBackend::new(settings.clone()));
                 Ok(Slot {
-                    backend,
-                    ipc: None,
-                    embedded: Some(e),
+                    backend: ipc.clone(),
+                    ipc: Some(ipc),
+                    embedded: None,
+                    prefer_embedded: true,
                 })
             }
             #[cfg(not(feature = "mpv-embedded"))]
