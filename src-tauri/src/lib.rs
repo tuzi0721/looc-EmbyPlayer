@@ -168,6 +168,7 @@ pub fn run() {
             commands::player::open_external,
             commands::player::open_path,
             commands::player::set_always_on_top,
+            commands::player::set_fullscreen,
             commands::player::set_secondary_display_blackout,
             commands::remote::list_remote_sessions,
             commands::remote::remote_playstate,

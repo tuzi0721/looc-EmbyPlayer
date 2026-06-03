@@ -1904,6 +1904,14 @@ pub async fn set_always_on_top(window: tauri::Window, enabled: bool) -> AppResul
 }
 
 #[tauri::command]
+pub async fn set_fullscreen(window: tauri::Window, enabled: bool) -> AppResult<bool> {
+    window
+        .set_fullscreen(enabled)
+        .map_err(|e| AppError::Other(format!("set fullscreen: {e}")))?;
+    Ok(window.is_fullscreen().unwrap_or(enabled))
+}
+
+#[tauri::command]
 pub async fn set_secondary_display_blackout(
     app: tauri::AppHandle,
     window: tauri::Window,
