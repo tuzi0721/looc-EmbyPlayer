@@ -4,8 +4,9 @@ use parking_lot::RwLock;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
+use std::path::PathBuf;
 use tauri::{AppHandle, Wry};
-use tauri_plugin_store::{Store, StoreExt};
+use tauri_plugin_store::{Store, StoreBuilder, StoreExt};
 
 use crate::config::models::{Account, AppSettings, Server};
 use crate::download::DownloadTask;
@@ -54,7 +55,15 @@ struct ConfigInner {
 
 impl ConfigStore {
     pub fn load(handle: &AppHandle) -> AppResult<Self> {
-        let store = handle.store(STORE_FILE)?;
+        let store = if let Some(path) = std::env::var_os("HILLS_CONFIG_STORE_PATH") {
+            let path = PathBuf::from(path);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            StoreBuilder::new(handle, path).build()?
+        } else {
+            handle.store(STORE_FILE)?
+        };
 
         let servers: Vec<Server> = read_or_default(&store, KEY_SERVERS)?;
         let accounts: Vec<Account> = read_or_default(&store, KEY_ACCOUNTS)?;

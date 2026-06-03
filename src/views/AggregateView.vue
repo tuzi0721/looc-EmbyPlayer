@@ -30,7 +30,8 @@ const searchResults = ref<MediaItem[]>([]);
 
 let searchTimer: number | null = null;
 
-const hasAccount = computed(() => !!auth.activeAccount);
+const hasAccount = computed(() => auth.accounts.length > 0);
+const accountSignature = computed(() => auth.accounts.map((account) => account.id).join("|"));
 const hasAnyContent = computed(
   () => resumeItems.value.length > 0 || favoriteItems.value.length > 0 || historyItems.value.length > 0,
 );
@@ -107,9 +108,11 @@ async function loadAggregate() {
   loading.value = false;
 }
 
-function onSearchInput() {
+function onSearchInput(event?: Event) {
   if (searchTimer != null) window.clearTimeout(searchTimer);
-  const term = searchTerm.value.trim();
+  const nextValue = event?.target instanceof HTMLInputElement ? event.target.value : searchTerm.value;
+  if (nextValue !== searchTerm.value) searchTerm.value = nextValue;
+  const term = nextValue.trim();
   if (!term) {
     searchResults.value = [];
     searching.value = false;
@@ -133,6 +136,7 @@ function onSearchInput() {
 
 onMounted(() => void loadAggregate());
 watch(() => auth.activeId, () => void loadAggregate());
+watch(accountSignature, () => void loadAggregate());
 watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
 </script>
 

@@ -19,7 +19,8 @@ const items = ref<MediaItem[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
-const hasAccount = computed(() => !!auth.activeAccount);
+const hasAccount = computed(() => auth.accounts.length > 0);
+const accountSignature = computed(() => auth.accounts.map((account) => account.id).join("|"));
 
 async function load() {
   if (!hasAccount.value) {
@@ -42,6 +43,7 @@ async function load() {
 
 onMounted(load);
 watch(() => auth.activeId, load);
+watch(accountSignature, load);
 watch(() => settings.settings.hideJavCodes, load);
 
 function open(item: MediaItem) {

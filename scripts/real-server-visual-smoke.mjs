@@ -12,6 +12,7 @@ const remotePort = process.env.HILLS_SMOKE_CDP_PORT
   : 9400 + Math.floor(Math.random() * 500);
 const appMode = process.env.HILLS_REAL_APP_MODE ?? "electron";
 const commandOnly = process.env.HILLS_REAL_COMMAND_ONLY === "1";
+const personalOnly = process.env.HILLS_REAL_PERSONAL_ONLY === "1";
 const layoutMetricsOnly = process.env.HILLS_REAL_LAYOUT_METRICS === "1";
 const isTauriMode = appMode.startsWith("tauri");
 const appExe = process.env.HILLS_REAL_APP_EXE ? path.resolve(process.env.HILLS_REAL_APP_EXE) : null;
@@ -20,6 +21,7 @@ const userDataDir = path.join(tmpDir, "user-data");
 const appDataDir = path.join(tmpDir, "app-data");
 const localAppDataDir = path.join(tmpDir, "local-app-data");
 const webviewDataDir = path.join(tmpDir, "webview2-data");
+const configStorePath = path.join(tmpDir, "config", "config.json");
 const screenshotsDir = path.join(tmpDir, "screenshots");
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const sensitiveValues = new Set();
@@ -130,6 +132,7 @@ function earlyCdpDiagnostics(child, childError, stdout, stderr) {
     tmpDir,
     remotePort,
     webviewDataDir,
+    configStorePath,
     child: {
       pid: child?.pid ?? null,
       exitCode: child?.exitCode ?? null,
@@ -792,6 +795,328 @@ async function setupRealAccountCommandOnly(ws) {
     seriesCandidateCount: seriesCandidates.filter((item) => item?.Id && item.Type === "Series").length,
     playbackSummary,
     loginWinningLineId: login.winningLineId,
+  };
+}
+
+async function setupSecondRealAccountForPersonal(ws) {
+  const lines = [
+    { id: "personal-line-2", name: "Line 2", baseUrl: line2, userAgent: null, headers: [], priority: 0, enabled: true },
+  ];
+
+  stage("personal-second-detect-start");
+  const detected = await bridgeInvoke(ws, "detect_server", { payload: { defaultUserAgent: null, lines } }, 30000);
+  stage("personal-second-detect-complete", {
+    kind: detected?.kind ?? null,
+    winningLineId: detected?.winningLineId ?? null,
+    serverNamePresent: Boolean(detected?.serverName),
+  });
+
+  stage("personal-second-add-server-start");
+  const server = await bridgeInvoke(ws, "add_server", {
+    payload: {
+      name: "Real Personal Smoke B",
+      kind: detected?.kind || "emby",
+      activeLineId: detected?.winningLineId || "personal-line-2",
+      defaultUserAgent: null,
+      lines,
+    },
+  });
+  stage("personal-second-add-server-complete", { serverIdPresent: Boolean(server?.id) });
+
+  stage("personal-second-login-start");
+  const login = await bridgeInvoke(ws, "login", {
+    payload: { serverId: server.id, username, password },
+  }, 30000);
+  const accounts = await bridgeInvoke(ws, "list_accounts");
+  stage("personal-second-login-complete", {
+    accountCount: Array.isArray(accounts) ? accounts.length : null,
+    winningLineId: login?.winningLineId ?? null,
+  });
+
+  return {
+    serverId: server?.id ?? null,
+    accountId: login?.account?.id ?? null,
+    accountCount: Array.isArray(accounts) ? accounts.length : 0,
+    winningLineId: login?.winningLineId ?? null,
+  };
+}
+
+function summarizeSourceItems(items) {
+  const list = Array.isArray(items) ? items : [];
+  const sourceKeys = new Set();
+  const sourceAccounts = new Set();
+  const sourceServers = new Set();
+  const nameSources = new Map();
+  let annotated = 0;
+  for (const item of list) {
+    const source = item?._source;
+    if (source?.serverId || source?.accountId) {
+      annotated += 1;
+      sourceKeys.add([source?.serverId ?? "", source?.accountId ?? "", item?.Id ?? ""].join(":"));
+      if (source?.accountId) sourceAccounts.add(source.accountId);
+      if (source?.serverId) sourceServers.add(source.serverId);
+      const name = String(item?.Name ?? "").trim().toLowerCase();
+      if (name) {
+        const existing = nameSources.get(name) ?? new Set();
+        existing.add([source?.serverId ?? "", source?.accountId ?? ""].join(":"));
+        nameSources.set(name, existing);
+      }
+    }
+  }
+  const sameNameAcrossSources = Array.from(nameSources.values()).filter((sources) => sources.size > 1).length;
+  return {
+    count: list.length,
+    annotated,
+    sourceKeyCount: sourceKeys.size,
+    sourceAccountCount: sourceAccounts.size,
+    sourceServerCount: sourceServers.size,
+    sameNameAcrossSources,
+  };
+}
+
+async function reloadAppStoresForPersonal(ws) {
+  stage("personal-reload-start");
+  await cdpCall(ws, "Page.reload", { ignoreCache: true });
+  const ready = await cdpEvalAfterContextReset(ws, `
+    (async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      let last = null;
+      for (let index = 0; index < 100; index += 1) {
+        const invoke = window.hillsLite?.invoke?.bind(window.hillsLite);
+        const router = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+        let accountCount = null;
+        if (invoke) {
+          try {
+            const accounts = await invoke("list_accounts");
+            accountCount = Array.isArray(accounts) ? accounts.length : null;
+          } catch {}
+        }
+        last = {
+          hasBridge: Boolean(invoke),
+          hasRouter: Boolean(router),
+          readyState: document.readyState,
+          route: router?.currentRoute?.value?.fullPath ?? (location.hash || location.pathname),
+          accountCount,
+        };
+        if (last.hasBridge && last.hasRouter && accountCount >= 2) return last;
+        await wait(250);
+      }
+      return last;
+    })()
+  `);
+  stage("personal-reload-complete", ready);
+  return ready;
+}
+
+async function inspectPersonalAllAccount(ws, setup, secondAccount) {
+  const mediaFields = "PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks,ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,ParentLogoItemId,ParentLogoImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag";
+  const imageParams = [
+    ["EnableUserData", "true"],
+    ["EnableImages", "true"],
+    ["ImageTypeLimit", "3"],
+    ["EnableImageTypes", "Primary,Backdrop,Thumb"],
+  ];
+  const selectedTerm = setup?.selected?.name ?? "";
+  const fallbackSearchTerm = await cdpEvalAfterContextReset(ws, "window.__hillsRealSmokeSelectedName || ''").catch(() => "");
+  const searchTerm = selectedTerm || fallbackSearchTerm;
+
+  stage("personal-backend-list-start");
+  const mediaResp = await bridgeInvoke(ws, "list_items_all_accounts", {
+    payload: {
+      params: [
+        ["Recursive", "true"],
+        ["IncludeItemTypes", "Movie,Episode"],
+        ["Fields", mediaFields],
+        ["SortBy", "DateCreated"],
+        ["SortOrder", "Descending"],
+        ["Limit", "36"],
+        ...imageParams,
+      ],
+    },
+  }, 30000);
+  const resumeResp = await bridgeInvoke(ws, "resume_items_all_accounts", {}, 30000).catch((error) => ({
+    Items: [],
+    TotalRecordCount: 0,
+    __error: error instanceof Error ? error.message : String(error),
+  }));
+  const searchResp = searchTerm
+    ? await bridgeInvoke(ws, "search_all_accounts", { term: searchTerm }, 30000)
+    : { Items: [], TotalRecordCount: 0 };
+  const backend = {
+    media: summarizeSourceItems(mediaResp?.Items),
+    resume: summarizeSourceItems(resumeResp?.Items),
+    search: summarizeSourceItems(searchResp?.Items),
+    resumeError: resumeResp?.__error ? redactSensitiveText(resumeResp.__error) : null,
+    searchTermPresent: Boolean(searchTerm),
+  };
+  stage("personal-backend-list-complete", backend);
+
+  const reloadReady = await reloadAppStoresForPersonal(ws);
+
+  stage("personal-ui-routes-start");
+  const routeExpectations = {
+    "/favorites": false,
+    "/history": backend.resume.count > 0,
+    "/aggregate": backend.resume.count > 0,
+  };
+  const ui = await cdpEvalAfterContextReset(ws, `
+    (async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+      if (!appRouter) throw new Error("mounted Vue router not found");
+      const routeExpectations = ${JSON.stringify(routeExpectations)};
+      const routeSnapshot = (route, waitedMs) => {
+        const bodyText = document.body.innerText || "";
+        const posterCount = document.querySelectorAll(".poster, .history-card").length;
+        const sourceLabelCount = document.querySelectorAll(".poster__source").length;
+        return {
+          route,
+          fullPath: appRouter.currentRoute?.value?.fullPath ?? (location.hash || location.pathname),
+          posterCount,
+          sourceLabelCount,
+          errorCount: document.querySelectorAll(".empty--error, .toast--error").length,
+          noAccountPrompt: /请先登录|璇峰厛鐧诲綍|user-x/i.test(bodyText),
+          loadingPresent: /加载|读取|鍔犺浇|璇诲彇|loader/i.test(bodyText),
+          emptyPresent: /暂无|没有|还没有|鏆傛棤|娌℃湁|杩樻病/i.test(bodyText),
+          expectContent: routeExpectations[route] === true,
+          waitedMs,
+        };
+      };
+      const routeResults = [];
+      for (const route of ["/favorites", "/history", "/aggregate"]) {
+        await appRouter.push(route);
+        let snapshot = routeSnapshot(route, 0);
+        for (let waitedMs = 250; waitedMs <= 8000; waitedMs += 250) {
+          await wait(250);
+          snapshot = routeSnapshot(route, waitedMs);
+          if (snapshot.errorCount > 0 || snapshot.noAccountPrompt) break;
+          if (snapshot.expectContent && snapshot.posterCount > 0) break;
+          if (!snapshot.expectContent && !snapshot.loadingPresent) break;
+        }
+        routeResults.push(snapshot);
+      }
+
+      await appRouter.push("/aggregate");
+      await wait(900);
+      const input = document.querySelector(".search input[type='search']");
+      const term = ${JSON.stringify(searchTerm)};
+      let clicked = null;
+      let searchPosterCount = 0;
+      let searchSourceLabelCount = 0;
+      let searchWaitedMs = 0;
+      let searchLoadingPresent = false;
+      let searchEmptyPresent = false;
+      let searchInputValue = null;
+      if (input && term) {
+        input.focus();
+        const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+        if (setValue) {
+          setValue.call(input, "");
+          input.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, inputType: "deleteContentBackward" }));
+          await wait(100);
+          setValue.call(input, term);
+        } else {
+          input.value = term;
+        }
+        input.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, data: term, inputType: "insertText" }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        for (let waitedMs = 250; waitedMs <= 10000; waitedMs += 250) {
+          await wait(250);
+          const bodyText = document.body.innerText || "";
+          searchPosterCount = document.querySelectorAll(".aggregate-section .poster").length;
+          searchSourceLabelCount = document.querySelectorAll(".aggregate-section .poster__source").length;
+          searchLoadingPresent = /搜索中|鎼滅储涓|loader/i.test(bodyText);
+          searchEmptyPresent = Boolean(document.querySelector(".aggregate-section .empty--compact"));
+          searchInputValue = input.value;
+          searchWaitedMs = waitedMs;
+          if (searchPosterCount > 0) break;
+          if (!searchLoadingPresent && searchEmptyPresent && waitedMs >= 1500) break;
+        }
+        const posters = Array.from(document.querySelectorAll(".poster"));
+        const target = posters.find((poster) => poster.querySelector(".poster__source")) ?? posters[0] ?? null;
+        if (target) {
+          target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+          for (let index = 0; index < 60; index += 1) {
+            const route = appRouter.currentRoute?.value;
+            if (route?.path?.startsWith("/item/")) break;
+            await wait(200);
+          }
+          await wait(1200);
+          const route = appRouter.currentRoute?.value;
+          const invoke = window.hillsLite?.invoke?.bind(window.hillsLite);
+          const accounts = invoke ? await invoke("list_accounts").catch(() => []) : [];
+          const activeAccount = Array.isArray(accounts)
+            ? accounts.find((account) => account.id === route?.query?.account) ?? null
+            : null;
+          clicked = {
+            path: route?.path ?? null,
+            fullPath: route?.fullPath ?? (location.hash || location.pathname),
+            queryAccount: typeof route?.query?.account === "string" ? route.query.account : null,
+            queryServer: typeof route?.query?.server === "string" ? route.query.server : null,
+            activeAccountMatchesQuery: Boolean(activeAccount),
+          };
+        }
+      }
+      return {
+        routes: routeResults,
+        search: {
+          attempted: Boolean(input && term),
+          posterCount: searchPosterCount,
+          sourceLabelCount: searchSourceLabelCount,
+          waitedMs: searchWaitedMs,
+          loadingPresent: searchLoadingPresent,
+          emptyPresent: searchEmptyPresent,
+          inputValueLength: searchInputValue == null ? null : String(searchInputValue).length,
+          termLength: String(term).length,
+        },
+        clicked,
+      };
+    })()
+  `);
+  stage("personal-ui-routes-complete", {
+    routes: ui?.routes?.length ?? null,
+    searchPosterCount: ui?.search?.posterCount ?? null,
+    clickedPath: ui?.clicked?.path ?? null,
+  });
+
+  const accounts = await bridgeInvoke(ws, "list_accounts");
+  const failures = [];
+  const accountCount = Array.isArray(accounts) ? accounts.length : 0;
+  if (accountCount < 2) failures.push(`expected at least 2 real accounts, got ${accountCount}`);
+  if (!secondAccount?.accountId) failures.push("second real account login did not return an account id");
+  if (backend.media.count < 1) failures.push("all-account media list returned no items");
+  if (backend.media.annotated !== backend.media.count) failures.push("all-account media list returned items without _source");
+  if (backend.media.sourceAccountCount < 2) failures.push("all-account media list did not include both account sources");
+  if (!backend.searchTermPresent || backend.search.count < 1) failures.push("all-account search returned no selected real item");
+  if (backend.search.annotated !== backend.search.count) failures.push("all-account search returned items without _source");
+  if (backend.search.sourceAccountCount < 2) failures.push("all-account search did not include both account sources");
+  if (backend.search.sameNameAcrossSources < 1) failures.push("same-name search results across different servers/accounts were not preserved");
+  if ((reloadReady?.accountCount ?? 0) < 2) failures.push("app reload did not see both accounts");
+  for (const route of ui?.routes ?? []) {
+    if (route.errorCount > 0) failures.push(`${route.route}: rendered error state`);
+    if (route.noAccountPrompt) failures.push(`${route.route}: rendered no-account prompt despite saved accounts`);
+    if (route.expectContent && route.posterCount < 1) {
+      failures.push(`${route.route}: expected personal-media cards from backend content but rendered none`);
+    }
+    if (route.expectContent && route.sourceLabelCount < 1) {
+      failures.push(`${route.route}: rendered personal-media cards without source labels`);
+    }
+  }
+  if (!ui?.search?.attempted) failures.push("aggregate UI search was not attempted");
+  if ((ui?.search?.posterCount ?? 0) < 1) failures.push("aggregate UI search rendered no result cards");
+  if ((ui?.search?.sourceLabelCount ?? 0) < 1) failures.push("aggregate UI search rendered no source labels");
+  if (!ui?.clicked?.path?.startsWith("/item/")) failures.push("clicking aggregate search result did not open an item detail route");
+  if (!ui?.clicked?.queryAccount || !ui?.clicked?.queryServer) failures.push("clicked personal-media result did not preserve account/server query");
+  if (!ui?.clicked?.activeAccountMatchesQuery) failures.push("clicked personal-media result did not resolve the queried account");
+
+  return {
+    ok: failures.length === 0,
+    failures,
+    accountCount,
+    secondAccount,
+    backend,
+    reloadReady,
+    ui,
   };
 }
 
@@ -1552,6 +1877,7 @@ if (appMode === "electron") {
       LOCALAPPDATA: localAppDataDir,
       HILLS_TAURI_CDP_PORT: String(remotePort),
       HILLS_TAURI_WEBVIEW_DATA_DIR: webviewDataDir,
+      HILLS_CONFIG_STORE_PATH: configStorePath,
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${remotePort}`,
       WEBVIEW2_USER_DATA_FOLDER: webviewDataDir,
       NO_COLOR: "1",
@@ -1569,6 +1895,7 @@ if (appMode === "electron") {
       LOCALAPPDATA: localAppDataDir,
       HILLS_TAURI_CDP_PORT: String(remotePort),
       HILLS_TAURI_WEBVIEW_DATA_DIR: webviewDataDir,
+      HILLS_CONFIG_STORE_PATH: configStorePath,
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${remotePort}`,
       WEBVIEW2_USER_DATA_FOLDER: webviewDataDir,
     },
@@ -1844,7 +2171,33 @@ try {
     mediaSourceCount: setup.playbackSummary?.mediaSourceCount ?? null,
   });
 
-  if (commandOnly) {
+  if (personalOnly) {
+    stage("personal-only-start");
+    const secondAccount = await setupSecondRealAccountForPersonal(ws);
+    const personal = await inspectPersonalAllAccount(ws, setup, secondAccount);
+    stage("personal-only-complete", {
+      ok: personal.ok,
+      failures: personal.failures,
+      accountCount: personal.accountCount,
+      backendSearchSources: personal.backend?.search?.sourceAccountCount ?? null,
+    });
+    const output = {
+      ok: personal.ok,
+      failures: personal.failures,
+      tmpDir,
+      setup,
+      personal,
+      diagnostics: {
+        electronStdout,
+        electronStderr,
+        pageConsole: pageConsole.slice(-12),
+        pageExceptions,
+      },
+    };
+    const redactedOutput = JSON.parse(redactSensitiveText(JSON.stringify(output)));
+    console.log(JSON.stringify(redactedOutput, null, 2));
+    if (!output.ok) process.exitCode = 1;
+  } else if (commandOnly) {
     stage("command-only-start");
     const playerOpen = await cdpEvalAfterContextReset(ws, `
       (async () => {

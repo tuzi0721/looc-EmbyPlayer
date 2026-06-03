@@ -20,7 +20,11 @@ export function mediaItemSourceLabel(item: MediaItem) {
 export async function openMediaItemFromSource(router: Router, auth: AuthStore, item: MediaItem) {
   const accountId = item._source?.accountId;
   if (accountId && auth.activeId !== accountId) {
-    await auth.switchTo(accountId);
+    try {
+      await auth.switchTo(accountId);
+    } catch {
+      // Keep navigation source-aware even if active-account sync needs the detail page to refresh stores first.
+    }
   }
   await router.push({
     path: `/item/${encodeURIComponent(item.Id)}`,

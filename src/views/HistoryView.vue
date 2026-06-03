@@ -27,7 +27,8 @@ const loadingMore = ref(false);
 const error = ref<string | null>(null);
 const rawLoaded = ref(0);
 
-const hasAccount = computed(() => !!auth.activeAccount);
+const hasAccount = computed(() => auth.accounts.length > 0);
+const accountSignature = computed(() => auth.accounts.map((account) => account.id).join("|"));
 const canLoadMore = computed(() => hasAccount.value && items.value.length < total.value);
 
 const filters: Array<{ id: HistoryFilter; label: string; icon: string }> = [
@@ -133,6 +134,7 @@ function progressLabel(item: MediaItem) {
 
 onMounted(() => void loadHistory());
 watch(() => auth.activeId, () => void loadHistory());
+watch(accountSignature, () => void loadHistory());
 watch(filter, () => void loadHistory());
 watch(() => settings.settings.hideJavCodes, () => void loadHistory());
 </script>
