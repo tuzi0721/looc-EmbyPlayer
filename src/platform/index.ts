@@ -54,6 +54,7 @@ declare global {
     hillsLite?: HillsLiteBridge;
     __TAURI_INTERNALS__?: unknown;
     __TAURI__?: unknown;
+    __TAURI_IPC__?: unknown;
   }
 }
 
@@ -172,7 +173,10 @@ let webPlaybackSnapshot: MpvSnapshot = webDefaultSnapshot();
 loadWebPreviewState();
 
 function hasTauriRuntime(): boolean {
-  return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
+  if (typeof window === "undefined") return false;
+  if (window.__TAURI_INTERNALS__ || window.__TAURI__ || window.__TAURI_IPC__) return true;
+  const { hostname, protocol } = window.location;
+  return hostname === "tauri.localhost" || protocol === "tauri:";
 }
 
 function getWebSettings(): AppSettings {
