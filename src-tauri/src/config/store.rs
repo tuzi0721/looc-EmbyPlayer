@@ -20,6 +20,8 @@ const KEY_ACTIVE_ACCOUNT: &str = "active_account_id";
 const KEY_SETTINGS: &str = "settings";
 const KEY_DOWNLOADS: &str = "downloads";
 const KEY_NOTIFICATIONS: &str = "notifications";
+const KEY_CLEARED_NOTIFICATION_KEYS: &str = "cleared_notification_keys";
+const KEY_NOTIFICATIONS_CLEARED_AT: &str = "notifications_cleared_at";
 
 fn account_identity_key(account: &Account) -> String {
     if !account.server_id.trim().is_empty() && !account.user_id.trim().is_empty() {
@@ -274,6 +276,28 @@ impl ConfigStore {
         self.persist_notifications()
     }
 
+    pub fn cleared_notification_keys(&self) -> Vec<String> {
+        normalize_string_list(self.store.get(KEY_CLEARED_NOTIFICATION_KEYS), 250)
+    }
+
+    pub fn replace_cleared_notification_keys(&self, keys: Vec<String>) -> AppResult<()> {
+        self.store.set(
+            KEY_CLEARED_NOTIFICATION_KEYS,
+            serde_json::to_value(normalize_strings(keys, 250))?,
+        );
+        self.store.save()?;
+        Ok(())
+    }
+
+    pub fn record_notifications_cleared(&self) -> AppResult<()> {
+        self.store.set(
+            KEY_NOTIFICATIONS_CLEARED_AT,
+            Value::String(chrono::Utc::now().to_rfc3339()),
+        );
+        self.store.save()?;
+        Ok(())
+    }
+
     fn persist_servers(&self) -> AppResult<()> {
         let v = serde_json::to_value(&self.inner.read().servers)?;
         self.store.set(KEY_SERVERS, v);
@@ -351,5 +375,37 @@ where
     match store.get(key) {
         Some(Value::Null) | None => Ok(None),
         Some(v) => serde_json::from_value(v).map_err(AppError::from),
+    }
+}
+
+fn normalize_string_list(value: Option<Value>, keep: usize) -> Vec<String> {
+    match value {
+        Some(Value::Array(items)) => normalize_strings(
+            items
+                .into_iter()
+                .filter_map(|item| match item {
+                    Value::String(text) => Some(text),
+                    _ => None,
+                })
+                .collect(),
+            keep,
+        ),
+        _ => Vec::new(),
+    }
+}
+
+fn normalize_strings(values: Vec<String>, keep: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    for value in values {
+        let text = value.trim();
+        if text.is_empty() || out.iter().any(|existing| existing == text) {
+            continue;
+        }
+        out.push(text.to_string());
+    }
+    if out.len() > keep {
+        out.split_off(out.len() - keep)
+    } else {
+        out
     }
 }
