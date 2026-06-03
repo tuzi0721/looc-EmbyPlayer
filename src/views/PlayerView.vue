@@ -73,6 +73,8 @@ let longPressSpeedTimer: number | null = null;
 let longPressRestoreSpeed: number | null = null;
 let longPressPointerId: number | null = null;
 let longPressStart: { x: number; y: number } | null = null;
+const embedAttachTimeoutMs = 3000;
+const embedShowTimeoutMs = 1500;
 
 const subtitlePanelOpen = ref(false);
 const settingsMenuOpen = ref(false);
@@ -1682,21 +1684,29 @@ async function prepareScreenshotFrame() {
 }
 
 async function setupEmbeddedVideoHost() {
-  if (!embedVideo) return;
-  await withTimeout(api.embedAttach(), 8000, "embedded mpv host attach timed out");
-  if (typeof ResizeObserver !== "undefined" && stageEl.value) {
-    embedResizeObserver = new ResizeObserver(scheduleEmbedRectSync);
-    embedResizeObserver.observe(stageEl.value);
+  if (!embedVideo) return true;
+  try {
+    await withTimeout(api.embedAttach(), embedAttachTimeoutMs, "embedded mpv host attach timed out");
+    if (typeof ResizeObserver !== "undefined" && stageEl.value) {
+      embedResizeObserver = new ResizeObserver(scheduleEmbedRectSync);
+      embedResizeObserver.observe(stageEl.value);
+    }
+    window.addEventListener("resize", scheduleEmbedRectSync, { passive: true });
+    scheduleEmbedRectSync();
+    await syncEmbedRect();
+    await withTimeout(api.embedSetVisible(true), embedShowTimeoutMs, "embedded mpv host show timed out");
+    scheduleEmbedRectLayoutSync();
+    return true;
+  } catch (error) {
+    resetEmbeddedVideoHostLayoutState();
+    const message = error instanceof Error ? error.message : String(error);
+    errorText.value = `内嵌播放窗口初始化失败，已继续请求播放：${message}`;
+    showControls.value = true;
+    return false;
   }
-  window.addEventListener("resize", scheduleEmbedRectSync, { passive: true });
-  scheduleEmbedRectSync();
-  await syncEmbedRect();
-  await withTimeout(api.embedSetVisible(true), 3000, "embedded mpv host show timed out");
-  scheduleEmbedRectLayoutSync();
 }
 
-function teardownEmbeddedVideoHost(cleanupTasks: Promise<unknown>[]) {
-  if (!embedVideo) return;
+function resetEmbeddedVideoHostLayoutState() {
   embedResizeObserver?.disconnect();
   embedResizeObserver = null;
   window.removeEventListener("resize", scheduleEmbedRectSync);
@@ -1709,6 +1719,11 @@ function teardownEmbeddedVideoHost(cleanupTasks: Promise<unknown>[]) {
     embedLayoutSyncTimer = null;
   }
   lastEmbedRectKey = "";
+}
+
+function teardownEmbeddedVideoHost(cleanupTasks: Promise<unknown>[]) {
+  if (!embedVideo) return;
+  resetEmbeddedVideoHostLayoutState();
   cleanupTasks.push(api.embedSetVisible(false), api.embedDetach());
 }
 
