@@ -227,6 +227,8 @@ let currentPlaySession = null;
 const registeredGlobalShortcuts = new Map();
 let runtimeCleanupPromise = null;
 let runtimeCleanupFinished = false;
+let mainWindowCloseRequested = false;
+let mainWindowCloseAllowed = false;
 
 function forceKillProcessTree(pid) {
   if (!pid || process.platform !== "win32") return Promise.resolve();
@@ -3051,8 +3053,16 @@ function createWindow() {
   win.setAutoHideMenuBar(true);
 
   win.once("ready-to-show", () => win.show());
-  win.on("close", () => {
-    cleanupRuntime("window-close");
+  win.on("close", (event) => {
+    if (runtimeCleanupFinished || mainWindowCloseAllowed) return;
+    event.preventDefault();
+    if (mainWindowCloseRequested) return;
+    mainWindowCloseRequested = true;
+    void cleanupRuntime("window-close").finally(() => {
+      mainWindowCloseAllowed = true;
+      if (!win.isDestroyed()) win.destroy();
+      if (process.platform !== "darwin") app.quit();
+    });
   });
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
