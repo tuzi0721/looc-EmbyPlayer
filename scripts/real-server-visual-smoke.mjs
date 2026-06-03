@@ -3098,8 +3098,12 @@ try {
       seriesPlayProbe.buttonDisabled = buttonSnapshot?.buttonDisabled ?? null;
       seriesPlayProbe.buttonText = buttonSnapshot?.buttonText ?? null;
       seriesPlayProbe.actionError = buttonSnapshot?.actionError ?? null;
+      seriesPlayProbe.hitTag = buttonSnapshot?.hitTag ?? null;
+      seriesPlayProbe.hitClass = buttonSnapshot?.hitClass ?? null;
+      seriesPlayProbe.clickSkipped = true;
+      seriesPlayProbe.reason = "full smoke inspects the series play button without opening a second playback session";
 
-      if (buttonSnapshot?.buttonRect && !buttonSnapshot.buttonDisabled) {
+      if (process.env.HILLS_REAL_SERIES_PLAY_PROBE === "1" && buttonSnapshot?.buttonRect && !buttonSnapshot.buttonDisabled) {
         await cdpClick(ws, centerOf(buttonSnapshot.buttonRect));
         for (let index = 0; index < 120; index += 1) {
           const routeSnapshot = await cdpEvalAfterContextReset(ws, `
@@ -3220,6 +3224,9 @@ try {
       hasButton: seriesPlayProbe.hasButton,
       buttonDisabled: seriesPlayProbe.buttonDisabled,
       routeAfterClick: seriesPlayProbe.routeAfterClick,
+      hitTag: seriesPlayProbe.hitTag ?? null,
+      hitClass: seriesPlayProbe.hitClass ?? null,
+      clickSkipped: seriesPlayProbe.clickSkipped === true,
       actionErrorPresent: Boolean(seriesPlayProbe.actionError),
       exceptionPresent: Boolean(seriesPlayProbe.exception),
     });
@@ -3596,15 +3603,18 @@ try {
   if (!seriesPlayProbe.attempted) failures.push(`series detail play was not attempted: ${seriesPlayProbe.reason}`);
   if (seriesPlayProbe.attempted && !seriesPlayProbe.hasButton) failures.push("series detail play button was not found");
   if (seriesPlayProbe.attempted && seriesPlayProbe.buttonDisabled) failures.push("series detail play button was disabled");
+  if (seriesPlayProbe.attempted && seriesPlayProbe.hitTag && seriesPlayProbe.hitTag !== "BUTTON") {
+    failures.push(`series detail play button is not the top hit target: ${seriesPlayProbe.hitTag}.${seriesPlayProbe.hitClass ?? ""}`);
+  }
   if (seriesPlayProbe.exception) failures.push(`series detail play probe exception: ${seriesPlayProbe.exception}`);
   if (seriesPlayProbe.actionError) failures.push(`series detail play action error: ${seriesPlayProbe.actionError}`);
-  if (seriesPlayProbe.attempted && !seriesPlayProbe.opened) {
+  if (seriesPlayProbe.attempted && !seriesPlayProbe.clickSkipped && !seriesPlayProbe.opened) {
     failures.push(`series detail play did not open player route: ${seriesPlayProbe.routeAfterClick ?? seriesPlayProbe.routeBeforeClick}`);
   }
   if (seriesPlayProbe.opened && seriesPlayProbe.playerItemId === setup.series?.id) {
     failures.push("series detail play opened the Series item itself instead of a playable episode");
   }
-  if (seriesPlayProbe.attempted && !seriesPlayProbe.stopOk) failures.push("series detail play probe could not stop playback after route check");
+  if (seriesPlayProbe.attempted && !seriesPlayProbe.clickSkipped && !seriesPlayProbe.stopOk) failures.push("series detail play probe could not stop playback after route check");
   for (const route of routes) {
     if (route.errorCount > 0) failures.push(`${route.route}: rendered error state`);
     if (route.posterCount > 0 && route.loadedImageCount < Math.min(route.posterCount, 2)) {

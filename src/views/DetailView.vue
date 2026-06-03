@@ -1980,7 +1980,6 @@ async function togglePlayed() {
   color: white;
   isolation: isolate;
   overflow: hidden;
-  pointer-events: none;
 }
 .hero__bg {
   position: absolute;
@@ -2096,6 +2095,7 @@ async function togglePlayed() {
 .hero__play {
   position: relative;
   z-index: 4;
+  pointer-events: auto;
   appearance: none;
   border: none;
   background: var(--accent-grad);
@@ -2122,6 +2122,7 @@ async function togglePlayed() {
 .circle-btn {
   position: relative;
   z-index: 4;
+  pointer-events: auto;
   appearance: none;
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.06);
