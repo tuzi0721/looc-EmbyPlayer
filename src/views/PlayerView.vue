@@ -78,7 +78,7 @@ let longPressRestoreSpeed: number | null = null;
 let longPressPointerId: number | null = null;
 let longPressStart: { x: number; y: number } | null = null;
 const embedAttachTimeoutMs = 3000;
-const embedShowTimeoutMs = 1500;
+const embedShowTimeoutMs = 4500;
 
 const subtitlePanelOpen = ref(false);
 const settingsMenuOpen = ref(false);
@@ -1619,11 +1619,27 @@ function currentEmbedRect() {
   const el = stageEl.value;
   if (!el) return null;
   const rect = el.getBoundingClientRect();
+  let top = rect.top;
+  let bottom = rect.bottom;
+  const topControls = document.querySelector<HTMLElement>(".player__top");
+  const bottomControls = document.querySelector<HTMLElement>(".player__bottom");
+  if (topControls) {
+    const controlsRect = topControls.getBoundingClientRect();
+    if (controlsRect.bottom > top && controlsRect.top < bottom) {
+      top = Math.min(bottom - 1, Math.max(top, controlsRect.bottom));
+    }
+  }
+  if (bottomControls) {
+    const controlsRect = bottomControls.getBoundingClientRect();
+    if (controlsRect.top < bottom && controlsRect.bottom > top) {
+      bottom = Math.max(top + 1, Math.min(bottom, controlsRect.top));
+    }
+  }
   const width = Math.max(1, Math.round(rect.width));
-  const height = Math.max(1, Math.round(rect.height));
+  const height = Math.max(1, Math.round(bottom - top));
   return {
     x: Math.round(rect.left),
-    y: Math.round(rect.top),
+    y: Math.round(top),
     width,
     height,
     scale: window.devicePixelRatio || 1,
@@ -1760,7 +1776,7 @@ async function setupEmbeddedVideoHost() {
   } catch (error) {
     resetEmbeddedVideoHostLayoutState();
     const message = error instanceof Error ? error.message : String(error);
-    errorText.value = `内嵌播放窗口初始化失败，已继续请求播放：${message}`;
+    errorText.value = `内嵌播放窗口初始化失败：${message}`;
     showControls.value = true;
     return false;
   }
@@ -2188,7 +2204,8 @@ onMounted(async () => {
   document.addEventListener("fullscreenchange", onFullscreenChange);
   document.addEventListener("webkitfullscreenchange", onFullscreenChange);
   try {
-    await setupEmbeddedVideoHost();
+    const hostReady = await setupEmbeddedVideoHost();
+    if (embedVideo && !hostReady) return;
     await startCurrentPlayback();
   } catch (e) {
     errorText.value = String(e);

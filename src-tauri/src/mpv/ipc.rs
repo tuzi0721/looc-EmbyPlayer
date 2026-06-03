@@ -30,7 +30,7 @@ use std::os::windows::process::CommandExt;
 pub struct MpvIpcBackend {
     inner: Arc<Mutex<Option<Inner>>>,
     settings: AppSettings,
-    host: Arc<Mutex<Option<HostWindow>>>,
+    host: Arc<Mutex<Option<Arc<HostWindow>>>>,
 }
 
 struct Inner {
@@ -59,25 +59,31 @@ impl MpvIpcBackend {
             drop(inner.cmd_tx);
             let _ = inner.child.start_kill();
         }
-        let mut guard = self.host.lock();
-        if let Some(old) = guard.take() {
+        let old = {
+            let mut guard = self.host.lock();
+            guard.take()
+        };
+        if let Some(old) = old {
             let _ = old.destroy();
         }
-        let host = HostWindow::create_child(parent)?;
+        let host = Arc::new(HostWindow::create_child(parent)?);
         host.show(false)?;
+        let mut guard = self.host.lock();
         *guard = Some(host);
         Ok(())
     }
 
     pub fn embed_rect(&self, rect: PlayerRect) -> AppResult<()> {
-        if let Some(h) = self.host.lock().as_ref() {
+        let host = self.host.lock().as_ref().cloned();
+        if let Some(h) = host {
             h.set_rect(rect)?;
         }
         Ok(())
     }
 
     pub fn embed_show(&self, visible: bool) -> AppResult<()> {
-        if let Some(h) = self.host.lock().as_ref() {
+        let host = self.host.lock().as_ref().cloned();
+        if let Some(h) = host {
             h.show(visible)?;
         }
         Ok(())
@@ -90,8 +96,11 @@ impl MpvIpcBackend {
     /// Tear down mpv IPC and destroy the native child window.
     pub async fn detach_embedded(&self) -> AppResult<()> {
         self.shutdown().await?;
-        let mut guard = self.host.lock();
-        if let Some(h) = guard.take() {
+        let host = {
+            let mut guard = self.host.lock();
+            guard.take()
+        };
+        if let Some(h) = host {
             h.destroy()?;
         }
         Ok(())
@@ -133,7 +142,11 @@ impl MpvIpcBackend {
         }
     }
 
-    async fn send_command_once(&self, args: Vec<Value>) -> AppResult<Value> {
+    async fn send_command_once_with_timeout(
+        &self,
+        args: Vec<Value>,
+        reply_timeout: Duration,
+    ) -> AppResult<Value> {
         self.ensure_started().await?;
         let req_id = next_id();
         let payload = json!({ "command": args, "request_id": req_id });
@@ -155,7 +168,7 @@ impl MpvIpcBackend {
         .await
         .map_err(|e| AppError::Mpv(format!("ipc send: {e}")))?;
 
-        let reply = timeout(Duration::from_secs(5), reply_rx)
+        let reply = timeout(reply_timeout, reply_rx)
             .await
             .map_err(|_| AppError::Mpv("mpv ipc timeout".into()))?
             .map_err(|e| AppError::Mpv(format!("ipc recv: {e}")))?;
@@ -175,6 +188,30 @@ impl MpvIpcBackend {
         }
     }
 
+    async fn send_command_once(&self, args: Vec<Value>) -> AppResult<Value> {
+        self.send_command_once_with_timeout(args, Duration::from_secs(5))
+            .await
+    }
+
+    async fn send_command_with_timeout(
+        &self,
+        args: Vec<Value>,
+        reply_timeout: Duration,
+    ) -> AppResult<Value> {
+        match self
+            .send_command_once_with_timeout(args.clone(), reply_timeout)
+            .await
+        {
+            Ok(v) => Ok(v),
+            Err(e) if Self::is_stale_ipc(&e) => {
+                self.shutdown().await?;
+                self.send_command_once_with_timeout(args, reply_timeout)
+                    .await
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     async fn send_command(&self, args: Vec<Value>) -> AppResult<Value> {
         match self.send_command_once(args.clone()).await {
             Ok(v) => Ok(v),
@@ -186,11 +223,103 @@ impl MpvIpcBackend {
         }
     }
 
-    async fn get_property(&self, name: &str) -> AppResult<Value> {
+    async fn get_property_with_timeout(
+        &self,
+        name: &str,
+        reply_timeout: Duration,
+    ) -> AppResult<Value> {
         let v = self
-            .send_command(vec![json!("get_property"), json!(name)])
+            .send_command_with_timeout(vec![json!("get_property"), json!(name)], reply_timeout)
             .await?;
         Ok(v.get("data").cloned().unwrap_or(Value::Null))
+    }
+
+    async fn current_time_pos_seconds(&self) -> Option<f64> {
+        self.get_property_with_timeout("time-pos", Duration::from_millis(500))
+            .await
+            .ok()
+            .and_then(|v| value_as_f64(&v))
+            .filter(|v| v.is_finite() && *v >= 0.0)
+    }
+
+    fn relative_seek_moved(before: f64, after: Option<f64>, delta_seconds: f64) -> bool {
+        let Some(after) = after else {
+            return true;
+        };
+        if !after.is_finite() || delta_seconds.abs() < 0.001 {
+            return true;
+        }
+        let threshold = (delta_seconds.abs() * 0.35).clamp(1.5, 12.0);
+        if delta_seconds > 0.0 {
+            after >= before + threshold
+        } else {
+            after <= (before - threshold).max(0.0)
+        }
+    }
+
+    async fn clamp_seek_target_to_cached_range(&self, before: f64, target: f64) -> f64 {
+        let Ok(cache_state) = self
+            .get_property_with_timeout("demuxer-cache-state", Duration::from_millis(500))
+            .await
+        else {
+            return target;
+        };
+        let Some(ranges) = cache_state.get("seekable-ranges").and_then(Value::as_array) else {
+            return target;
+        };
+        for range in ranges {
+            let Some(start) = range.get("start").and_then(value_as_f64) else {
+                continue;
+            };
+            let Some(end) = range.get("end").and_then(value_as_f64) else {
+                continue;
+            };
+            if !start.is_finite() || !end.is_finite() || end <= start {
+                continue;
+            }
+            let before_in_range = before >= start - 0.5 && before <= end + 0.5;
+            let target_in_range = target >= start && target <= end;
+            if before_in_range || target_in_range {
+                let min_target = (start + 0.25).min(end);
+                let max_target = (end - 1.5).max(start);
+                return target.clamp(min_target, max_target);
+            }
+        }
+        target
+    }
+
+    async fn seek_relative_with_fallback(&self, delta_ms: i64) -> AppResult<()> {
+        let before = self.current_time_pos_seconds().await;
+        let delta_seconds = delta_ms as f64 / 1000.0;
+        self.send_command(vec![
+            json!("seek"),
+            json!(delta_seconds),
+            json!("relative+keyframes"),
+        ])
+        .await?;
+
+        let Some(before) = before else {
+            return Ok(());
+        };
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        if Self::relative_seek_moved(before, self.current_time_pos_seconds().await, delta_seconds) {
+            return Ok(());
+        }
+
+        let unclamped_target = (before + delta_seconds).max(0.0);
+        let target = self
+            .clamp_seek_target_to_cached_range(before, unclamped_target)
+            .await;
+        self.send_command(vec![json!("seek"), json!(target), json!("absolute")])
+            .await?;
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        if Self::relative_seek_moved(before, self.current_time_pos_seconds().await, delta_seconds) {
+            return Ok(());
+        }
+
+        self.send_command(vec![json!("seek"), json!(delta_seconds), json!("relative")])
+            .await?;
+        Ok(())
     }
 
     async fn set_property(&self, name: &str, value: Value) -> AppResult<()> {
@@ -489,13 +618,7 @@ impl MpvBackend for MpvIpcBackend {
                 Ok(())
             }
             MpvCommand::SeekRelative { delta_ms } => {
-                self.send_command(vec![
-                    json!("seek"),
-                    json!(delta_ms as f64 / 1000.0),
-                    json!("relative+keyframes"),
-                ])
-                .await?;
-                Ok(())
+                self.seek_relative_with_fallback(delta_ms).await
             }
             MpvCommand::SetSpeed(s) => self.set_property("speed", json!(s)).await,
             MpvCommand::SetVolume(v) => self.set_property("volume", json!(v)).await,
@@ -623,240 +746,185 @@ impl MpvBackend for MpvIpcBackend {
     }
 
     async fn snapshot(&self) -> AppResult<MpvSnapshot> {
-        let url = self
-            .get_property("path")
-            .await
-            .ok()
-            .and_then(|v| v.as_str().map(str::to_string));
-        let paused = self
-            .get_property("pause")
-            .await
-            .ok()
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true);
-        let position = self
-            .get_property("time-pos")
-            .await
-            .ok()
-            .and_then(|v| v.as_f64())
+        let property_timeout = Duration::from_millis(900);
+        macro_rules! property {
+            ($name:literal) => {
+                self.get_property_with_timeout($name, property_timeout)
+            };
+        }
+        fn ok_value(result: AppResult<Value>) -> Option<Value> {
+            result.ok()
+        }
+        fn value_string(result: AppResult<Value>) -> Option<String> {
+            ok_value(result).and_then(|v| v.as_str().map(str::to_string))
+        }
+
+        let (
+            path,
+            pause,
+            time_pos,
+            duration,
+            speed,
+            volume,
+            mute,
+            eof_reached,
+            track_list,
+            chapter_list,
+            chapter_value,
+            secondary_sid,
+            sub_delay_value,
+            sub_scale_value,
+            cache_speed,
+            video_codec_value,
+            audio_codec_value,
+            video_params_value,
+            video_out_params_value,
+            osd_dimensions_value,
+            audio_params_value,
+            hwdec_current_value,
+            idle_active_value,
+            demuxer_value,
+            file_format_value,
+            media_title_value,
+            stream_open_filename_value,
+            stream_path_value,
+            demuxer_cache_state_value,
+            playlist_count_value,
+            playlist_pos_value,
+            container_fps_value,
+            estimated_vf_fps_value,
+            video_bitrate_value,
+            audio_bitrate_value,
+            frame_drop_count_value,
+            decoder_frame_drop_count_value,
+            vo_frame_drop_count_value,
+            keepaspect_value,
+            panscan_value,
+            video_zoom_value,
+            video_scale_x_value,
+            video_scale_y_value,
+            video_aspect_override_value,
+        ) = tokio::join!(
+            property!("path"),
+            property!("pause"),
+            property!("time-pos"),
+            property!("duration"),
+            property!("speed"),
+            property!("volume"),
+            property!("mute"),
+            property!("eof-reached"),
+            property!("track-list"),
+            property!("chapter-list"),
+            property!("chapter"),
+            property!("secondary-sid"),
+            property!("sub-delay"),
+            property!("sub-scale"),
+            property!("cache-speed"),
+            property!("video-codec"),
+            property!("audio-codec"),
+            property!("video-params"),
+            property!("video-out-params"),
+            property!("osd-dimensions"),
+            property!("audio-params"),
+            property!("hwdec-current"),
+            property!("idle-active"),
+            property!("demuxer"),
+            property!("file-format"),
+            property!("media-title"),
+            property!("stream-open-filename"),
+            property!("stream-path"),
+            property!("demuxer-cache-state"),
+            property!("playlist-count"),
+            property!("playlist-pos"),
+            property!("container-fps"),
+            property!("estimated-vf-fps"),
+            property!("video-bitrate"),
+            property!("audio-bitrate"),
+            property!("frame-drop-count"),
+            property!("decoder-frame-drop-count"),
+            property!("vo-drop-frame-count"),
+            property!("keepaspect"),
+            property!("panscan"),
+            property!("video-zoom"),
+            property!("video-scale-x"),
+            property!("video-scale-y"),
+            property!("video-aspect-override")
+        );
+
+        let url = value_string(path);
+        let paused = ok_value(pause).and_then(|v| v.as_bool()).unwrap_or(true);
+        let position = ok_value(time_pos)
+            .and_then(|v| value_as_f64(&v))
             .unwrap_or(0.0);
-        let duration = self
-            .get_property("duration")
-            .await
-            .ok()
-            .and_then(|v| v.as_f64())
+        let duration = ok_value(duration)
+            .and_then(|v| value_as_f64(&v))
             .unwrap_or(0.0);
-        let speed = self
-            .get_property("speed")
-            .await
-            .ok()
-            .and_then(|v| v.as_f64())
+        let speed = ok_value(speed)
+            .and_then(|v| value_as_f64(&v))
             .unwrap_or(1.0);
-        let volume = self
-            .get_property("volume")
-            .await
-            .ok()
-            .and_then(|v| v.as_f64())
+        let volume = ok_value(volume)
+            .and_then(|v| value_as_f64(&v))
             .map(|x| x as i32)
             .unwrap_or(100);
-        let muted = self
-            .get_property("mute")
-            .await
-            .ok()
+        let muted = ok_value(mute).and_then(|v| v.as_bool()).unwrap_or(false);
+        let eof = ok_value(eof_reached)
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        let eof = self
-            .get_property("eof-reached")
-            .await
-            .ok()
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let tracks_val = self.get_property("track-list").await.unwrap_or(Value::Null);
+        let tracks_val = ok_value(track_list).unwrap_or(Value::Null);
         let tracks = parse_tracks(&tracks_val);
-        let chapters_val = self
-            .get_property("chapter-list")
-            .await
-            .unwrap_or(Value::Null);
+        let chapters_val = ok_value(chapter_list).unwrap_or(Value::Null);
         let chapters = parse_chapters(&chapters_val);
-        let chapter = self
-            .get_property("chapter")
-            .await
-            .ok()
-            .and_then(|v| v.as_i64())
+        let chapter = ok_value(chapter_value)
+            .and_then(|v| value_as_i64(&v))
             .filter(|v| *v >= 0);
-        let secondary_sub_id = self
-            .get_property("secondary-sid")
-            .await
-            .ok()
+        let secondary_sub_id = ok_value(secondary_sid)
             .and_then(|v| match v {
                 Value::Number(n) => n.as_i64(),
                 Value::String(s) => s.parse::<i64>().ok(),
                 _ => None,
             })
             .filter(|v| *v >= 0);
-        let sub_delay = self
-            .get_property("sub-delay")
-            .await
-            .ok()
-            .and_then(|v| v.as_f64())
+        let sub_delay = ok_value(sub_delay_value)
+            .and_then(|v| value_as_f64(&v))
             .unwrap_or(0.0);
-        let sub_scale = self
-            .get_property("sub-scale")
-            .await
-            .ok()
-            .and_then(|v| v.as_f64())
+        let sub_scale = ok_value(sub_scale_value)
+            .and_then(|v| value_as_f64(&v))
             .unwrap_or(1.0);
-        let network_bps = self
-            .get_property("cache-speed")
-            .await
-            .ok()
+        let network_bps = ok_value(cache_speed)
             .and_then(|v| value_as_f64(&v))
             .filter(|v| v.is_finite() && *v >= 0.0);
-        let video_codec = self
-            .get_property("video-codec")
-            .await
-            .ok()
-            .and_then(|v| v.as_str().map(str::to_string));
-        let audio_codec = self
-            .get_property("audio-codec")
-            .await
-            .ok()
-            .and_then(|v| v.as_str().map(str::to_string));
-        let video_params = self
-            .get_property("video-params")
-            .await
-            .ok()
-            .filter(Value::is_object);
-        let video_out_params = self
-            .get_property("video-out-params")
-            .await
-            .ok()
-            .filter(Value::is_object);
-        let osd_dimensions = self
-            .get_property("osd-dimensions")
-            .await
-            .ok()
-            .filter(Value::is_object);
-        let audio_params = self
-            .get_property("audio-params")
-            .await
-            .ok()
-            .filter(Value::is_object);
-        let hwdec_current = self
-            .get_property("hwdec-current")
-            .await
-            .ok()
-            .and_then(|v| v.as_str().map(str::to_string));
-        let idle_active = self
-            .get_property("idle-active")
-            .await
-            .ok()
-            .and_then(|v| v.as_bool());
-        let demuxer = self
-            .get_property("demuxer")
-            .await
-            .ok()
-            .and_then(|v| v.as_str().map(str::to_string));
-        let file_format = self
-            .get_property("file-format")
-            .await
-            .ok()
-            .and_then(|v| v.as_str().map(str::to_string));
-        let media_title = self
-            .get_property("media-title")
-            .await
-            .ok()
-            .and_then(|v| v.as_str().map(str::to_string));
-        let stream_open_filename = self
-            .get_property("stream-open-filename")
-            .await
-            .ok()
-            .and_then(|v| v.as_str().map(str::to_string));
-        let stream_path = self
-            .get_property("stream-path")
-            .await
-            .ok()
-            .and_then(|v| v.as_str().map(str::to_string));
-        let demuxer_cache_state = self
-            .get_property("demuxer-cache-state")
-            .await
-            .ok()
-            .filter(Value::is_object);
-        let playlist_count = self
-            .get_property("playlist-count")
-            .await
-            .ok()
-            .and_then(|v| value_as_i64(&v));
-        let playlist_pos = self
-            .get_property("playlist-pos")
-            .await
-            .ok()
-            .and_then(|v| value_as_i64(&v));
-        let container_fps = self
-            .get_property("container-fps")
-            .await
-            .ok()
-            .and_then(|v| value_as_f64(&v));
-        let estimated_vf_fps = self
-            .get_property("estimated-vf-fps")
-            .await
-            .ok()
-            .and_then(|v| value_as_f64(&v));
-        let video_bitrate = self
-            .get_property("video-bitrate")
-            .await
-            .ok()
-            .and_then(|v| value_as_f64(&v));
-        let audio_bitrate = self
-            .get_property("audio-bitrate")
-            .await
-            .ok()
-            .and_then(|v| value_as_f64(&v));
-        let frame_drop_count = self
-            .get_property("frame-drop-count")
-            .await
-            .ok()
-            .and_then(|v| value_as_f64(&v));
-        let decoder_frame_drop_count = self
-            .get_property("decoder-frame-drop-count")
-            .await
-            .ok()
-            .and_then(|v| value_as_f64(&v));
-        let vo_frame_drop_count = self
-            .get_property("vo-drop-frame-count")
-            .await
-            .ok()
-            .and_then(|v| value_as_f64(&v));
-        let keepaspect = self
-            .get_property("keepaspect")
-            .await
-            .ok()
-            .and_then(|v| v.as_bool());
-        let panscan = self
-            .get_property("panscan")
-            .await
-            .ok()
-            .and_then(|v| value_as_f64(&v));
-        let video_zoom = self
-            .get_property("video-zoom")
-            .await
-            .ok()
-            .and_then(|v| value_as_f64(&v));
-        let video_scale_x = self
-            .get_property("video-scale-x")
-            .await
-            .ok()
-            .and_then(|v| value_as_f64(&v));
-        let video_scale_y = self
-            .get_property("video-scale-y")
-            .await
-            .ok()
-            .and_then(|v| value_as_f64(&v));
-        let video_aspect_override = self
-            .get_property("video-aspect-override")
-            .await
-            .ok()
-            .and_then(|v| value_as_f64(&v));
+        let video_codec = value_string(video_codec_value);
+        let audio_codec = value_string(audio_codec_value);
+        let video_params = ok_value(video_params_value).filter(Value::is_object);
+        let video_out_params = ok_value(video_out_params_value).filter(Value::is_object);
+        let osd_dimensions = ok_value(osd_dimensions_value).filter(Value::is_object);
+        let audio_params = ok_value(audio_params_value).filter(Value::is_object);
+        let hwdec_current = value_string(hwdec_current_value);
+        let idle_active = ok_value(idle_active_value).and_then(|v| v.as_bool());
+        let demuxer = value_string(demuxer_value);
+        let file_format = value_string(file_format_value);
+        let media_title = value_string(media_title_value);
+        let stream_open_filename = value_string(stream_open_filename_value);
+        let stream_path = value_string(stream_path_value);
+        let demuxer_cache_state = ok_value(demuxer_cache_state_value).filter(Value::is_object);
+        let playlist_count = ok_value(playlist_count_value).and_then(|v| value_as_i64(&v));
+        let playlist_pos = ok_value(playlist_pos_value).and_then(|v| value_as_i64(&v));
+        let container_fps = ok_value(container_fps_value).and_then(|v| value_as_f64(&v));
+        let estimated_vf_fps = ok_value(estimated_vf_fps_value).and_then(|v| value_as_f64(&v));
+        let video_bitrate = ok_value(video_bitrate_value).and_then(|v| value_as_f64(&v));
+        let audio_bitrate = ok_value(audio_bitrate_value).and_then(|v| value_as_f64(&v));
+        let frame_drop_count = ok_value(frame_drop_count_value).and_then(|v| value_as_f64(&v));
+        let decoder_frame_drop_count =
+            ok_value(decoder_frame_drop_count_value).and_then(|v| value_as_f64(&v));
+        let vo_frame_drop_count =
+            ok_value(vo_frame_drop_count_value).and_then(|v| value_as_f64(&v));
+        let keepaspect = ok_value(keepaspect_value).and_then(|v| v.as_bool());
+        let panscan = ok_value(panscan_value).and_then(|v| value_as_f64(&v));
+        let video_zoom = ok_value(video_zoom_value).and_then(|v| value_as_f64(&v));
+        let video_scale_x = ok_value(video_scale_x_value).and_then(|v| value_as_f64(&v));
+        let video_scale_y = ok_value(video_scale_y_value).and_then(|v| value_as_f64(&v));
+        let video_aspect_override =
+            ok_value(video_aspect_override_value).and_then(|v| value_as_f64(&v));
 
         Ok(MpvSnapshot {
             url,

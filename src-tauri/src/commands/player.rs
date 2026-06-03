@@ -1888,9 +1888,20 @@ pub async fn take_screenshot(
 #[tauri::command]
 pub async fn get_state(state: State<'_, Arc<AppState>>) -> AppResult<MpvSnapshot> {
     log_visual_player_stage("get_state:start");
-    let snapshot = state.mpv.backend().snapshot().await;
+    let backend = state.mpv.backend();
+    let snapshot = match tokio::time::timeout(
+        std::time::Duration::from_millis(1100),
+        backend.snapshot(),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(AppError::Mpv("mpv state timed out".into())),
+    };
     log_visual_player_stage(if snapshot.is_ok() {
         "get_state:complete"
+    } else if matches!(&snapshot, Err(AppError::Mpv(message)) if message.contains("timed out")) {
+        "get_state:timeout"
     } else {
         "get_state:error"
     });
@@ -1962,7 +1973,30 @@ pub async fn embed_set_visible(state: State<'_, Arc<AppState>>, visible: bool) -
     } else {
         "embed_visible:hide"
     });
-    state.mpv.embed_show(visible)
+    let mpv = state.mpv.clone();
+    let timeout_ms = if visible { 4000 } else { 1500 };
+    let result = match tokio::time::timeout(
+        std::time::Duration::from_millis(timeout_ms),
+        tokio::task::spawn_blocking(move || mpv.embed_show(visible)),
+    )
+    .await
+    {
+        Ok(joined) => joined
+            .map_err(|error| AppError::Mpv(format!("embed visible worker failed: {error}")))?,
+        Err(_) => Err(AppError::Mpv(if visible {
+            "embed show timed out".into()
+        } else {
+            "embed hide timed out".into()
+        })),
+    };
+    log_visual_player_stage(if result.is_ok() {
+        "embed_visible:complete"
+    } else if matches!(&result, Err(AppError::Mpv(message)) if message.contains("timed out")) {
+        "embed_visible:timeout"
+    } else {
+        "embed_visible:error"
+    });
+    result
 }
 
 #[tauri::command]

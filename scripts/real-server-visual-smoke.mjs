@@ -276,7 +276,7 @@ async function cdpCall(ws, method, params = {}) {
       ws.__hillsCdpPending.delete(id);
       const parseNote = ws.__hillsCdpLastParseError ? `; last parse data ${ws.__hillsCdpLastParseError}` : "";
       reject(new Error(`${method} timeout${parseNote}`));
-    }, 60_000);
+    }, 120_000);
     ws.__hillsCdpPending.set(id, { method, resolve, reject, timer });
     ws.send(JSON.stringify({ id, method, params }));
   });
@@ -1238,7 +1238,6 @@ function captureNativeWindowAndAnalyze(rootPid, windowHandle, name, options = {}
         [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
         [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT point);
         [DllImport("user32.dll")] public static extern bool IsChild(IntPtr hWndParent, IntPtr hWnd);
-        [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint nFlags);
       }
 "@
     $root = ${pid}
@@ -1348,9 +1347,13 @@ function captureNativeWindowAndAnalyze(rootPid, windowHandle, name, options = {}
       [Win32]::SetForegroundWindow($ownerHwnd) | Out-Null
       Start-Sleep -Milliseconds 260
     }
-    [Win32]::ShowWindow($hWnd, 5) | Out-Null
-    [Win32]::SetWindowPos($hWnd, [IntPtr](0), 0, 0, 0, 0, 0x0043) | Out-Null
-    Start-Sleep -Milliseconds 260
+    if ($requestedHwnd -eq "0") {
+      [Win32]::ShowWindow($hWnd, 5) | Out-Null
+      [Win32]::SetWindowPos($hWnd, [IntPtr](0), 0, 0, 0, 0, 0x0043) | Out-Null
+      Start-Sleep -Milliseconds 260
+    } elseif (-not $target.visible) {
+      throw "requested native child host is not visible"
+    }
     $rect = New-Object RECT
     if (-not [Win32]::GetWindowRect($hWnd, [ref]$rect)) {
       throw "failed to read native window rect"
@@ -1376,19 +1379,7 @@ function captureNativeWindowAndAnalyze(rootPid, windowHandle, name, options = {}
     }
     $bmp = New-Object System.Drawing.Bitmap($width, $height)
     $gfx = [System.Drawing.Graphics]::FromImage($bmp)
-    if ($requestedHwnd -ne "0") {
-      $hdc = $gfx.GetHdc()
-      try {
-        $printed = [Win32]::PrintWindow($hWnd, $hdc, 2)
-      } finally {
-        $gfx.ReleaseHdc($hdc)
-      }
-      if (-not $printed) {
-        throw "PrintWindow failed for native playback hwnd $($target.hwnd)"
-      }
-    } else {
-      $gfx.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bmp.Size)
-    }
+    $gfx.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bmp.Size)
     $bmp.Save(${JSON.stringify(outputPath)}, [System.Drawing.Imaging.ImageFormat]::Png)
     $gfx.Dispose()
     $bmp.Dispose()
@@ -1417,7 +1408,8 @@ function captureNativeWindowAndAnalyze(rootPid, windowHandle, name, options = {}
     timeout: 12000,
     killSignal: "SIGKILL",
   });
-  return { ...analyzePng(outputPath), windowInfo: JSON.parse(result.stdout.trim()) };
+  const pixels = analyzePng(outputPath);
+  return { ...pixels, pixelOk: pixelSampleOk(pixels), windowInfo: JSON.parse(result.stdout.trim()) };
 }
 
 function resizeNativeRootWindow(rootPid, size) {
@@ -1564,6 +1556,33 @@ function processTree(rootPid) {
   if (!stdout) return [];
   const parsed = JSON.parse(stdout);
   return Array.isArray(parsed) ? parsed : [parsed];
+}
+
+function killLaunchedProcessTree(childProcess) {
+  const rootPid = Number(childProcess?.pid) || 0;
+  if (!rootPid) return { rootPid: null, targets: [], taskkill: [] };
+  if (process.platform !== "win32") {
+    if (childProcess.exitCode == null && !childProcess.killed) childProcess.kill();
+    return { rootPid, targets: [rootPid], taskkill: [] };
+  }
+  const knownChildren = processTree(rootPid)
+    .map((processInfo) => Number(processInfo.ProcessId))
+    .filter(Boolean);
+  const targets = [...new Set([rootPid, ...knownChildren])].reverse();
+  const taskkill = targets.map((pid) => {
+    const result = spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      stdio: "pipe",
+      windowsHide: true,
+    });
+    return {
+      pid,
+      status: result.status,
+      error: result.error?.message ?? null,
+    };
+  });
+  return { rootPid, targets, taskkill };
 }
 
 function listTopLevelPlaybackWindows(rootPid) {
@@ -2656,7 +2675,7 @@ try {
       };
     }
     let nativeFrameEvidence = null;
-    if (!expectedClearBlockSeen && !frameEvidence?.pixelOk && isTauriMode) {
+    if (!expectedClearBlockSeen && isTauriMode) {
       try {
         const nativeCapture = await capturePlaybackNativeLayer(ws, child.pid, "command-player-native-playback");
         nativeFrameEvidence = nativeCapture.capture;
@@ -2746,8 +2765,11 @@ try {
     if (!expectClearBlock && !frameEvidence?.pixelOk) {
       failures.push(`mpv frame screenshot is missing or visually blank: ${frameEvidence?.error ?? "pixel sample failed"}`);
     }
-    if (!expectClearBlock && !frameEvidence?.pixelOk && nativeFrameEvidence?.error) {
+    if (!expectClearBlock && isTauriMode && nativeFrameEvidence?.error) {
       failures.push(`native playback capture failed: ${nativeFrameEvidence.error}`);
+    }
+    if (!expectClearBlock && isTauriMode && !nativeFrameEvidence?.pixelOk) {
+      failures.push("native app-owned playback region is visually blank or missing");
     }
     if (!playbackWindows.ok) {
       if (playbackWindows.externalMpv.length > 0) {
@@ -3571,6 +3593,8 @@ try {
   }
 } finally {
   ws?.close();
+  const cleanupResult = killLaunchedProcessTree(child);
+  stage("launched-process-cleanup", cleanupResult);
   if (child.exitCode == null && !child.killed) child.kill();
   setTimeout(() => {
     if (child.exitCode == null) child.kill("SIGKILL");
