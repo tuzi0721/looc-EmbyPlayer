@@ -37,6 +37,10 @@ const auth = useAuthStore();
 const lib = useLibraryStore();
 const serverStore = useServerStore();
 const settings = useSettingsStore();
+const routeAccountId = computed(() => {
+  const value = route.query.account;
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : auth.activeId;
+});
 
 const desktopBridge =
   typeof window !== "undefined" && Boolean((window as Window & { hillsLite?: unknown }).hillsLite);
@@ -342,7 +346,7 @@ function mergeDanmakuComments(comments: DanmakuComment[]): DanmakuComment[] {
 }
 
 const currentItemId = computed(() => player.itemId ?? props.id);
-const item = computed(() => lib.cachedItem(currentItemId.value, auth.activeId) ?? lib.cachedItem(props.id, auth.activeId));
+const item = computed(() => lib.cachedItem(currentItemId.value, routeAccountId.value) ?? lib.cachedItem(props.id, routeAccountId.value));
 const routeLocalFilePath = computed(() => {
   const value = route.query.file;
   return typeof value === "string" && value.trim().length > 0 ? value : null;
@@ -2001,6 +2005,10 @@ async function startCurrentPlayback() {
   const stealthWhenRecording = route.query.stealth !== "0";
   const lineId = firstQueryString(route.query.lineId) || null;
   const mediaSourceId = firstQueryString(route.query.mediaSourceId) || null;
+  if (routeAccountId.value && auth.activeId !== routeAccountId.value) {
+    await auth.switchTo(routeAccountId.value);
+  }
+  const playbackAccountId = routeAccountId.value;
 
   if (filePath) {
     resetDanmakuState();
@@ -2019,18 +2027,18 @@ async function startCurrentPlayback() {
       await player.refresh();
     }
   } else if (localId) {
-    if (!lib.cachedItem(props.id, auth.activeId)) {
-      await lib.loadItem(props.id, auth.activeId);
+    if (!lib.cachedItem(props.id, playbackAccountId)) {
+      await lib.loadItem(props.id, playbackAccountId);
     }
     await api.playLocal(localId, start);
   } else if (useHtmlVideo) {
-    if (!lib.cachedItem(props.id, auth.activeId)) {
-      await lib.loadItem(props.id, auth.activeId);
+    if (!lib.cachedItem(props.id, playbackAccountId)) {
+      await lib.loadItem(props.id, playbackAccountId);
     }
     await startHtmlPlayback(props.id, start, { lineId, mediaSourceId });
   } else {
-    if (!lib.cachedItem(props.id, auth.activeId)) {
-      await lib.loadItem(props.id, auth.activeId);
+    if (!lib.cachedItem(props.id, playbackAccountId)) {
+      await lib.loadItem(props.id, playbackAccountId);
     }
     await player.play({
       itemId: props.id,

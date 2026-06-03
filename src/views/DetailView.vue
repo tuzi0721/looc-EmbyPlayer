@@ -1126,6 +1126,9 @@ function setSeriesPlaybackQueue(ep: MediaItem) {
 
 async function pushPlayerRoute(id: string, startMs: number) {
   const query: Record<string, string> = { start: String(startMs), from: props.id };
+  if (routeAccountId.value) query.account = routeAccountId.value;
+  const routeServerId = typeof route.query.server === "string" ? route.query.server.trim() : "";
+  if (routeServerId) query.server = routeServerId;
   if (id === props.id && selectedMediaSourcePlaybackId.value) {
     query.mediaSourceId = selectedMediaSourcePlaybackId.value;
   }
