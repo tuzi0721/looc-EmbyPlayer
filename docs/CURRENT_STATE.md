@@ -283,6 +283,8 @@ node scripts\check-notification-clear.mjs
 
 
 
+> 2026-06-03 17:28 update: committed and pushed the verified playback/proxy work to GitHub. Commit: `5d9033d Restore real embedded playback via local stream proxy`; push result: `a83b994..5d9033d main -> main`. Latest phase log: `docs/CHANGE_LOG/2026-06-03-1728-git-sync-local-proxy.md`. Next step: commit/push this sync log, then continue remaining UI/playback issues from a clean baseline.
+
 > 2026-06-03 17:27 update: removed the untracked `.cunzhi-memory` scratch files and added `.cunzhi-memory/` to `.gitignore` so this unrelated memory folder does not keep appearing in git status. Latest phase log: `docs/CHANGE_LOG/2026-06-03-1727-unrelated-memory-cleanup.md`. Next step: commit the verified playback/proxy changes and logs so git no longer keeps accumulating this work.
 
 > 2026-06-03 17:25 update: strict real-account command-only smoke passed against the `17:24:21` release. Evidence: real Emby setup/login/media succeeded, DirectPlay PlaybackInfo returned 2 media sources, embedded attach succeeded, backend reached `play:stream-proxy-ready`/`play:mpv-load-complete`/`play:return`, and player state reported `durationMs=1420032`, `positionMs=3270`, `trackCount=4`, `videoTrackCount=1`, `videoTrackCodecs=["h264"]`, `fileLoadedCount=1`, `playbackRestartCount=1`. No independent `mpv.exe` process was reported; cleanup returned `stop=true`, `hide=true`, `detach=true`; temp credential file was deleted. No screenshots were used. Latest phase log: `docs/CHANGE_LOG/2026-06-03-1725-real-command-strict-proxy-pass.md`. Next step: continue remaining UI/playback issues now that real embedded playback is no longer blocked by remote URL loading.
