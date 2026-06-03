@@ -15,6 +15,7 @@ const commandOnly = process.env.HILLS_REAL_COMMAND_ONLY === "1";
 const expectClearBlock = process.env.HILLS_REAL_EXPECT_CLEAR_BLOCK === "1";
 const personalOnly = process.env.HILLS_REAL_PERSONAL_ONLY === "1";
 const layoutMetricsOnly = process.env.HILLS_REAL_LAYOUT_METRICS === "1";
+const hitTestOnly = process.env.HILLS_REAL_HIT_TEST_ONLY === "1";
 const isTauriMode = appMode.startsWith("tauri");
 const appExe = process.env.HILLS_REAL_APP_EXE ? path.resolve(process.env.HILLS_REAL_APP_EXE) : null;
 const tmpDir = path.join(os.tmpdir(), `hills-lite-real-visual-${Date.now()}`);
@@ -2364,6 +2365,139 @@ try {
     const redactedOutput = JSON.parse(redactSensitiveText(JSON.stringify(output)));
     console.log(JSON.stringify(redactedOutput, null, 2));
     if (!output.ok) process.exitCode = 1;
+  } else if (hitTestOnly) {
+    stage("hit-test-only-start");
+    const hitTest = await cdpEvalAfterContextReset(ws, `
+      (async () => {
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+        if (!appRouter) throw new Error("mounted Vue router not found");
+        const rectOf = (selector) => {
+          const node = document.querySelector(selector);
+          if (!node) return null;
+          const rect = node.getBoundingClientRect();
+          const style = getComputedStyle(node);
+          return {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+            left: rect.left,
+            display: style.display,
+            visibility: style.visibility,
+            opacity: Number(style.opacity || "1"),
+            pointerEvents: style.pointerEvents,
+            zIndex: style.zIndex,
+          };
+        };
+        const stackAt = (x, y) =>
+          document.elementsFromPoint(x, y).slice(0, 8).map((node) => ({
+            tag: node.tagName,
+            className: String(node.className ?? ""),
+            id: node.id || null,
+            role: node.getAttribute?.("role") ?? null,
+            ariaLabel: node.getAttribute?.("aria-label") ?? null,
+            isHeroPlay: Boolean(node.closest?.(".hero__play")),
+          }));
+        const inspect = async (route) => {
+          await appRouter.push(route);
+          window.moveTo(40, 40);
+          window.resizeTo(1366, 768);
+          await wait(2600);
+          const buttons = Array.from(document.querySelectorAll(".detail .hero__play")).map((button, index) => {
+            const rect = button.getBoundingClientRect();
+            const style = getComputedStyle(button);
+            const points = [
+              { name: "center", x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+              { name: "left-inside", x: rect.left + Math.min(24, rect.width / 3), y: rect.top + rect.height / 2 },
+              { name: "right-inside", x: rect.right - Math.min(24, rect.width / 3), y: rect.top + rect.height / 2 },
+            ].map((point) => {
+              const hit = document.elementFromPoint(point.x, point.y);
+              const hitPlayButton = hit?.closest?.(".hero__play") ?? null;
+              return {
+                ...point,
+                hitTag: hit?.tagName ?? null,
+                hitClass: String(hit?.className ?? ""),
+                hitPlayButton: Boolean(hitPlayButton),
+                stack: stackAt(point.x, point.y),
+              };
+            });
+            return {
+              index,
+              text: button.textContent?.replace(/\\s+/g, " ").trim() ?? null,
+              disabled: Boolean(button.disabled),
+              rect: {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+                top: rect.top,
+                right: rect.right,
+                bottom: rect.bottom,
+                left: rect.left,
+              },
+              style: {
+                display: style.display,
+                visibility: style.visibility,
+                opacity: Number(style.opacity || "1"),
+                pointerEvents: style.pointerEvents,
+                zIndex: style.zIndex,
+              },
+              points,
+            };
+          });
+          return {
+            route: appRouter.currentRoute.value.fullPath,
+            url: window.location.href,
+            viewport: { width: window.innerWidth, height: window.innerHeight },
+            title: document.querySelector(".hero__title")?.textContent?.replace(/\\s+/g, " ").trim() ?? null,
+            hero: rectOf(".hero"),
+            heroBody: rectOf(".hero__body"),
+            heroMain: rectOf(".hero__main"),
+            heroActions: rectOf(".hero__actions"),
+            buttons,
+          };
+        };
+        return {
+          movie: await inspect(${JSON.stringify(`/item/${setup.selected.id}`)}),
+          series: ${setup.series?.id ? `await inspect(${JSON.stringify(`/item/${setup.series.id}`)})` : "null"},
+        };
+      })()
+    `, 4);
+    const failures = [];
+    for (const [name, entry] of Object.entries(hitTest)) {
+      if (!entry) continue;
+      const playButton = entry.buttons?.[0] ?? null;
+      if (!playButton) {
+        failures.push(`${name}: play button missing`);
+        continue;
+      }
+      if (playButton.disabled) failures.push(`${name}: play button disabled`);
+      const center = playButton.points?.find((point) => point.name === "center");
+      if (!center?.hitPlayButton) {
+        failures.push(`${name}: play button center hit ${center?.hitTag ?? "none"}.${center?.hitClass ?? ""}`);
+      }
+    }
+    stage("hit-test-only-complete", { ok: failures.length === 0, failures });
+    const output = {
+      ok: failures.length === 0,
+      failures,
+      tmpDir,
+      setup,
+      hitTest,
+      diagnostics: {
+        electronStdout,
+        electronStderr,
+        pageConsole: pageConsole.slice(-12),
+        pageExceptions,
+      },
+    };
+    const redactedOutput = JSON.parse(redactSensitiveText(JSON.stringify(output)));
+    console.log(JSON.stringify(redactedOutput, null, 2));
+    if (!output.ok) process.exitCode = 1;
   } else if (commandOnly) {
     stage("command-only-start");
     const playerOpen = await cdpEvalAfterContextReset(ws, `
@@ -3062,6 +3196,7 @@ try {
             const hit = rect
               ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
               : null;
+            const hitPlayButton = hit?.closest?.(".hero__play") ?? null;
             return {
               route,
               titleMatches: !expectedName || title.includes(expectedName),
@@ -3071,6 +3206,8 @@ try {
               actionError: document.querySelector(".hero__action-error")?.textContent?.replace(/\\s+/g, " ").trim() ?? null,
               hitTag: hit?.tagName ?? null,
               hitClass: hit?.className ?? null,
+              hitPlayButton: Boolean(hitPlayButton),
+              hitPlayButtonClass: hitPlayButton?.className ?? null,
               buttonRect: rect ? {
                 x: rect.x,
                 y: rect.y,
@@ -3100,6 +3237,8 @@ try {
       seriesPlayProbe.actionError = buttonSnapshot?.actionError ?? null;
       seriesPlayProbe.hitTag = buttonSnapshot?.hitTag ?? null;
       seriesPlayProbe.hitClass = buttonSnapshot?.hitClass ?? null;
+      seriesPlayProbe.hitPlayButton = buttonSnapshot?.hitPlayButton ?? false;
+      seriesPlayProbe.hitPlayButtonClass = buttonSnapshot?.hitPlayButtonClass ?? null;
       seriesPlayProbe.clickSkipped = true;
       seriesPlayProbe.reason = "full smoke inspects the series play button without opening a second playback session";
 
@@ -3226,6 +3365,8 @@ try {
       routeAfterClick: seriesPlayProbe.routeAfterClick,
       hitTag: seriesPlayProbe.hitTag ?? null,
       hitClass: seriesPlayProbe.hitClass ?? null,
+      hitPlayButton: seriesPlayProbe.hitPlayButton === true,
+      hitPlayButtonClass: seriesPlayProbe.hitPlayButtonClass ?? null,
       clickSkipped: seriesPlayProbe.clickSkipped === true,
       actionErrorPresent: Boolean(seriesPlayProbe.actionError),
       exceptionPresent: Boolean(seriesPlayProbe.exception),
@@ -3261,6 +3402,7 @@ try {
       const hit = rect
         ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
         : null;
+      const hitPlayButton = hit?.closest?.(".hero__play") ?? null;
       return {
         route: appRouter.currentRoute.value.fullPath,
         url: window.location.href,
@@ -3268,6 +3410,8 @@ try {
         buttonDisabled: button ? Boolean(button.disabled) : null,
         hitTag: hit?.tagName ?? null,
         hitClass: hit?.className ?? null,
+        hitPlayButton: Boolean(hitPlayButton),
+        hitPlayButtonClass: hitPlayButton?.className ?? null,
         buttonRect: rect ? {
           x: rect.x,
           y: rect.y,
@@ -3285,6 +3429,9 @@ try {
     route: playEntry.route,
     hasButton: Boolean(playEntry.buttonRect),
     buttonDisabled: playEntry.buttonDisabled,
+    hitTag: playEntry.hitTag ?? null,
+    hitClass: playEntry.hitClass ?? null,
+    hitPlayButton: playEntry.hitPlayButton === true,
   });
   if (!playEntry.buttonRect) throw new Error("detail play button was not found");
   if (playEntry.buttonDisabled) throw new Error("detail play button was disabled");
@@ -3316,6 +3463,7 @@ try {
       route: playerOpen.route,
       hitTag: playEntry.hitTag ?? null,
       hitClass: playEntry.hitClass ?? null,
+      hitPlayButton: playEntry.hitPlayButton === true,
     });
     await cdpEvalAfterContextReset(ws, `
       (() => {
@@ -3603,7 +3751,7 @@ try {
   if (!seriesPlayProbe.attempted) failures.push(`series detail play was not attempted: ${seriesPlayProbe.reason}`);
   if (seriesPlayProbe.attempted && !seriesPlayProbe.hasButton) failures.push("series detail play button was not found");
   if (seriesPlayProbe.attempted && seriesPlayProbe.buttonDisabled) failures.push("series detail play button was disabled");
-  if (seriesPlayProbe.attempted && seriesPlayProbe.hitTag && seriesPlayProbe.hitTag !== "BUTTON") {
+  if (seriesPlayProbe.attempted && seriesPlayProbe.hitTag && !seriesPlayProbe.hitPlayButton) {
     failures.push(`series detail play button is not the top hit target: ${seriesPlayProbe.hitTag}.${seriesPlayProbe.hitClass ?? ""}`);
   }
   if (seriesPlayProbe.exception) failures.push(`series detail play probe exception: ${seriesPlayProbe.exception}`);
