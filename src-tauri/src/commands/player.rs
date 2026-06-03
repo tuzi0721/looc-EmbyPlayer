@@ -9,9 +9,11 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
+use url::Url;
 use uuid::Uuid;
 
-use crate::emby::models::{MediaSource, MediaStream, PlaybackInfo};
+use crate::config::models::{Account, Line, LineStatus, Server};
+use crate::emby::models::{MediaItem, MediaSource, MediaStream, PlaybackInfo};
 use crate::error::{AppError, AppResult};
 use crate::mpv::backend::MpvBackend;
 use crate::mpv::backend::{MpvTrackInfo, TrackKind};
@@ -282,6 +284,197 @@ fn close_secondary_blackout_windows(app: &tauri::AppHandle) {
     }
 }
 
+struct PlaybackLineSelection {
+    line: Line,
+    url: Url,
+    headers: Vec<(String, String)>,
+    user_agent: Option<String>,
+    range_supported: bool,
+}
+
+fn playback_line_candidates(server: &Server, line_id: Option<&str>) -> AppResult<Vec<Line>> {
+    if let Some(id) = line_id.filter(|id| !id.trim().is_empty()) {
+        let line = server
+            .lines
+            .iter()
+            .find(|line| line.id == id)
+            .ok_or_else(|| AppError::NotFound(format!("line {id}")))?;
+        if !line.enabled {
+            return Err(AppError::NoLine(server.id.clone()));
+        }
+        return Ok(vec![line.clone()]);
+    }
+
+    let mut candidates: Vec<Line> = Vec::new();
+    if let Some(active_id) = &server.active_line_id {
+        if let Some(line) = server
+            .lines
+            .iter()
+            .find(|line| &line.id == active_id && line.enabled)
+        {
+            candidates.push(line.clone());
+        }
+    }
+
+    let mut alive: Vec<&Line> = server
+        .lines
+        .iter()
+        .filter(|line| line.enabled && line.last_status != Some(LineStatus::Down))
+        .collect();
+    alive.sort_by_key(|line| (line.priority, line.last_latency_ms.unwrap_or(u32::MAX)));
+
+    for line in alive {
+        if candidates.iter().any(|candidate| candidate.id == line.id) {
+            continue;
+        }
+        candidates.push(line.clone());
+    }
+
+    if candidates.is_empty() {
+        return Err(AppError::NoLine(server.id.clone()));
+    }
+    Ok(candidates)
+}
+
+fn playback_headers_for_line(
+    server: &Server,
+    account: &Account,
+    line: &Line,
+) -> (Option<String>, Vec<(String, String)>) {
+    let user_agent = line
+        .user_agent
+        .clone()
+        .or_else(|| server.default_user_agent.clone());
+    let mut headers = line.headers.clone();
+    headers.push(("X-Emby-Token".into(), account.access_token.clone()));
+    headers.push((
+        "Authorization".into(),
+        format!("MediaBrowser Token=\"{}\"", account.access_token),
+    ));
+    (user_agent, headers)
+}
+
+async fn select_playback_line(
+    state: &AppState,
+    server: &Server,
+    account: &Account,
+    item: &MediaItem,
+    source: &MediaSource,
+    play_session_id: &str,
+    prefer_direct: bool,
+    line_id: Option<&str>,
+) -> AppResult<PlaybackLineSelection> {
+    let candidates = playback_line_candidates(server, line_id)?;
+    let mut first_nonseekable: Option<PlaybackLineSelection> = None;
+    let mut saw_range_probe_error = false;
+    let mut saw_range_broken_mp4 = false;
+
+    for line in candidates {
+        let url = state.emby.build_stream_url_for_line(
+            server,
+            account,
+            item,
+            source,
+            play_session_id,
+            prefer_direct,
+            Some(&line.id),
+        )?;
+        let (user_agent, headers) = playback_headers_for_line(server, account, &line);
+        log_visual_player_stage(&format!("play:range-probe-line-start id={}", line.id));
+        let range_supported = match state
+            .stream_proxy
+            .probe_range_support(url.clone(), headers.clone(), user_agent.clone())
+            .await
+        {
+            Ok(supported) => supported,
+            Err(error) => {
+                saw_range_probe_error = true;
+                log_visual_player_stage(&format!(
+                    "play:range-probe-line-error id={} {}",
+                    line.id,
+                    sanitize_visual_error(&error.to_string())
+                ));
+                continue;
+            }
+        };
+        log_visual_player_stage(&format!(
+            "play:range-probe-line-complete id={} supported={range_supported}",
+            line.id
+        ));
+
+        let selection = PlaybackLineSelection {
+            line,
+            url,
+            headers,
+            user_agent,
+            range_supported,
+        };
+
+        if range_supported {
+            log_visual_player_stage(&format!(
+                "play:range-probe-selected id={} supported=true",
+                selection.line.id
+            ));
+            return Ok(selection);
+        }
+
+        if source_requires_streamable_mp4_prefix(source) {
+            log_visual_player_stage(&format!(
+                "play:mp4-prefix-probe-start id={}",
+                selection.line.id
+            ));
+            let streamable_prefix = match state
+                .stream_proxy
+                .probe_mp4_streamable_prefix(
+                    selection.url.clone(),
+                    selection.headers.clone(),
+                    selection.user_agent.clone(),
+                )
+                .await
+            {
+                Ok(streamable) => streamable,
+                Err(error) => {
+                    log_visual_player_stage(&format!(
+                        "play:mp4-prefix-probe-error id={} {}",
+                        selection.line.id,
+                        sanitize_visual_error(&error.to_string())
+                    ));
+                    false
+                }
+            };
+            log_visual_player_stage(&format!(
+                "play:mp4-prefix-probe id={} streamable={streamable_prefix}",
+                selection.line.id
+            ));
+            if !streamable_prefix {
+                saw_range_broken_mp4 = true;
+                continue;
+            }
+        }
+
+        if first_nonseekable.is_none() {
+            first_nonseekable = Some(selection);
+        }
+    }
+
+    if let Some(selection) = first_nonseekable {
+        log_visual_player_stage(&format!(
+            "play:range-probe-selected id={} supported=false",
+            selection.line.id
+        ));
+        return Ok(selection);
+    }
+
+    if saw_range_broken_mp4 {
+        log_visual_player_stage("play:blocked-range-broken-mp4");
+        return Err(AppError::InvalidState(RANGE_BROKEN_MP4_ERROR.into()));
+    }
+    if saw_range_probe_error {
+        return Err(AppError::InvalidState(STREAM_PROBE_ERROR.into()));
+    }
+    Err(AppError::InvalidState(STREAM_PROBE_ERROR.into()))
+}
+
 #[tauri::command]
 pub async fn get_playback_source(
     state: State<'_, Arc<AppState>>,
@@ -309,6 +502,7 @@ pub async fn get_playback_source(
         .await?;
     let source = pick_local_media_source(&pb, payload.media_source_id.as_deref())?;
     let play_method = source.local_decode_play_method().to_string();
+    let line = state.emby.pick_line(&server, line_id)?;
     let url = state.emby.build_stream_url_for_line(
         &server,
         &account,
@@ -316,20 +510,9 @@ pub async fn get_playback_source(
         &source,
         &pb.play_session_id,
         true,
-        line_id,
+        Some(&line.id),
     )?;
-    let line = state.emby.pick_line(&server, line_id)?;
-
-    let user_agent = line
-        .user_agent
-        .clone()
-        .or_else(|| server.default_user_agent.clone());
-    let mut headers = line.headers.clone();
-    headers.push(("X-Emby-Token".into(), account.access_token.clone()));
-    headers.push((
-        "Authorization".into(),
-        format!("MediaBrowser Token=\"{}\"", account.access_token),
-    ));
+    let (user_agent, headers) = playback_headers_for_line(&server, &account, &line);
     let proxy_url = state
         .stream_proxy
         .register(url.clone(), headers.clone(), user_agent.clone())
@@ -470,7 +653,8 @@ pub async fn play(
     };
     log_visual_player_stage("play:source-selected");
 
-    let url = state.emby.build_stream_url_for_line(
+    let selected_line = select_playback_line(
+        &state,
         &server,
         &account,
         &item,
@@ -478,10 +662,16 @@ pub async fn play(
         &pb.play_session_id,
         payload.prefer_direct,
         line_id,
-    )?;
+    )
+    .await?;
     log_visual_player_stage("play:stream-url-ready");
-
-    let line = state.emby.pick_line(&server, line_id)?;
+    let PlaybackLineSelection {
+        line,
+        url,
+        headers,
+        user_agent,
+        range_supported,
+    } = selected_line;
     let play_method = source.local_decode_play_method().to_string();
     let tracks = source.media_streams.iter().map(stream_to_track).collect();
     let media_sources = pb
@@ -504,55 +694,7 @@ pub async fn play(
         })
         .collect();
 
-    let user_agent = line
-        .user_agent
-        .clone()
-        .or_else(|| server.default_user_agent.clone());
-    let mut headers = line.headers.clone();
-    headers.push(("X-Emby-Token".into(), account.access_token.clone()));
-    headers.push((
-        "Authorization".into(),
-        format!("MediaBrowser Token=\"{}\"", account.access_token),
-    ));
-    let range_supported = match state
-        .stream_proxy
-        .probe_range_support(url.clone(), headers.clone(), user_agent.clone())
-        .await
-    {
-        Ok(supported) => supported,
-        Err(error) => {
-            log_visual_player_stage(&format!(
-                "play:range-probe-error {}",
-                sanitize_visual_error(&error.to_string())
-            ));
-            return Err(AppError::InvalidState(STREAM_PROBE_ERROR.into()));
-        }
-    };
     log_visual_player_stage(&format!("play:range-probe supported={range_supported}"));
-    if !range_supported && source_requires_streamable_mp4_prefix(&source) {
-        log_visual_player_stage("play:mp4-prefix-probe-start");
-        let streamable_prefix = match state
-            .stream_proxy
-            .probe_mp4_streamable_prefix(url.clone(), headers.clone(), user_agent.clone())
-            .await
-        {
-            Ok(streamable) => streamable,
-            Err(error) => {
-                log_visual_player_stage(&format!(
-                    "play:mp4-prefix-probe-error {}",
-                    sanitize_visual_error(&error.to_string())
-                ));
-                false
-            }
-        };
-        log_visual_player_stage(&format!(
-            "play:mp4-prefix-probe streamable={streamable_prefix}"
-        ));
-        if !streamable_prefix {
-            log_visual_player_stage("play:blocked-range-broken-mp4");
-            return Err(AppError::InvalidState(RANGE_BROKEN_MP4_ERROR.into()));
-        }
-    }
     let mpv_url = state
         .stream_proxy
         .register_with_range_support(
@@ -668,6 +810,7 @@ pub async fn play(
             "name": line.name.clone(),
             "baseUrl": line.base_url.clone(),
         },
+        "rangeSupported": range_supported,
     });
 
     let result = PlaybackSourceResult {
