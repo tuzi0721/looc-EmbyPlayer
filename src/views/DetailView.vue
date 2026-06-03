@@ -30,6 +30,10 @@ const routeAccountId = computed(() => {
   const value = route.query.account;
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : auth.activeId;
 });
+const routeAccount = computed(() =>
+  auth.accounts.find((account) => account.id === routeAccountId.value) ??
+  (auth.activeAccount?.id === routeAccountId.value ? auth.activeAccount : null),
+);
 const item = computed(() => lib.cachedItem(props.id, routeAccountId.value));
 const loading = ref(false);
 const loadStage = ref("");
@@ -202,11 +206,11 @@ const seriesId = computed(() =>
 );
 
 const activeServer = computed(() => {
-  const a = auth.activeAccount;
+  const a = routeAccount.value;
   return a ? serverStore.byId(a.serverId) ?? null : null;
 });
 
-const hasPlaybackContext = computed(() => Boolean(auth.activeAccount && activeServer.value));
+const hasPlaybackContext = computed(() => Boolean(routeAccount.value && activeServer.value));
 
 function missingPlaybackContextError() {
   if (!auth.activeAccount) return "当前没有已登录账号，请先在服务器设置中登录 Emby/Jellyfin。";
@@ -1138,6 +1142,14 @@ async function pushPlayerRoute(id: string, startMs: number) {
   });
 }
 
+function currentSourceQuery(): Record<string, string> | undefined {
+  const query: Record<string, string> = {};
+  if (routeAccountId.value) query.account = routeAccountId.value;
+  const routeServerId = typeof route.query.server === "string" ? route.query.server.trim() : "";
+  if (routeServerId) query.server = routeServerId;
+  return Object.keys(query).length > 0 ? query : undefined;
+}
+
 async function playTarget(id: string, startMs: number) {
   if (playNavigating.value) return;
   playNavigating.value = true;
@@ -1238,6 +1250,7 @@ function openRelatedItem(target: MediaItem) {
   router.push({
     name: "item-detail",
     params: { id: target.Id },
+    query: currentSourceQuery(),
   }).catch(() => {});
 }
 
@@ -1384,11 +1397,11 @@ async function toggleFavorite() {
   const next = !current.UserData?.IsFavorite;
   actionError.value = null;
   userDataUpdating.value = "favorite";
-  lib.updateItemUserData(current.Id, mergedUserData({ IsFavorite: next }));
+  lib.updateItemUserData(current.Id, mergedUserData({ IsFavorite: next }), routeAccountId.value);
 
   try {
     const userData = await api.setItemFavorite({ itemId: current.Id, value: next });
-    lib.updateItemUserData(current.Id, userData);
+    lib.updateItemUserData(current.Id, userData, routeAccountId.value);
   } catch (e) {
     actionError.value = next ? "收藏失败，请稍后重试" : "取消收藏失败，请稍后重试";
     await lib.loadItem(current.Id, routeAccountId.value).catch(() => {});
@@ -1412,11 +1425,12 @@ async function togglePlayed() {
       PlayedPercentage: next ? 100 : 0,
       PlaybackPositionTicks: next ? current.RunTimeTicks ?? 0 : 0,
     }),
+    routeAccountId.value,
   );
 
   try {
     const userData = await api.setItemPlayed({ itemId: current.Id, value: next });
-    lib.updateItemUserData(current.Id, userData);
+    lib.updateItemUserData(current.Id, userData, routeAccountId.value);
   } catch (e) {
     actionError.value = next ? "标记已看失败，请稍后重试" : "取消已看失败，请稍后重试";
     await lib.loadItem(current.Id, routeAccountId.value).catch(() => {});

@@ -137,12 +137,21 @@ export const useLibraryStore = defineStore("library", () => {
     return m;
   }
 
-  function updateItemUserData(itemId: string, userData: UserData) {
+  function updateItemUserData(itemId: string, userData: UserData, accountId = auth.activeId) {
+    const targetCacheKey = itemCacheKey(itemId, accountId);
+    const appliesToItem = (item: MediaItem): boolean => {
+      if (item.Id !== itemId) return false;
+      const sourceAccountId = item._source?.accountId;
+      return !accountId || !sourceAccountId || sourceAccountId === accountId;
+    };
     const apply = (item: MediaItem): MediaItem =>
-      item.Id === itemId ? { ...item, UserData: userData } : item;
+      appliesToItem(item) ? { ...item, UserData: userData } : item;
 
     itemCache.value = Object.fromEntries(
-      Object.entries(itemCache.value).map(([key, item]) => [key, apply(item)]),
+      Object.entries(itemCache.value).map(([key, item]) => [
+        key,
+        key === targetCacheKey || (!accountId && key === itemId) ? { ...item, UserData: userData } : apply(item),
+      ]),
     );
 
     resume.value = resume.value.map(apply);
