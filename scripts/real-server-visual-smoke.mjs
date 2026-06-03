@@ -1025,6 +1025,120 @@ function captureNativeWindowAndAnalyze(rootPid, windowHandle, name, options = {}
   return { ...analyzePng(outputPath), windowInfo: JSON.parse(result.stdout.trim()) };
 }
 
+function resizeNativeRootWindow(rootPid, size) {
+  const pid = Number(rootPid) || 0;
+  const width = Math.max(320, Math.round(Number(size?.width) || 0));
+  const height = Math.max(240, Math.round(Number(size?.height) || 0));
+  if (!pid || process.platform !== "win32") return null;
+  const script = `
+    Add-Type @"
+      using System;
+      using System.Text;
+      using System.Runtime.InteropServices;
+      public struct RECT {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+      }
+      public static class Win32 {
+        public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+        [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+        [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+        [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+        [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
+        [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+        [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+        [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+        [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+      }
+"@
+    $root = ${pid}
+    $targetWidth = ${width}
+    $targetHeight = ${height}
+    $all = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine
+    $ids = New-Object 'System.Collections.Generic.HashSet[int]'
+    [void]$ids.Add($root)
+    $frontier = @($root)
+    while ($frontier.Count -gt 0) {
+      $next = @()
+      foreach ($parent in $frontier) {
+        foreach ($p in ($all | Where-Object { $_.ParentProcessId -eq $parent })) {
+          if ($ids.Add([int]$p.ProcessId)) {
+            $next += [int]$p.ProcessId
+          }
+        }
+      }
+      $frontier = $next
+    }
+
+    $procById = @{}
+    foreach ($p in $all) {
+      $procById[[int]$p.ProcessId] = $p
+    }
+
+    $windows = New-Object System.Collections.Generic.List[object]
+    $callback = [Win32+EnumWindowsProc]{
+      param([IntPtr]$hWnd, [IntPtr]$lParam)
+      $windowPid = 0
+      [Win32]::GetWindowThreadProcessId($hWnd, [ref]$windowPid) | Out-Null
+      if (-not $ids.Contains([int]$windowPid)) { return $true }
+      if (-not [Win32]::IsWindowVisible($hWnd)) { return $true }
+      $rect = New-Object RECT
+      if (-not [Win32]::GetWindowRect($hWnd, [ref]$rect)) { return $true }
+      $w = $rect.Right - $rect.Left
+      $h = $rect.Bottom - $rect.Top
+      if ($w -lt 160 -or $h -lt 120) { return $true }
+      $length = [Win32]::GetWindowTextLength($hWnd)
+      $titleBuilder = New-Object System.Text.StringBuilder([Math]::Max(1, $length + 1))
+      [Win32]::GetWindowText($hWnd, $titleBuilder, $titleBuilder.Capacity) | Out-Null
+      $proc = $procById[[int]$windowPid]
+      $windows.Add([PSCustomObject]@{
+        hwnd = $hWnd.ToInt64()
+        processId = [int]$windowPid
+        processName = [string]$proc.Name
+        commandLine = [string]$proc.CommandLine
+        title = $titleBuilder.ToString()
+        x = $rect.Left
+        y = $rect.Top
+        width = $w
+        height = $h
+      })
+      return $true
+    }
+    [Win32]::EnumWindows($callback, [IntPtr]::Zero) | Out-Null
+    $target = $windows |
+      Sort-Object @{ Expression = { if (($_.processName -match "mpv") -or ($_.commandLine -match "hills-lite-mpv")) { 1 } else { 0 } } }, @{ Expression = { -($_.width * $_.height) } } |
+      Select-Object -First 1
+    if (-not $target) {
+      throw "no visible app window found in launched process tree $root"
+    }
+    $hWnd = [IntPtr]::new([int64]$target.hwnd)
+    [Win32]::ShowWindow($hWnd, 9) | Out-Null
+    [Win32]::SetWindowPos($hWnd, [IntPtr](0), 40, 40, $targetWidth, $targetHeight, 0x0040) | Out-Null
+    [Win32]::SetForegroundWindow($hWnd) | Out-Null
+    Start-Sleep -Milliseconds 350
+    $rect = New-Object RECT
+    if (-not [Win32]::GetWindowRect($hWnd, [ref]$rect)) {
+      throw "failed to read resized app window rect"
+    }
+    [PSCustomObject]@{
+      hwnd = [int64]$target.hwnd
+      processId = [int]$target.processId
+      processName = [string]$target.processName
+      title = [string]$target.title
+      x = $rect.Left
+      y = $rect.Top
+      width = $rect.Right - $rect.Left
+      height = $rect.Bottom - $rect.Top
+    } | ConvertTo-Json -Compress
+  `;
+  const result = run("powershell", ["-NoProfile", "-Command", script]);
+  const stdout = result.stdout.trim();
+  return stdout ? JSON.parse(stdout) : null;
+}
+
 function processTree(rootPid) {
   const pid = Number(rootPid) || 0;
   if (!pid) return [];
@@ -1231,7 +1345,7 @@ function metricsExpression(options = {}) {
   `;
 }
 
-async function resizeAndInspect(ws, route, size, name) {
+async function resizeAndInspect(ws, rootPid, route, size, name) {
   await cdpEvalAfterContextReset(ws, `
     (async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -1243,13 +1357,15 @@ async function resizeAndInspect(ws, route, size, name) {
       return true;
     })()
   `);
+  const nativeWindow = resizeNativeRootWindow(rootPid, size);
+  if (nativeWindow) await wait(700);
   const filePath = await capture(ws, name);
   const pixels = analyzePng(filePath);
   const metrics = await cdpEvalAfterContextReset(ws, metricsExpression());
-  return { size, screenshotPath: filePath, pixels, metrics };
+  return { size, nativeWindow, screenshotPath: filePath, pixels, metrics };
 }
 
-async function resizeAndMeasure(ws, route, size) {
+async function resizeAndMeasure(ws, rootPid, route, size) {
   await cdpEvalAfterContextReset(ws, `
     (async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -1261,14 +1377,23 @@ async function resizeAndMeasure(ws, route, size) {
       return true;
     })()
   `);
+  const nativeWindow = resizeNativeRootWindow(rootPid, size);
+  if (nativeWindow) await wait(700);
   const metrics = await cdpEvalAfterContextReset(ws, metricsExpression({ skipPlayerState: true }));
-  return { size, metrics };
+  return { size, nativeWindow, metrics };
 }
 
 function summarizeLayoutEntry(entry) {
   const metrics = entry.metrics ?? {};
   return {
     size: entry.size,
+    nativeWindow: entry.nativeWindow
+      ? {
+          width: entry.nativeWindow.width,
+          height: entry.nativeWindow.height,
+          processName: entry.nativeWindow.processName ?? null,
+        }
+      : null,
     viewport: metrics.viewport ?? null,
     route: metrics.route ?? null,
     hasHorizontalOverflow: metrics.hasHorizontalOverflow === true,
@@ -1953,7 +2078,7 @@ try {
     const home = [];
     stage("layout-home-start", { count: layoutSizes.length });
     for (const size of layoutSizes) {
-      home.push(await resizeAndMeasure(ws, "/home", size));
+      home.push(await resizeAndMeasure(ws, child.pid, "/home", size));
       stage("layout-home-size", size);
     }
 
@@ -1961,7 +2086,7 @@ try {
     const itemRoute = `/item/${setup.selected.id}`;
     stage("layout-detail-start", { count: layoutSizes.length });
     for (const size of layoutSizes) {
-      detail.push(await resizeAndMeasure(ws, itemRoute, size));
+      detail.push(await resizeAndMeasure(ws, child.pid, itemRoute, size));
       stage("layout-detail-size", size);
     }
 
@@ -1970,7 +2095,7 @@ try {
     if (seriesRoute) {
       stage("layout-series-detail-start", { count: layoutSizes.length });
       for (const size of layoutSizes) {
-        seriesDetail.push(await resizeAndMeasure(ws, seriesRoute, size));
+        seriesDetail.push(await resizeAndMeasure(ws, child.pid, seriesRoute, size));
         stage("layout-series-detail-size", size);
       }
     } else {
@@ -2031,7 +2156,7 @@ try {
   const home = [];
   stage("home-inspect-start", { count: homeSizes.length });
   for (const size of homeSizes) {
-    home.push(await resizeAndInspect(ws, "/home", size, `home-${size.width}x${size.height}`));
+    home.push(await resizeAndInspect(ws, child.pid, "/home", size, `home-${size.width}x${size.height}`));
     stage("home-inspect-size", size);
   }
 
@@ -2039,7 +2164,7 @@ try {
   const itemRoute = `/item/${setup.selected.id}`;
   stage("detail-inspect-start", { count: homeSizes.length });
   for (const size of homeSizes) {
-    detail.push(await resizeAndInspect(ws, itemRoute, size, `detail-${size.width}x${size.height}`));
+    detail.push(await resizeAndInspect(ws, child.pid, itemRoute, size, `detail-${size.width}x${size.height}`));
     stage("detail-inspect-size", size);
   }
 
@@ -2048,7 +2173,7 @@ try {
   if (seriesRoute) {
     stage("series-detail-inspect-start", { count: homeSizes.length });
     for (const size of homeSizes) {
-      seriesDetail.push(await resizeAndInspect(ws, seriesRoute, size, `series-detail-${size.width}x${size.height}`));
+      seriesDetail.push(await resizeAndInspect(ws, child.pid, seriesRoute, size, `series-detail-${size.width}x${size.height}`));
       stage("series-detail-inspect-size", size);
     }
   } else {
@@ -2451,7 +2576,7 @@ try {
     { width: 960, height: 600 },
     { width: 760, height: 430 },
   ]) {
-    const entry = await resizeAndInspect(ws, null, size, `player-${size.width}x${size.height}-ui`);
+    const entry = await resizeAndInspect(ws, child.pid, null, size, `player-${size.width}x${size.height}-ui`);
     if (!entry.metrics.htmlVideo && entry.metrics.mpvState) {
       try {
         const nativeCapture = await capturePlaybackNativeLayer(
