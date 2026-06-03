@@ -1725,10 +1725,13 @@ function resetEmbeddedVideoHostLayoutState() {
   lastEmbedRectKey = "";
 }
 
-function teardownEmbeddedVideoHost(cleanupTasks: Promise<unknown>[]) {
+async function teardownEmbeddedVideoHost(options: { hide?: boolean } = {}) {
   if (!embedVideo) return;
   resetEmbeddedVideoHostLayoutState();
-  cleanupTasks.push(api.embedSetVisible(false), api.embedDetach());
+  if (options.hide !== false) {
+    await api.embedSetVisible(false);
+  }
+  await api.embedDetach();
 }
 
 watch(showControls, () => scheduleEmbedRectLayoutSync());
@@ -2121,8 +2124,14 @@ onBeforeUnmount(async () => {
     secondaryBlackoutActive.value = false;
     cleanupTasks.push(api.setSecondaryDisplayBlackout(false));
   }
-  await player.stop().catch((error) => console.warn(error));
-  teardownEmbeddedVideoHost(cleanupTasks);
+  player.stopPolling();
+  if (embedVideo) {
+    await api.embedSetVisible(false).catch((error) => console.warn(error));
+    await teardownEmbeddedVideoHost({ hide: false }).catch((error) => console.warn(error));
+    await player.stop({ stopBackend: false }).catch((error) => console.warn(error));
+  } else {
+    await player.stop().catch((error) => console.warn(error));
+  }
   await Promise.allSettled(cleanupTasks);
 });
 </script>

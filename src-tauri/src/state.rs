@@ -10,7 +10,7 @@ use crate::config::ConfigStore;
 use crate::download::DownloadManager;
 use crate::emby::{EmbyClient, EmbySocket, SessionController};
 use crate::error::AppResult;
-use crate::mpv::{MpvCommand, MpvManager};
+use crate::mpv::MpvManager;
 use crate::network::{build_client, HealthScheduler, HeartbeatScheduler};
 use crate::notifications::NotificationCenter;
 use crate::stream_proxy::StreamProxy;
@@ -122,9 +122,6 @@ impl AppState {
 
     pub async fn shutdown_playback(&self) {
         let backend = self.mpv.backend();
-        if let Err(e) = backend.execute(MpvCommand::Stop).await {
-            tracing::debug!(target = "mpv", error = %e, "mpv stop during shutdown failed");
-        }
         if let Err(e) = backend.shutdown().await {
             tracing::warn!(target = "mpv", error = %e, "mpv shutdown during app exit failed");
         }

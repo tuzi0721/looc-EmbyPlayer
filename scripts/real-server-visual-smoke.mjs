@@ -399,7 +399,7 @@ function analyzePng(imagePath) {
     } | ConvertTo-Json -Compress
     $bmp.Dispose()
   `;
-  const result = run("powershell", ["-NoProfile", "-Command", script]);
+  const result = run("powershell", ["-NoProfile", "-Command", script], { timeout: 12000 });
   return JSON.parse(result.stdout);
 }
 
@@ -2061,27 +2061,36 @@ try {
         }
         const domControls = await inspectPlayerControls();
         let frameScreenshot = null;
+        const frameScreenshots = [];
         if (strictReady && api.takeScreenshot) {
-          frameScreenshot = await Promise.race([
-            api
-              .takeScreenshot({ title: "real-smoke-frame", includeSubtitles: true })
-              .then((result) => ({ ok: true, filePath: result?.filePath ?? null }))
-              .catch((error) => ({ ok: false, error: error?.message ?? String(error) })),
-            timeout(4500),
-          ]);
-          if (frameScreenshot?.__timeout) {
-            frameScreenshot = { ok: false, error: "take_screenshot timed out" };
+          for (let attempt = 1; attempt <= 3; attempt += 1) {
+            frameScreenshot = await Promise.race([
+              api
+                .takeScreenshot({ title: "real-smoke-frame-" + attempt, includeSubtitles: true })
+                .then((result) => ({ ok: true, filePath: result?.filePath ?? null, attempt }))
+                .catch((error) => ({ ok: false, error: error?.message ?? String(error), attempt })),
+              timeout(4500),
+            ]);
+            if (frameScreenshot?.__timeout) {
+              frameScreenshot = { ok: false, error: "take_screenshot timed out", attempt };
+            }
+            frameScreenshots.push(frameScreenshot);
+            if (attempt < 3) {
+              await api.seekRelative(45000).catch(() => {});
+              await wait(1600);
+            }
           }
+          frameScreenshot =
+            frameScreenshots.find((entry) => entry?.ok) ??
+            frameScreenshots[frameScreenshots.length - 1] ??
+            null;
         }
+        const routeBeforeCleanup = (appRouter.currentRoute?.value?.fullPath ?? location.hash) || location.pathname;
+        const hasPlayerBeforeCleanup = Boolean(document.querySelector(".player"));
         const errorText = document.querySelector(".player__error")?.innerText ?? null;
-        const cleanup = {
-          stop: await settle(api.stop(), 2500),
-          hide: api.embedSetVisible ? await settle(api.embedSetVisible(false), 1500) : null,
-          detach: api.embedDetach ? await settle(api.embedDetach(), 1500) : null,
-        };
         return {
-          route: location.hash || location.pathname,
-          hasPlayer: Boolean(document.querySelector(".player")),
+          route: routeBeforeCleanup,
+          hasPlayer: hasPlayerBeforeCleanup,
           errorText,
           stateTimedOut: timedOut,
           stateError,
@@ -2089,37 +2098,84 @@ try {
           controls,
           domControls,
           frameScreenshot,
-          cleanup,
+          frameScreenshots,
+          cleanup: null,
         };
       })()
     `, 3);
     let frameEvidence = null;
-    if (playerOpen.frameScreenshot?.ok && playerOpen.frameScreenshot.filePath) {
-      const fileReady = await waitForFile(playerOpen.frameScreenshot.filePath, 5000);
-      if (fileReady) {
-        const pixels = analyzePng(playerOpen.frameScreenshot.filePath);
-        frameEvidence = {
-          width: pixels.width,
-          height: pixels.height,
-          aspect: aspectFromSize(pixels.width, pixels.height),
-          brightRatio: pixels.brightRatio,
-          colorfulRatio: pixels.colorfulRatio,
-          meaningfulRatio: pixels.meaningfulRatio,
-          contentAspect: pixels.contentBox?.aspect ?? null,
-          pixelOk: pixelSampleOk(pixels),
-        };
-        await fsp.rm(playerOpen.frameScreenshot.filePath, { force: true }).catch(() => {});
-      } else {
-        frameEvidence = { error: "mpv frame screenshot file was not written" };
+    const frameEvidenceCandidates = [];
+    const screenshotCandidates = Array.isArray(playerOpen.frameScreenshots) && playerOpen.frameScreenshots.length > 0
+      ? playerOpen.frameScreenshots
+      : [playerOpen.frameScreenshot].filter(Boolean);
+    for (const screenshot of screenshotCandidates) {
+      if (!screenshot?.ok || !screenshot.filePath) {
+        frameEvidenceCandidates.push({
+          attempt: screenshot?.attempt ?? null,
+          error: screenshot?.error ?? "mpv frame screenshot was not captured",
+          pixelOk: false,
+        });
+        continue;
       }
-    } else {
-      frameEvidence = { error: playerOpen.frameScreenshot?.error ?? "mpv frame screenshot was not captured" };
+      const fileReady = await waitForFile(screenshot.filePath, 5000);
+      if (!fileReady) {
+        frameEvidenceCandidates.push({
+          attempt: screenshot.attempt ?? null,
+          error: "mpv frame screenshot file was not written",
+          pixelOk: false,
+        });
+        continue;
+      }
+      const pixels = analyzePng(screenshot.filePath);
+      const candidate = {
+        attempt: screenshot.attempt ?? null,
+        width: pixels.width,
+        height: pixels.height,
+        aspect: aspectFromSize(pixels.width, pixels.height),
+        brightRatio: pixels.brightRatio,
+        colorfulRatio: pixels.colorfulRatio,
+        meaningfulRatio: pixels.meaningfulRatio,
+        contentAspect: pixels.contentBox?.aspect ?? null,
+        pixelOk: pixelSampleOk(pixels),
+      };
+      frameEvidenceCandidates.push(candidate);
+      await fsp.rm(screenshot.filePath, { force: true }).catch(() => {});
+      if (candidate.pixelOk && !frameEvidence) frameEvidence = candidate;
     }
+    frameEvidence = frameEvidence ?? frameEvidenceCandidates.find((entry) => entry.width) ?? {
+      error: playerOpen.frameScreenshot?.error ?? "mpv frame screenshot was not captured",
+      pixelOk: false,
+    };
+    const nativeFrameEvidence = null;
+    const cleanup = await cdpEvalAfterContextReset(ws, `
+      (async () => {
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const timeout = (ms) => new Promise((resolve) => setTimeout(() => resolve({ __timeout: true }), ms));
+        const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+        if (!appRouter) throw new Error("mounted Vue router not found");
+        const routeAway = await Promise.race([
+          appRouter.push("/home").then(() => true, () => false),
+          timeout(7000),
+        ]);
+        const cleanup = {
+          routeAway: routeAway?.__timeout ? false : routeAway === true,
+          routeAfter: (appRouter.currentRoute?.value?.fullPath ?? location.hash) || location.pathname,
+          waitedForUnmountMs: 6000,
+        };
+        await wait(cleanup.waitedForUnmountMs);
+        cleanup.routeAfterWait = (appRouter.currentRoute?.value?.fullPath ?? location.hash) || location.pathname;
+        cleanup.hasPlayerAfterWait = Boolean(document.querySelector(".player"));
+        return cleanup;
+      })()
+    `, 3);
+    playerOpen.cleanup = cleanup;
     const visualSmokeLog = tailTextFile(path.join(localAppDataDir, "EmbyPlayer", "visual-smoke.log"), 16000);
     const mpvProcessCount = tasklistImageCount("mpv.exe");
     const backendReachedLoad = /play:mpv-load-start/.test(visualSmokeLog ?? "");
     const backendCompletedLoad = /play:mpv-load-complete/.test(visualSmokeLog ?? "");
     const attached = /embed_attach:complete|embed_visible:show|embed_detach:complete/.test(visualSmokeLog ?? "");
+    const cleanupHidHost = /embed_visible:hide/.test(visualSmokeLog ?? "");
+    const cleanupDetachedHost = /embed_detach:complete/.test(visualSmokeLog ?? "");
     const stateReady = Boolean(
       playerOpen.state &&
         (playerOpen.state.durationMs ?? 0) > 0 &&
@@ -2150,6 +2206,10 @@ try {
     if (!frameEvidence?.pixelOk) {
       failures.push(`mpv frame screenshot is missing or visually blank: ${frameEvidence?.error ?? "pixel sample failed"}`);
     }
+    if (playerOpen.cleanup?.routeAway !== true) failures.push("player cleanup route-away failed or timed out");
+    if (playerOpen.cleanup?.hasPlayerAfterWait) failures.push("player cleanup did not unmount PlayerView");
+    if (!cleanupHidHost) failures.push("player cleanup did not hide embedded host");
+    if (!cleanupDetachedHost) failures.push("player cleanup did not detach embedded host");
     if ((mpvProcessCount ?? 0) > 0) failures.push("independent mpv.exe process is running");
     stage("command-only-complete", {
       ok: failures.length === 0,
@@ -2158,6 +2218,8 @@ try {
       stateReady,
       domControlsOk: playerOpen.domControls?.ok ?? false,
       framePixelOk: frameEvidence?.pixelOk ?? false,
+      cleanupHidHost,
+      cleanupDetachedHost,
       attached,
       backendReachedLoad,
       backendCompletedLoad,
@@ -2175,6 +2237,8 @@ try {
         backendReachedLoad,
         backendCompletedLoad,
         frameEvidence,
+        frameEvidenceCandidates,
+        nativeFrameEvidence,
         visualSmokeLog,
       },
       diagnostics: {

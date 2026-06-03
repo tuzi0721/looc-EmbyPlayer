@@ -578,8 +578,21 @@ impl MpvBackend for MpvIpcBackend {
                 } else {
                     "video"
                 };
-                self.send_command(vec![json!("screenshot-to-file"), json!(path), json!(mode)])
-                    .await?;
+                if let Err(error) = self
+                    .send_command(vec![json!("screenshot-to-file"), json!(path), json!(mode)])
+                    .await
+                {
+                    if include_subtitles {
+                        self.send_command(vec![
+                            json!("screenshot-to-file"),
+                            json!(path),
+                            json!("video"),
+                        ])
+                        .await?;
+                    } else {
+                        return Err(error);
+                    }
+                }
                 Ok(())
             }
             MpvCommand::ShowStatsOsd { page } => {
@@ -834,8 +847,16 @@ impl MpvBackend for MpvIpcBackend {
         if let Some(mut inner) = inner_opt {
             // Drop the command channel first so the IO task exits cleanly.
             drop(inner.cmd_tx);
-            let _ = inner.child.kill().await;
-            let _ = inner.child.wait().await;
+            let _ = inner.child.start_kill();
+            match timeout(Duration::from_secs(2), inner.child.wait()).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => {
+                    tracing::warn!(target = "mpv", error = %e, "mpv process wait during shutdown failed");
+                }
+                Err(_) => {
+                    tracing::warn!(target = "mpv", "mpv process wait during shutdown timed out");
+                }
+            }
         }
         Ok(())
     }

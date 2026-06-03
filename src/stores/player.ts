@@ -413,29 +413,34 @@ export const usePlayerStore = defineStore("player", () => {
     await api.resume();
     await refresh();
   }
-  async function stop() {
+  async function stop(options: { stopBackend?: boolean } = {}) {
     stopPolling();
-    if (itemId.value && playSessionId.value && snapshot.value) {
-      try {
-        await api.reportPlaybackStopped({
-          itemId: itemId.value,
-          playSessionId: playSessionId.value,
-          positionTicks: snapshot.value.positionMs * 10_000,
-        });
-      } catch {
-        /* ignore */
+    const stoppedReport =
+      itemId.value && playSessionId.value && snapshot.value
+        ? {
+            itemId: itemId.value,
+            playSessionId: playSessionId.value,
+            positionTicks: snapshot.value.positionMs * 10_000,
+        }
+        : null;
+    try {
+      if (options.stopBackend !== false) {
+        await api.stop();
       }
+    } finally {
+      snapshot.value = null;
+      playbackSource.value = null;
+      itemId.value = null;
+      playSessionId.value = null;
+      localFilePath.value = null;
+      localFileTitle.value = null;
+      directUrl.value = null;
+      directTitle.value = null;
+      directSourceLabel.value = null;
     }
-    await api.stop();
-    snapshot.value = null;
-    playbackSource.value = null;
-    itemId.value = null;
-    playSessionId.value = null;
-    localFilePath.value = null;
-    localFileTitle.value = null;
-    directUrl.value = null;
-    directTitle.value = null;
-    directSourceLabel.value = null;
+    if (stoppedReport) {
+      void api.reportPlaybackStopped(stoppedReport).catch(() => {});
+    }
     try {
       await api.clearNowPlaying();
     } catch {
@@ -633,6 +638,7 @@ export const usePlayerStore = defineStore("player", () => {
     pause,
     resume,
     stop,
+    stopPolling,
     seek,
     seekRelative,
     setSpeed,

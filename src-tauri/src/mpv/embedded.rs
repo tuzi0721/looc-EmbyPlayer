@@ -711,8 +711,16 @@ impl MpvBackend for MpvEmbeddedBackend {
                 } else {
                     "video"
                 };
-                m.command("screenshot-to-file", &[path.as_str(), mode])
-                    .map_err(|e| AppError::Mpv(e.to_string()))
+                if let Err(error) = m.command("screenshot-to-file", &[path.as_str(), mode]) {
+                    if include_subtitles {
+                        m.command("screenshot-to-file", &[path.as_str(), "video"])
+                            .map_err(|e| AppError::Mpv(e.to_string()))
+                    } else {
+                        Err(AppError::Mpv(error.to_string()))
+                    }
+                } else {
+                    Ok(())
+                }
             }
             MpvCommand::ShowStatsOsd { page } => {
                 let page = page.clamp(1, 5);
