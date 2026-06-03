@@ -14,10 +14,17 @@ const route = useRoute();
 const router = useRouter();
 const actionBusy = ref<string | null>(null);
 const errorText = ref<string | null>(null);
+const autoPlayTriggeredForId = ref<string | null>(null);
 
 const highlightedTaskId = computed(() =>
   typeof route.query.task === "string" && route.query.task.trim()
     ? route.query.task.trim()
+    : null,
+);
+const autoPlayHighlighted = computed(() => route.query.autoplay === "1");
+const highlightedTask = computed(() =>
+  highlightedTaskId.value
+    ? downloads.tasks.find((task) => task.id === highlightedTaskId.value) ?? null
     : null,
 );
 
@@ -41,6 +48,13 @@ watch(
   async () => {
     await nextTick();
     scrollToHighlightedTask();
+  },
+);
+
+watch(
+  () => highlightedTaskId.value,
+  () => {
+    autoPlayTriggeredForId.value = null;
   },
 );
 
@@ -75,8 +89,33 @@ function pct(t: DownloadTask) {
 }
 
 async function play(t: DownloadTask) {
-  router.push({ name: "player", params: { id: t.itemId }, query: { local: t.id } });
+  await router.push({
+    name: "player",
+    params: { id: t.itemId },
+    query: {
+      local: t.id,
+      account: t.accountId,
+      server: t.serverId,
+    },
+  });
 }
+
+watch(
+  () => ({
+    autoPlay: autoPlayHighlighted.value,
+    taskId: highlightedTask.value?.id ?? null,
+    status: highlightedTask.value?.status ?? null,
+  }),
+  async ({ autoPlay, taskId, status }) => {
+    if (!autoPlay || !taskId || status !== "completed") return;
+    if (autoPlayTriggeredForId.value === taskId) return;
+    const task = highlightedTask.value;
+    if (!task) return;
+    autoPlayTriggeredForId.value = taskId;
+    await play(task);
+  },
+  { immediate: true },
+);
 
 function fileNameFromPath(filePath: string): string {
   return filePath.split(/[\\/]/).filter(Boolean).pop() ?? filePath;
@@ -169,6 +208,12 @@ function statusLabel(s: DownloadStatus) {
             <div class="task__main">
               <div class="task__title">
                 <span>{{ t.title }}</span>
+                <span
+                  v-if="autoPlayHighlighted && t.id === highlightedTaskId && t.status !== 'completed'"
+                  class="badge autoplay"
+                >
+                  完成后播放
+                </span>
                 <span v-if="t.stealth" class="badge stealth">伪装</span>
               </div>
               <div class="task__sub">
@@ -426,6 +471,15 @@ function statusLabel(s: DownloadStatus) {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+.badge.autoplay {
+  flex: 0 0 auto;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent-strong);
+  font-weight: 700;
 }
 .empty {
   display: flex;

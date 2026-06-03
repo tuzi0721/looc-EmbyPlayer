@@ -2024,8 +2024,16 @@ async function startDownloadForCurrentItem() {
       await auth.switchTo(routeAccountId.value);
     }
     const task = await downloads.start(itemId, { stealth: false, preferDirect: true });
-    downloadActionStatus.value = "已创建下载任务";
-    await router.push({ name: "downloads", query: { task: task.id } });
+    const query: LocationQueryRaw = {
+      task: task.id,
+      autoplay: "1",
+    };
+    if (routeAccountId.value) query.account = routeAccountId.value;
+    if (typeof route.query.server === "string" && route.query.server.trim()) {
+      query.server = route.query.server.trim();
+    }
+    downloadActionStatus.value = "已创建下载任务，完成后将自动本地播放";
+    await router.push({ name: "downloads", query });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     downloadActionStatus.value = `启动下载失败: ${message}`;
@@ -2264,7 +2272,7 @@ onBeforeUnmount(async () => {
             :loading="downloadStarting"
             @click="startDownloadForCurrentItem"
           >
-            下载到本地
+            下载后播放
           </GlassButton>
           <GlassButton variant="ghost" @click="copyPlayerError">复制错误</GlassButton>
           <GlassButton variant="secondary" @click="back">返回</GlassButton>
