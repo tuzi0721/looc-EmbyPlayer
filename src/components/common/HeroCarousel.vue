@@ -235,7 +235,7 @@ onUnmounted(() => {
   position: relative;
   width: 100%;
   margin: 0;
-  aspect-ratio: 16 / 7;
+  aspect-ratio: 8 / 3;
   height: auto;
   min-height: 0;
   border-radius: 0;
@@ -245,7 +245,7 @@ onUnmounted(() => {
   outline: none;
 }
 .hero--cinema {
-  aspect-ratio: 16 / 7;
+  aspect-ratio: 8 / 3;
 }
 .hero__bg {
   position: absolute;
@@ -404,12 +404,12 @@ onUnmounted(() => {
 @media (max-width: 760px) {
   .hero {
     width: 100%;
-    aspect-ratio: 16 / 7;
+    aspect-ratio: 8 / 3;
     height: auto;
     min-height: 0;
   }
   .hero--cinema {
-    aspect-ratio: 16 / 7;
+    aspect-ratio: 8 / 3;
   }
   .hero--cinema .hero__content {
     left: 18px;
@@ -430,12 +430,12 @@ onUnmounted(() => {
 }
 @media (max-height: 760px) and (min-width: 1101px) {
   .hero {
-    aspect-ratio: 16 / 7;
+    aspect-ratio: 8 / 3;
     height: auto;
     min-height: 0;
   }
   .hero--cinema {
-    aspect-ratio: 16 / 7;
+    aspect-ratio: 8 / 3;
   }
   .hero--cinema .hero__content {
     bottom: 34px;
@@ -462,12 +462,12 @@ onUnmounted(() => {
 }
 @media (max-height: 700px) and (min-width: 761px) and (max-width: 1100px) {
   .hero {
-    aspect-ratio: 16 / 7;
+    aspect-ratio: 8 / 3;
     height: auto;
     min-height: 0;
   }
   .hero--cinema {
-    aspect-ratio: 16 / 7;
+    aspect-ratio: 8 / 3;
   }
   .hero--cinema .hero__content {
     left: clamp(28px, 5vw, 60px);
@@ -498,7 +498,7 @@ onUnmounted(() => {
   .hero,
   .hero--cinema {
     width: 100%;
-    aspect-ratio: 16 / 7;
+    aspect-ratio: 8 / 3;
     height: auto;
     min-height: 0;
   }
