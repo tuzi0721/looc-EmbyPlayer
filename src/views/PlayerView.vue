@@ -1729,9 +1729,9 @@ async function teardownEmbeddedVideoHost(options: { hide?: boolean } = {}) {
   if (!embedVideo) return;
   resetEmbeddedVideoHostLayoutState();
   if (options.hide !== false) {
-    await api.embedSetVisible(false);
+    await withTimeout(api.embedSetVisible(false), 1200, "embedded mpv host hide timed out");
   }
-  await api.embedDetach();
+  await withTimeout(api.embedDetach(), 4500, "embedded mpv host detach timed out");
 }
 
 watch(showControls, () => scheduleEmbedRectLayoutSync());
@@ -2126,9 +2126,14 @@ onBeforeUnmount(async () => {
   }
   player.stopPolling();
   if (embedVideo) {
-    await api.embedSetVisible(false).catch((error) => console.warn(error));
-    await teardownEmbeddedVideoHost({ hide: false }).catch((error) => console.warn(error));
-    await player.stop({ stopBackend: false }).catch((error) => console.warn(error));
+    let detached = false;
+    try {
+      await teardownEmbeddedVideoHost({ hide: false });
+      detached = true;
+    } catch (error) {
+      console.warn(error);
+    }
+    await player.stop({ stopBackend: !detached }).catch((error) => console.warn(error));
   } else {
     await player.stop().catch((error) => console.warn(error));
   }

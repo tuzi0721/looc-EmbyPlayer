@@ -640,7 +640,10 @@ impl EmbyClient {
         line_id: Option<&str>,
     ) -> AppResult<Url> {
         let line = self.pick_line(server, line_id)?;
-        let mut url = if let Some(direct_url) = source
+        let mut url = if safe_stream_extension(source.container.as_deref()).is_some() {
+            let path = stream_path_for_source(&item.id, source);
+            endpoints::join(&line.base_url, &path)?
+        } else if let Some(direct_url) = source
             .direct_stream_url
             .as_deref()
             .map(str::trim)
@@ -649,7 +652,7 @@ impl EmbyClient {
             Url::parse(direct_url)
                 .or_else(|_| endpoints::join(&line.base_url, direct_url.trim_start_matches('/')))?
         } else {
-            let path = format!("Videos/{}/stream", item.id);
+            let path = stream_path_for_source(&item.id, source);
             endpoints::join(&line.base_url, &path)?
         };
         {
@@ -775,6 +778,26 @@ impl EmbyClient {
             ))
         })
     }
+}
+
+fn stream_path_for_source(item_id: &str, source: &MediaSource) -> String {
+    if let Some(ext) = safe_stream_extension(source.container.as_deref()) {
+        return format!("Videos/{item_id}/stream.{ext}");
+    }
+    format!("Videos/{item_id}/stream")
+}
+
+fn safe_stream_extension(container: Option<&str>) -> Option<String> {
+    let ext = container?
+        .split(',')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .trim_start_matches('.');
+    if ext.is_empty() || ext.len() > 16 || !ext.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+        return None;
+    }
+    Some(ext.to_ascii_lowercase())
 }
 
 fn build_headers(

@@ -670,6 +670,12 @@ function localDecodeMode(mediaSource: any): "direct-play" | "direct-stream" {
   return localDecodePlayMethod(mediaSource) === "DirectPlay" ? "direct-play" : "direct-stream";
 }
 
+function safeStreamExtension(container: unknown): string | null {
+  const ext = stringFrom(container)?.split(",")[0]?.trim().replace(/^\./, "") ?? "";
+  if (!ext || ext.length > 16 || !/^[a-z0-9]+$/i.test(ext)) return null;
+  return ext.toLowerCase();
+}
+
 function sanitizePlaybackMethod(value: any): "DirectPlay" | "DirectStream" {
   return stringFrom(value) === "DirectStream" ? "DirectStream" : "DirectPlay";
 }
@@ -1593,7 +1599,9 @@ async function webPlaybackSource(
   const playMethod = localDecodePlayMethod(mediaSource);
   const playSessionId =
     stringFrom(info?.PlaySessionId) ?? stringFrom(mediaSource.PlaySessionId) ?? createId("play");
-  const streamUrl = joinWebUrl(line.baseUrl, `Videos/${itemId}/stream`);
+  const streamExt = safeStreamExtension(mediaSource.Container);
+  const streamPath = streamExt ? `Videos/${itemId}/stream.${streamExt}` : `Videos/${itemId}/stream`;
+  const streamUrl = joinWebUrl(line.baseUrl, streamPath);
   streamUrl.searchParams.set("MediaSourceId", mediaSourceId);
   streamUrl.searchParams.set("PlaySessionId", playSessionId);
   streamUrl.searchParams.set("Static", "true");

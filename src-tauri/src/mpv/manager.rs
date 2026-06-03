@@ -129,6 +129,18 @@ impl MpvManager {
         }
         Ok(())
     }
+
+    pub fn embedded_window_handle(&self) -> Option<i64> {
+        let g = self.inner.read();
+        #[cfg(feature = "mpv-embedded")]
+        if let Some(e) = g.embedded.as_ref() {
+            return e.embed_window_handle();
+        }
+        if let Some(ipc) = g.ipc.as_ref() {
+            return ipc.embed_window_handle();
+        }
+        None
+    }
 }
 
 fn build_slot(settings: &AppSettings) -> AppResult<Slot> {

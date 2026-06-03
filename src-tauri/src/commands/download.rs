@@ -186,6 +186,7 @@ pub async fn play_local(
             headers: vec![],
             user_agent: None,
             start_ms: payload.start_ms,
+            http_seekable: None,
             stream_record_path: None,
             autoload_subtitles: true,
         })

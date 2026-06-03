@@ -287,6 +287,15 @@ export interface MpvSnapshot {
   osdDimensions?: MpvOsdDimensions | null;
   audioParams?: MpvAudioParams | null;
   hwdecCurrent?: string | null;
+  idleActive?: boolean | null;
+  demuxer?: string | null;
+  fileFormat?: string | null;
+  mediaTitle?: string | null;
+  streamOpenFilename?: string | null;
+  streamPath?: string | null;
+  demuxerCacheState?: Record<string, unknown> | null;
+  playlistCount?: number | null;
+  playlistPos?: number | null;
   keepaspect?: boolean;
   panscan?: number;
   videoZoom?: number;

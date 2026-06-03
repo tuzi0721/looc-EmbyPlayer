@@ -140,6 +140,10 @@ impl MpvEmbeddedBackend {
         }
     }
 
+    pub fn embed_window_handle(&self) -> Option<i64> {
+        self.host.read().as_ref().map(|h| h.handle())
+    }
+
     fn mark_load_start(&self) -> u64 {
         let mut state = self.diagnostics.write();
         state.load_generation = state.load_generation.saturating_add(1);
@@ -532,6 +536,7 @@ impl MpvBackend for MpvEmbeddedBackend {
                 headers,
                 user_agent,
                 start_ms,
+                http_seekable,
                 stream_record_path,
                 autoload_subtitles,
             } => {
@@ -563,7 +568,15 @@ impl MpvBackend for MpvEmbeddedBackend {
                 } else {
                     m.set_property("stream-record", "").ok();
                 }
-                match m.command("loadfile", &[&url, "replace"]) {
+                let load_result = if http_seekable == Some(false) {
+                    m.command(
+                        "loadfile",
+                        &[&url, "replace", "-1", "demuxer-lavf-o=seekable=0"],
+                    )
+                } else {
+                    m.command("loadfile", &[&url, "replace"])
+                };
+                match load_result {
                     Ok(()) => {
                         self.mark_load_result(load_generation, Ok(()));
                         drop(m);
@@ -706,21 +719,23 @@ impl MpvBackend for MpvEmbeddedBackend {
                 path,
                 include_subtitles,
             } => {
-                let mode = if include_subtitles {
-                    "subtitles"
+                let modes: &[&str] = if include_subtitles {
+                    &["subtitles", "video", "window"]
                 } else {
-                    "video"
+                    &["video", "window"]
                 };
-                if let Err(error) = m.command("screenshot-to-file", &[path.as_str(), mode]) {
-                    if include_subtitles {
-                        m.command("screenshot-to-file", &[path.as_str(), "video"])
-                            .map_err(|e| AppError::Mpv(e.to_string()))
-                    } else {
-                        Err(AppError::Mpv(error.to_string()))
+                let mut last_error = None;
+                for mode in modes {
+                    match m.command("screenshot-to-file", &[path.as_str(), mode]) {
+                        Ok(_) => return Ok(()),
+                        Err(error) => {
+                            last_error = Some(error.to_string());
+                        }
                     }
-                } else {
-                    Ok(())
                 }
+                Err(AppError::Mpv(
+                    last_error.unwrap_or_else(|| "screenshot failed".into()),
+                ))
             }
             MpvCommand::ShowStatsOsd { page } => {
                 let page = page.clamp(1, 5);
@@ -752,6 +767,15 @@ impl MpvBackend for MpvEmbeddedBackend {
         let video_codec = mpv_string(m, "video-codec");
         let audio_codec = mpv_string(m, "audio-codec");
         let hwdec_current = mpv_string(m, "hwdec-current");
+        let idle_active = mpv_bool(m, "idle-active");
+        let demuxer = mpv_string(m, "demuxer");
+        let file_format = mpv_string(m, "file-format");
+        let media_title = mpv_string(m, "media-title");
+        let stream_open_filename = mpv_string(m, "stream-open-filename");
+        let stream_path = mpv_string(m, "stream-path");
+        let demuxer_cache_state = None;
+        let playlist_count = mpv_i64(m, "playlist-count");
+        let playlist_pos = mpv_i64(m, "playlist-pos");
         let container_fps = mpv_f64(m, "container-fps");
         let estimated_vf_fps = mpv_f64(m, "estimated-vf-fps");
         let video_bitrate = mpv_f64(m, "video-bitrate");
@@ -795,6 +819,15 @@ impl MpvBackend for MpvEmbeddedBackend {
             ),
             audio_params: read_audio_params(m),
             hwdec_current,
+            idle_active,
+            demuxer,
+            file_format,
+            media_title,
+            stream_open_filename,
+            stream_path,
+            demuxer_cache_state,
+            playlist_count,
+            playlist_pos,
             keepaspect: mpv_bool(m, "keepaspect"),
             panscan: mpv_f64(m, "panscan"),
             video_zoom: mpv_f64(m, "video-zoom"),
@@ -893,18 +926,23 @@ fn wait_for_load_readiness(
     let mpv = mpv.lock();
     let path_present = mpv_string(&mpv, "path").is_some();
     let demuxer = mpv_string(&mpv, "demuxer");
+    let file_format = mpv_string(&mpv, "file-format");
+    let eof = mpv_bool(&mpv, "eof-reached").unwrap_or(false);
+    let idle = mpv_bool(&mpv, "idle-active").unwrap_or(false);
     let stream_path_present = mpv_string(&mpv, "stream-path").is_some();
     if saw_container {
         let duration = mpv_f64(&mpv, "duration").unwrap_or(0.0);
         let tracks = mpv_i64(&mpv, "track-list/count").unwrap_or(0);
         log_visual_mpv_event(&format!(
-            "load-partial generation={generation} duration={duration:.3} tracks={tracks} video=false path={path_present} stream_path={stream_path_present} demuxer={}",
-            demuxer.unwrap_or_else(|| "none".into())
+            "load-partial generation={generation} duration={duration:.3} tracks={tracks} video=false path={path_present} stream_path={stream_path_present} eof={eof} idle={idle} demuxer={} format={}",
+            demuxer.unwrap_or_else(|| "none".into()),
+            file_format.unwrap_or_else(|| "none".into())
         ));
     } else {
         log_visual_mpv_event(&format!(
-            "load-not-ready generation={generation} path={path_present} stream_path={stream_path_present} demuxer={}",
-            demuxer.unwrap_or_else(|| "none".into())
+            "load-not-ready generation={generation} path={path_present} stream_path={stream_path_present} eof={eof} idle={idle} demuxer={} format={}",
+            demuxer.unwrap_or_else(|| "none".into()),
+            file_format.unwrap_or_else(|| "none".into())
         ));
     }
 }

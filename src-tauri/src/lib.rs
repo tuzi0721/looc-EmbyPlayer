@@ -135,6 +135,7 @@ pub fn run() {
             commands::player::embed_set_rect,
             commands::player::embed_set_visible,
             commands::player::embed_detach,
+            commands::player::get_embed_state,
             commands::settings::get_settings,
             commands::settings::update_settings,
             commands::settings::export_config,

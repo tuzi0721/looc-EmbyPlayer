@@ -512,6 +512,21 @@ pub async fn play(
         "Authorization".into(),
         format!("MediaBrowser Token=\"{}\"", account.access_token),
     ));
+    let range_supported = match state
+        .stream_proxy
+        .probe_range_support(url.clone(), headers.clone(), user_agent.clone())
+        .await
+    {
+        Ok(supported) => supported,
+        Err(error) => {
+            log_visual_player_stage(&format!(
+                "play:range-probe-error {}",
+                sanitize_visual_error(&error.to_string())
+            ));
+            true
+        }
+    };
+    log_visual_player_stage(&format!("play:range-probe supported={range_supported}"));
     let mpv_url = state
         .stream_proxy
         .register(url.clone(), headers.clone(), user_agent.clone())
@@ -571,6 +586,7 @@ pub async fn play(
             headers: Vec::new(),
             user_agent: None,
             start_ms: payload.start_ms,
+            http_seekable: Some(range_supported),
             stream_record_path,
             autoload_subtitles: true,
         })
@@ -1116,6 +1132,7 @@ pub async fn play_file(state: State<'_, Arc<AppState>>, payload: PlayFilePayload
             headers: vec![],
             user_agent: None,
             start_ms: payload.start_ms,
+            http_seekable: None,
             stream_record_path: None,
             autoload_subtitles: false,
         })
@@ -1710,6 +1727,17 @@ pub async fn show_mpv_stats_osd(
 
 use crate::mpv::{ParentHandle, PlayerRect};
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbedState {
+    pub mode: String,
+    pub host_kind: String,
+    pub runtime: String,
+    pub hwnd: Option<String>,
+    pub host_window_handle: Option<String>,
+    pub attached_mpv_window_handle: Option<String>,
+}
+
 #[tauri::command]
 pub async fn embed_attach(state: State<'_, Arc<AppState>>, window: tauri::Window) -> AppResult<()> {
     log_visual_player_stage("embed_attach:start");
@@ -1761,6 +1789,23 @@ pub async fn embed_detach(state: State<'_, Arc<AppState>>) -> AppResult<()> {
     result
 }
 
+#[tauri::command]
+pub fn get_embed_state(state: State<'_, Arc<AppState>>, window: tauri::Window) -> EmbedState {
+    EmbedState {
+        mode: "wid".into(),
+        host_kind: "native-child".into(),
+        runtime: "tauri".into(),
+        hwnd: state
+            .mpv
+            .embedded_window_handle()
+            .map(|handle| handle.to_string()),
+        host_window_handle: native_parent_handle(&window)
+            .ok()
+            .and_then(parent_handle_to_string),
+        attached_mpv_window_handle: None,
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn native_parent_handle(window: &tauri::Window) -> AppResult<ParentHandle> {
     let h = window
@@ -1774,6 +1819,19 @@ fn native_parent_handle(_window: &tauri::Window) -> AppResult<ParentHandle> {
     Err(AppError::Mpv(
         "embedded MPV currently only supported on Windows".into(),
     ))
+}
+
+#[cfg(target_os = "windows")]
+fn parent_handle_to_string(parent: ParentHandle) -> Option<String> {
+    match parent {
+        ParentHandle::Win32(handle) => Some(handle.to_string()),
+        _ => None,
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn parent_handle_to_string(_parent: ParentHandle) -> Option<String> {
+    None
 }
 
 // ── MPV detection / external links ───────────────────────────────────────────

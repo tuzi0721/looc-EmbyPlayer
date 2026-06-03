@@ -244,6 +244,7 @@ impl SessionController {
                 headers,
                 user_agent: ua,
                 start_ms: Some(start_ticks / 10_000),
+                http_seekable: None,
                 stream_record_path: None,
                 autoload_subtitles: true,
             })

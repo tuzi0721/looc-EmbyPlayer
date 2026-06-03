@@ -89,6 +89,9 @@ function run(command, args, options = {}) {
     windowsHide: true,
     ...options,
   });
+  if (result.error) {
+    throw new Error(`${command} failed: ${result.error.message}`);
+  }
   if (result.status !== 0) {
     throw new Error(`${command} failed: ${result.stderr || result.stdout || result.status}`);
   }
@@ -1130,17 +1133,6 @@ async function readEmbedState(ws) {
 }
 
 async function capturePlaybackNativeLayer(ws, rootPid, name) {
-  if (isTauriMode) {
-    return {
-      embedState: {
-        mode: "embedded",
-        hostKind: "native-child",
-        runtime: appMode,
-      },
-      capture: captureNativeWindowAndAnalyze(rootPid, null, name),
-      usedHandle: false,
-    };
-  }
   const embedState = await readEmbedState(ws).catch((error) => ({
     error: error instanceof Error ? error.message : String(error),
   }));
@@ -1196,6 +1188,7 @@ function captureNativeWindowAndAnalyze(rootPid, windowHandle, name, options = {}
         [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
         [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT point);
         [DllImport("user32.dll")] public static extern bool IsChild(IntPtr hWndParent, IntPtr hWnd);
+        [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint nFlags);
       }
 "@
     $root = ${pid}
@@ -1333,7 +1326,19 @@ function captureNativeWindowAndAnalyze(rootPid, windowHandle, name, options = {}
     }
     $bmp = New-Object System.Drawing.Bitmap($width, $height)
     $gfx = [System.Drawing.Graphics]::FromImage($bmp)
-    $gfx.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bmp.Size)
+    if ($requestedHwnd -ne "0") {
+      $hdc = $gfx.GetHdc()
+      try {
+        $printed = [Win32]::PrintWindow($hWnd, $hdc, 2)
+      } finally {
+        $gfx.ReleaseHdc($hdc)
+      }
+      if (-not $printed) {
+        throw "PrintWindow failed for native playback hwnd $($target.hwnd)"
+      }
+    } else {
+      $gfx.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bmp.Size)
+    }
     $bmp.Save(${JSON.stringify(outputPath)}, [System.Drawing.Imaging.ImageFormat]::Png)
     $gfx.Dispose()
     $bmp.Dispose()
@@ -1358,7 +1363,10 @@ function captureNativeWindowAndAnalyze(rootPid, windowHandle, name, options = {}
       screenshotPath = ${JSON.stringify(outputPath)}
     } | ConvertTo-Json -Compress
   `;
-  const result = run("powershell", ["-NoProfile", "-Command", script]);
+  const result = run("powershell", ["-NoProfile", "-Command", script], {
+    timeout: 12000,
+    killSignal: "SIGKILL",
+  });
   return { ...analyzePng(outputPath), windowInfo: JSON.parse(result.stdout.trim()) };
 }
 
@@ -2244,6 +2252,15 @@ try {
             videoTrackCodecs,
             videoCodec: state?.videoCodec ?? null,
             audioCodec: state?.audioCodec ?? null,
+            eof: state?.eof === true,
+            idleActive: state?.idleActive ?? null,
+            demuxer: state?.demuxer ?? null,
+            fileFormat: state?.fileFormat ?? null,
+            streamOpenFilenamePresent: Boolean(state?.streamOpenFilename),
+            streamPathPresent: Boolean(state?.streamPath),
+            playlistCount: state?.playlistCount ?? null,
+            playlistPos: state?.playlistPos ?? null,
+            demuxerCacheState: state?.demuxerCacheState ?? null,
             hasVideoParams: Boolean(state?.videoParams),
             hasVideoOutParams: Boolean(state?.videoOutParams),
             hasVideoEvidence: Boolean(
@@ -2499,7 +2516,23 @@ try {
       error: playerOpen.frameScreenshot?.error ?? "mpv frame screenshot was not captured",
       pixelOk: false,
     };
-    const nativeFrameEvidence = null;
+    let nativeFrameEvidence = null;
+    if (!frameEvidence?.pixelOk && isTauriMode) {
+      try {
+        const nativeCapture = await capturePlaybackNativeLayer(ws, child.pid, "command-player-native-playback");
+        nativeFrameEvidence = nativeCapture.capture;
+        if (nativeFrameEvidence?.pixelOk) {
+          frameEvidence = {
+            ...nativeFrameEvidence,
+            source: "native-window",
+            embedState: nativeCapture.embedState ?? null,
+            usedHandle: nativeCapture.usedHandle === true,
+          };
+        }
+      } catch (error) {
+        nativeFrameEvidence = { error: error?.message ?? String(error), pixelOk: false };
+      }
+    }
     const cleanup = await cdpEvalAfterContextReset(ws, `
       (async () => {
         const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -2549,6 +2582,11 @@ try {
     if (!stateReady && playerOpen.state?.backendDiagnostics?.lastError) {
       failures.push(`mpv diagnostic error: ${playerOpen.state.backendDiagnostics.lastError}`);
     }
+    if (!stateReady && playerOpen.state) {
+      failures.push(
+        `mpv unready detail: duration=${playerOpen.state.durationMs ?? 0} tracks=${playerOpen.state.trackCount ?? 0} videoTracks=${playerOpen.state.videoTrackCount ?? 0} eof=${playerOpen.state.eof === true} idle=${playerOpen.state.idleActive ?? "unknown"} demuxer=${playerOpen.state.demuxer ?? "none"} format=${playerOpen.state.fileFormat ?? "none"}`,
+      );
+    }
     if (!playerOpen.controls?.pauseOk) failures.push("pause command did not take effect");
     if (!playerOpen.controls?.resumeOk) failures.push("resume command did not take effect");
     if (!playerOpen.controls?.seekForwardOk) failures.push("seek forward command did not move position");
@@ -2559,9 +2597,12 @@ try {
     if (!frameEvidence?.pixelOk) {
       failures.push(`mpv frame screenshot is missing or visually blank: ${frameEvidence?.error ?? "pixel sample failed"}`);
     }
+    if (!frameEvidence?.pixelOk && nativeFrameEvidence?.error) {
+      failures.push(`native playback capture failed: ${nativeFrameEvidence.error}`);
+    }
     if (playerOpen.cleanup?.routeAway !== true) failures.push("player cleanup route-away failed or timed out");
     if (playerOpen.cleanup?.hasPlayerAfterWait) failures.push("player cleanup did not unmount PlayerView");
-    if (!cleanupHidHost) failures.push("player cleanup did not hide embedded host");
+    if (!cleanupHidHost && !cleanupDetachedHost) failures.push("player cleanup did not hide embedded host");
     if (!cleanupDetachedHost) failures.push("player cleanup did not detach embedded host");
     if ((mpvProcessCount ?? 0) > 0) failures.push("independent mpv.exe process is running");
     stage("command-only-complete", {

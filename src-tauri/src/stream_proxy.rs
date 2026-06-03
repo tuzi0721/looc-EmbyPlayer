@@ -87,6 +87,52 @@ impl StreamProxy {
         Ok(format!("http://{addr}/stream/{id}"))
     }
 
+    pub async fn probe_range_support(
+        &self,
+        url: Url,
+        headers: Vec<(String, String)>,
+        user_agent: Option<String>,
+    ) -> AppResult<bool> {
+        let mut upstream = self.inner.client.get(url);
+        upstream = upstream
+            .header(ACCEPT_ENCODING, "identity")
+            .header(RANGE, "bytes=0-0");
+        if let Some(ua) = user_agent.as_deref().filter(|ua| !ua.trim().is_empty()) {
+            upstream = upstream.header(USER_AGENT, ua);
+        }
+        for (name, value) in &headers {
+            if name.eq_ignore_ascii_case("host") {
+                continue;
+            }
+            let Ok(header_name) = HeaderName::from_bytes(name.as_bytes()) else {
+                continue;
+            };
+            let Ok(header_value) = HeaderValue::from_str(value) else {
+                continue;
+            };
+            upstream = upstream.header(header_name, header_value);
+        }
+
+        let response = upstream.send().await?;
+        let status = response.status();
+        let has_content_range = response.headers().get(CONTENT_RANGE).is_some();
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(sanitize_proxy_log_value)
+            .unwrap_or_else(|| "none".into());
+        let supported = status == StatusCode::PARTIAL_CONTENT && has_content_range;
+        log_visual_stream_proxy_event(&format!(
+            "range-probe status={} content_range={} content_type={} supported={}",
+            status.as_u16(),
+            has_content_range,
+            content_type,
+            supported
+        ));
+        Ok(supported)
+    }
+
     pub fn clear(&self) {
         self.inner.routes.clear();
     }
@@ -217,9 +263,17 @@ async fn handle_connection(inner: Arc<StreamProxyInner>, mut stream: TcpStream) 
         upstream = upstream.header(RANGE, range);
     }
 
+    let has_range = request.headers.contains_key("range");
     let response = match upstream.send().await {
         Ok(response) => response,
         Err(error) => {
+            log_visual_stream_proxy_event(&format!(
+                "request id={} method={} range={} upstream_error={}",
+                short_route_id(id),
+                request.method,
+                has_range,
+                sanitize_proxy_log_value(&error.to_string())
+            ));
             write_simple_response(
                 &mut stream,
                 StatusCode::BAD_GATEWAY,
@@ -230,8 +284,39 @@ async fn handle_connection(inner: Arc<StreamProxyInner>, mut stream: TcpStream) 
             return Err(AppError::Network(error));
         }
     };
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(sanitize_proxy_log_value)
+        .unwrap_or_else(|| "none".into());
+    let content_length = response
+        .headers()
+        .get(CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .map(sanitize_proxy_log_value)
+        .unwrap_or_else(|| "unknown".into());
+    log_visual_stream_proxy_event(&format!(
+        "request id={} method={} range={} upstream_status={} content_type={} content_length={}",
+        short_route_id(id),
+        request.method,
+        has_range,
+        status.as_u16(),
+        content_type,
+        content_length
+    ));
 
-    write_upstream_response(&mut stream, response, request.method == "HEAD").await
+    let bytes = write_upstream_response(&mut stream, response, request.method == "HEAD").await?;
+    log_visual_stream_proxy_event(&format!(
+        "complete id={} method={} range={} status={} bytes={}",
+        short_route_id(id),
+        request.method,
+        has_range,
+        status.as_u16(),
+        bytes
+    ));
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -292,7 +377,7 @@ async fn write_upstream_response(
     stream: &mut TcpStream,
     response: reqwest::Response,
     head_only: bool,
-) -> AppResult<()> {
+) -> AppResult<u64> {
     let status = response.status();
     let reason = status.canonical_reason().unwrap_or("ok");
     let mut head = format!("HTTP/1.1 {} {}\r\n", status.as_u16(), reason);
@@ -319,18 +404,20 @@ async fn write_upstream_response(
     stream.write_all(head.as_bytes()).await?;
     if head_only {
         stream.shutdown().await?;
-        return Ok(());
+        return Ok(0);
     }
 
     let mut body = response.bytes_stream();
+    let mut sent = 0_u64;
     while let Some(chunk) = body.next().await {
         let chunk = chunk?;
+        sent = sent.saturating_add(chunk.len() as u64);
         if stream.write_all(&chunk).await.is_err() {
             break;
         }
     }
     let _ = stream.shutdown().await;
-    Ok(())
+    Ok(sent)
 }
 
 async fn write_simple_response(
@@ -349,4 +436,41 @@ async fn write_simple_response(
     stream.write_all(body).await?;
     let _ = stream.shutdown().await;
     Ok(())
+}
+
+fn short_route_id(id: &str) -> String {
+    id.chars().take(8).collect()
+}
+
+fn sanitize_proxy_log_value(input: &str) -> String {
+    let mut text = input.replace(['\r', '\n'], " ");
+    if text.len() > 120 {
+        text.truncate(120);
+        text.push_str("...");
+    }
+    text
+}
+
+fn log_visual_stream_proxy_event(msg: &str) {
+    if std::env::var_os("HILLS_TAURI_CDP_PORT").is_none() {
+        return;
+    }
+    let path = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("USERPROFILE")
+                .map(std::path::PathBuf::from)
+                .map(|p| p.join("AppData").join("Local"))
+        })
+        .unwrap_or_else(std::env::temp_dir);
+    let dir = path.join("EmbyPlayer");
+    let _ = std::fs::create_dir_all(&dir);
+    let file = dir.join("visual-smoke.log");
+    let when = chrono::Utc::now().to_rfc3339();
+    let line = format!("{when} player stream-proxy:{msg}\n");
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file)
+        .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
 }

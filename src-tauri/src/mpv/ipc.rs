@@ -80,6 +80,10 @@ impl MpvIpcBackend {
         Ok(())
     }
 
+    pub fn embed_window_handle(&self) -> Option<i64> {
+        self.host.lock().as_ref().map(|h| h.handle())
+    }
+
     /// Tear down mpv IPC and destroy the native child window.
     pub async fn detach_embedded(&self) -> AppResult<()> {
         self.shutdown().await?;
@@ -427,6 +431,7 @@ impl MpvBackend for MpvIpcBackend {
                 headers,
                 user_agent,
                 start_ms,
+                http_seekable,
                 stream_record_path,
                 autoload_subtitles,
             } => {
@@ -455,8 +460,14 @@ impl MpvBackend for MpvIpcBackend {
                 } else {
                     self.set_property("stream-record", json!("")).await.ok();
                 }
-                self.send_command(vec![json!("loadfile"), json!(url), json!("replace")])
-                    .await?;
+                let mut args = vec![json!("loadfile"), json!(url), json!("replace")];
+                if http_seekable == Some(false) {
+                    args.push(json!(-1));
+                    args.push(json!({
+                        "demuxer-lavf-o": "seekable=0",
+                    }));
+                }
+                self.send_command(args).await?;
                 Ok(())
             }
             MpvCommand::Pause => self.set_property("pause", json!(true)).await,
@@ -573,27 +584,24 @@ impl MpvBackend for MpvIpcBackend {
                 path,
                 include_subtitles,
             } => {
-                let mode = if include_subtitles {
-                    "subtitles"
+                let modes: &[&str] = if include_subtitles {
+                    &["subtitles", "video", "window"]
                 } else {
-                    "video"
+                    &["video", "window"]
                 };
-                if let Err(error) = self
-                    .send_command(vec![json!("screenshot-to-file"), json!(path), json!(mode)])
-                    .await
-                {
-                    if include_subtitles {
-                        self.send_command(vec![
-                            json!("screenshot-to-file"),
-                            json!(path),
-                            json!("video"),
-                        ])
-                        .await?;
-                    } else {
-                        return Err(error);
+                let mut last_error = None;
+                for mode in modes {
+                    match self
+                        .send_command(vec![json!("screenshot-to-file"), json!(path), json!(mode)])
+                        .await
+                    {
+                        Ok(_) => return Ok(()),
+                        Err(error) => {
+                            last_error = Some(error);
+                        }
                     }
                 }
-                Ok(())
+                Err(last_error.unwrap_or_else(|| AppError::Mpv("screenshot failed".into())))
             }
             MpvCommand::ShowStatsOsd { page } => {
                 let page = page.clamp(1, 5);
@@ -736,6 +744,51 @@ impl MpvBackend for MpvIpcBackend {
             .await
             .ok()
             .and_then(|v| v.as_str().map(str::to_string));
+        let idle_active = self
+            .get_property("idle-active")
+            .await
+            .ok()
+            .and_then(|v| v.as_bool());
+        let demuxer = self
+            .get_property("demuxer")
+            .await
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string));
+        let file_format = self
+            .get_property("file-format")
+            .await
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string));
+        let media_title = self
+            .get_property("media-title")
+            .await
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string));
+        let stream_open_filename = self
+            .get_property("stream-open-filename")
+            .await
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string));
+        let stream_path = self
+            .get_property("stream-path")
+            .await
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string));
+        let demuxer_cache_state = self
+            .get_property("demuxer-cache-state")
+            .await
+            .ok()
+            .filter(Value::is_object);
+        let playlist_count = self
+            .get_property("playlist-count")
+            .await
+            .ok()
+            .and_then(|v| value_as_i64(&v));
+        let playlist_pos = self
+            .get_property("playlist-pos")
+            .await
+            .ok()
+            .and_then(|v| value_as_i64(&v));
         let container_fps = self
             .get_property("container-fps")
             .await
@@ -825,6 +878,15 @@ impl MpvBackend for MpvIpcBackend {
             osd_dimensions,
             audio_params,
             hwdec_current,
+            idle_active,
+            demuxer,
+            file_format,
+            media_title,
+            stream_open_filename,
+            stream_path,
+            demuxer_cache_state,
+            playlist_count,
+            playlist_pos,
             keepaspect,
             panscan,
             video_zoom,
@@ -923,4 +985,8 @@ fn parse_chapters(v: &Value) -> Vec<MpvChapterInfo> {
 
 fn value_as_f64(v: &Value) -> Option<f64> {
     v.as_f64().or_else(|| v.as_i64().map(|n| n as f64))
+}
+
+fn value_as_i64(v: &Value) -> Option<i64> {
+    v.as_i64()
 }

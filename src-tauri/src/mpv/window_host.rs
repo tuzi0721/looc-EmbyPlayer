@@ -60,6 +60,10 @@ impl HostWindow {
         }
     }
 
+    pub fn handle(&self) -> i64 {
+        self.wid()
+    }
+
     pub fn set_rect(&self, rect: PlayerRect) -> AppResult<()> {
         #[cfg(target_os = "windows")]
         {

@@ -77,6 +77,24 @@ pub struct MpvSnapshot {
     #[serde(default)]
     pub hwdec_current: Option<String>,
     #[serde(default)]
+    pub idle_active: Option<bool>,
+    #[serde(default)]
+    pub demuxer: Option<String>,
+    #[serde(default)]
+    pub file_format: Option<String>,
+    #[serde(default)]
+    pub media_title: Option<String>,
+    #[serde(default)]
+    pub stream_open_filename: Option<String>,
+    #[serde(default)]
+    pub stream_path: Option<String>,
+    #[serde(default)]
+    pub demuxer_cache_state: Option<Value>,
+    #[serde(default)]
+    pub playlist_count: Option<i64>,
+    #[serde(default)]
+    pub playlist_pos: Option<i64>,
+    #[serde(default)]
     pub keepaspect: Option<bool>,
     #[serde(default)]
     pub panscan: Option<f64>,
@@ -138,6 +156,11 @@ pub enum MpvCommand {
         headers: Vec<(String, String)>,
         user_agent: Option<String>,
         start_ms: Option<i64>,
+        /// Whether the chosen HTTP source passed a real Range preflight.
+        /// `Some(false)` is loaded with per-file lavf `seekable=0` so the
+        /// local proxy stream is read sequentially instead of issuing broken
+        /// upstream Range retries.
+        http_seekable: Option<bool>,
         /// When set, mpv writes the streamed bytes verbatim to this local path
         /// (`--stream-record`) so the user can keep watching while the file is
         /// saved.

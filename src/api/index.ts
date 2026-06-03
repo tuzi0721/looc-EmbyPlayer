@@ -403,6 +403,14 @@ export const api = {
   }) => invoke<void>("embed_set_rect", { rect }),
   embedSetVisible: (visible: boolean) => invoke<void>("embed_set_visible", { visible }),
   embedDetach: () => invoke<void>("embed_detach"),
+  getEmbedState: () => invoke<{
+    mode: string;
+    hostKind: string;
+    runtime: string;
+    hwnd?: string | null;
+    hostWindowHandle?: string | null;
+    attachedMpvWindowHandle?: string | null;
+  }>("get_embed_state"),
 
   // Settings
   getSettings: () => invoke<AppSettings>("get_settings"),
