@@ -64,24 +64,30 @@
 }
 
 :root[data-theme="light"] {
-  --bg-base: #f2f2f7;
-  --bg-elevated: rgba(255, 255, 255, 0.7);
-  --bg-overlay: rgba(255, 255, 255, 0.5);
+  --bg-base: #f5f7fb;
+  --bg-elevated: #ffffff;
+  --bg-overlay: rgba(248, 250, 252, 0.78);
 
-  --fg-primary: rgba(0, 0, 0, 0.92);
-  --fg-secondary: rgba(0, 0, 0, 0.6);
-  --fg-tertiary: rgba(0, 0, 0, 0.42);
-  --fg-quaternary: rgba(0, 0, 0, 0.18);
+  --fg-primary: #111827;
+  --fg-secondary: #374151;
+  --fg-tertiary: #667085;
+  --fg-quaternary: rgba(17, 24, 39, 0.28);
 
-  --separator: rgba(0, 0, 0, 0.08);
-  --separator-strong: rgba(0, 0, 0, 0.14);
+  --separator: rgba(17, 24, 39, 0.10);
+  --separator-strong: rgba(17, 24, 39, 0.18);
 
-  --glass-bg: rgba(255, 255, 255, 0.55);
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-pressed: #1e40af;
+  --accent-soft: rgba(37, 99, 235, 0.12);
+  --accent-grad: linear-gradient(135deg, #2563eb 0%, #0891b2 100%);
+
+  --glass-bg: rgba(255, 255, 255, 0.82);
   --glass-bg-thin: rgba(255, 255, 255, 0.72);
-  --glass-bg-strong: rgba(255, 255, 255, 0.86);
-  --glass-border: rgba(0, 0, 0, 0.06);
-  --glass-border-strong: rgba(0, 0, 0, 0.10);
-  --glass-shadow: 0 12px 34px rgba(18, 24, 38, 0.12);
+  --glass-bg-strong: rgba(255, 255, 255, 0.96);
+  --glass-border: rgba(17, 24, 39, 0.12);
+  --glass-border-strong: rgba(17, 24, 39, 0.18);
+  --glass-shadow: 0 10px 26px rgba(15, 23, 42, 0.10);
 
   --line-unknown: rgba(0, 0, 0, 0.32);
 
@@ -181,12 +187,14 @@ textarea {
 }
 
 :root[data-theme="light"] .app-backdrop {
-  background: linear-gradient(180deg, #fbfcff 0%, #eef2f8 100%);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(242, 246, 252, 0.98) 100%),
+    linear-gradient(135deg, rgba(37, 99, 235, 0.08) 0%, rgba(8, 145, 178, 0.06) 100%);
 }
 
 :root[data-theme="light"] .app-backdrop::after {
-  background-image: radial-gradient(rgba(18, 24, 38, 0.035) 1px, transparent 1px);
-  opacity: 0.75;
+  background-image: radial-gradient(rgba(17, 24, 39, 0.025) 1px, transparent 1px);
+  opacity: 0.45;
 }
 
 /* WebView2 on Windows: backdrop-filter + window move causes severe UI freeze. */
@@ -203,4 +211,12 @@ html.platform-windows .app-sidebar {
 }
 html.platform-windows .topbar {
   background: var(--surface-1);
+}
+html.platform-windows[data-theme="light"] .app-sidebar,
+html.platform-windows[data-theme="light"] .topbar,
+html.platform-windows[data-theme="light"] .navbar.glass-thin,
+html.platform-windows[data-theme="light"] .glass,
+html.platform-windows[data-theme="light"] .glass-thin {
+  background: var(--glass-bg-strong);
+  border-color: var(--glass-border);
 }

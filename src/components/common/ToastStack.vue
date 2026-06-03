@@ -212,6 +212,16 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, 0.08);
 }
 
+:global(:root[data-theme="light"]) .toast {
+  background: var(--glass-bg-strong);
+  border-color: var(--glass-border-strong);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.14);
+}
+
+:global(:root[data-theme="light"]) .iconbtn:hover {
+  background: rgba(15, 23, 42, 0.08);
+}
+
 .toast-enter-active,
 .toast-leave-active {
   transition: transform 260ms var(--easing-glide), opacity 220ms var(--easing-glide);
