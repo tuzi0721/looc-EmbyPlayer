@@ -718,9 +718,12 @@ async function setupRealAccountCommandOnly(ws) {
   const requestedSelected = requestedItemId
     ? candidates.find((item) => item?.Id === requestedItemId)
     : null;
+  const playableCandidates = candidates.filter(
+    (item) => item?.Id && !skippedItemIds.has(String(item.Id)) && (item.Type === "Movie" || item.Type === "Episode"),
+  );
   const selected =
     requestedSelected ??
-    candidates.find((item) => item?.Id && (item.Type === "Movie" || item.Type === "Episode")) ??
+    playableCandidates.find((item) => item?.Id && (item.Type === "Movie" || item.Type === "Episode")) ??
     (requestedItemId ? { Id: requestedItemId, Type: "Movie", Name: "" } : null);
   if (!selected) throw new Error("real server has no Movie/Episode candidate for playback smoke");
   const selectedSeries = seriesCandidates.find((item) => item?.Id && item.Type === "Series") ?? null;
@@ -1935,12 +1938,20 @@ function centerOf(rect) {
 
 const [line1, line2, username, password, requestedItemIdRaw] = readInput();
 const requestedItemId = String(requestedItemIdRaw ?? "").trim();
+const skippedItemIds = new Set(
+  String(process.env.HILLS_REAL_SKIP_ITEM_IDS ?? "")
+    .split(/[,\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean),
+);
 for (const value of [line1, line2, username, password]) registerSensitiveValue(value);
 stage("input-read", {
   line1Present: Boolean(line1),
   line2Present: Boolean(line2),
   usernamePresent: Boolean(username),
   passwordPresent: Boolean(password),
+  requestedItemPresent: Boolean(requestedItemId),
+  skippedItemCount: skippedItemIds.size,
 });
 if (!line1 || !line2 || !username || !password) {
   throw new Error("Provide line1, line2, username, password via stdin or HILLS_REAL_* env vars.");
@@ -2208,12 +2219,16 @@ try {
         ...(seriesResp.Items ?? []),
       ];
       const requestedItemId = ${JSON.stringify(requestedItemId)};
+      const skippedItemIds = new Set(${JSON.stringify([...skippedItemIds])});
       const requestedSelected = requestedItemId
         ? candidates.find((item) => item?.Id === requestedItemId)
         : null;
+      const playableCandidates = candidates.filter(
+        (item) => item?.Id && !skippedItemIds.has(String(item.Id)) && (item.Type === "Movie" || item.Type === "Episode"),
+      );
       const selected =
         requestedSelected ??
-        candidates.find((item) => item?.Id && (item.Type === "Movie" || item.Type === "Episode")) ??
+        playableCandidates.find((item) => item?.Id && (item.Type === "Movie" || item.Type === "Episode")) ??
         (requestedItemId ? { Id: requestedItemId, Type: "Movie", Name: "" } : null);
       if (!selected) throw new Error("real server has no Movie/Episode candidate for playback smoke");
       const selectedSeries = seriesCandidates.find((item) => item?.Id && item.Type === "Series") ?? null;
