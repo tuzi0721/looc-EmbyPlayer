@@ -44,6 +44,8 @@ export interface PlaybackSource {
   playMethod?: "DirectPlay" | "DirectStream";
   lineId?: string | null;
   lineName?: string | null;
+  rangeSupported?: boolean | null;
+  startSuppressedNonSeekable?: boolean;
   streamUrl: string;
   durationMs?: number | null;
   tracks?: MpvSnapshot["tracks"];

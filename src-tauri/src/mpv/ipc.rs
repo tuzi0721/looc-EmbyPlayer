@@ -586,6 +586,8 @@ impl MpvBackend for MpvIpcBackend {
                 if let Some(ms) = start_ms {
                     self.set_property("start", json!(format!("{:.3}", ms as f64 / 1000.0)))
                         .await?;
+                } else {
+                    self.set_property("start", json!("0")).await?;
                 }
                 if let Some(rec) = stream_record_path {
                     self.set_property("stream-record", json!(rec)).await?;

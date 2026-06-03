@@ -1980,11 +1980,13 @@ async function togglePlayed() {
   color: white;
   isolation: isolate;
   overflow: hidden;
+  pointer-events: none;
 }
 .hero__bg {
   position: absolute;
   inset: 0;
   background: #08080a;
+  pointer-events: none;
 }
 .hero__bg img {
   width: 100%;
@@ -1996,6 +1998,7 @@ async function togglePlayed() {
 .hero__shade {
   position: absolute;
   inset: 0;
+  pointer-events: none;
   background:
     linear-gradient(90deg, rgba(10, 10, 12, 0.82) 0%, rgba(10, 10, 12, 0.3) 43%, rgba(10, 10, 12, 0.14) 100%),
     linear-gradient(0deg, rgba(10, 10, 12, 0.9) 0%, rgba(10, 10, 12, 0.42) 34%, rgba(10, 10, 12, 0.05) 72%);
@@ -2005,6 +2008,7 @@ async function togglePlayed() {
   top: 16px;
   left: 16px;
   z-index: 2;
+  pointer-events: auto;
   appearance: none;
   border: none;
   background: rgba(0, 0, 0, 0.35);
@@ -2021,7 +2025,8 @@ async function togglePlayed() {
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 1;
+  z-index: 5;
+  pointer-events: auto;
   padding: 0 var(--content-pad) clamp(24px, 6vh, 64px);
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
@@ -2089,6 +2094,8 @@ async function togglePlayed() {
   flex-wrap: wrap;
 }
 .hero__play {
+  position: relative;
+  z-index: 4;
   appearance: none;
   border: none;
   background: var(--accent-grad);
@@ -2113,6 +2120,8 @@ async function togglePlayed() {
   gap: 10px;
 }
 .circle-btn {
+  position: relative;
+  z-index: 4;
   appearance: none;
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.06);

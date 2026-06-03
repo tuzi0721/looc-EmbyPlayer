@@ -561,6 +561,9 @@ impl MpvBackend for MpvEmbeddedBackend {
                     let s = format!("{:.3}", ms as f64 / 1000.0);
                     m.set_property("start", s.as_str())
                         .map_err(|e| AppError::Mpv(e.to_string()))?;
+                } else {
+                    m.set_property("start", "0")
+                        .map_err(|e| AppError::Mpv(e.to_string()))?;
                 }
                 if let Some(rec) = stream_record_path {
                     m.set_property("stream-record", rec.as_str())

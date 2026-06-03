@@ -70,6 +70,7 @@ let embedResizeRaf = 0;
 let embedLayoutSyncTimer: number | null = null;
 let lastEmbedRectKey = "";
 let blackoutSyncSeq = 0;
+let playerUnmounted = false;
 let introSkipAppliedItemId: string | null = null;
 let outroSkipAppliedItemId: string | null = null;
 let localQueueEofHandled = false;
@@ -417,6 +418,16 @@ const positionMs = computed(() =>
 );
 const durationMs = computed(() =>
   useHtmlVideo ? htmlDurationMs.value : player.snapshot?.durationMs ?? 0,
+);
+const playbackControlsEnabled = computed(() => !errorText.value);
+const seekAvailable = computed(() => {
+  if (!playbackControlsEnabled.value) return false;
+  if (useHtmlVideo) return true;
+  if (isLocalFilePlayback.value || isDirectUrlPlayback.value || routeLocalDownloadId.value) return true;
+  return player.playbackSource?.rangeSupported !== false;
+});
+const seekUnavailableTitle = computed(() =>
+  seekAvailable.value ? "" : "当前线路不支持远程跳转",
 );
 const paused = computed(() =>
   useHtmlVideo ? htmlPaused.value : player.snapshot?.paused ?? true,
@@ -1430,6 +1441,10 @@ function clampSeekMs(value: number) {
 }
 
 async function seekToMs(value: number) {
+  if (!seekAvailable.value) {
+    bumpControls();
+    return;
+  }
   const target = clampSeekMs(value);
   if (useHtmlVideo && videoEl.value) {
     const video = videoEl.value;
@@ -1451,6 +1466,10 @@ async function seekToMs(value: number) {
 }
 
 async function nudgeSeek(deltaSec: number) {
+  if (!seekAvailable.value) {
+    bumpControls();
+    return;
+  }
   if (!useHtmlVideo) {
     await player.seekRelative(deltaSec * 1000);
     bumpControls();
@@ -2201,19 +2220,33 @@ async function takeScreenshot() {
 }
 
 onMounted(async () => {
+  playerUnmounted = false;
   document.addEventListener("fullscreenchange", onFullscreenChange);
   document.addEventListener("webkitfullscreenchange", onFullscreenChange);
   try {
     const hostReady = await setupEmbeddedVideoHost();
     if (embedVideo && !hostReady) return;
+    if (playerUnmounted) {
+      await player.stop().catch((error) => console.warn(error));
+      return;
+    }
     await startCurrentPlayback();
+    if (playerUnmounted) {
+      await player.stop().catch((error) => console.warn(error));
+      return;
+    }
   } catch (e) {
+    if (playerUnmounted) {
+      await player.stop().catch((error) => console.warn(error));
+      return;
+    }
     errorText.value = String(e);
     showControls.value = true;
   }
 });
 
 onBeforeUnmount(async () => {
+  playerUnmounted = true;
   document.removeEventListener("fullscreenchange", onFullscreenChange);
   document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
   blackoutSyncSeq += 1;
@@ -2233,14 +2266,12 @@ onBeforeUnmount(async () => {
   }
   player.stopPolling();
   if (embedVideo) {
-    let detached = false;
+    await player.stop().catch((error) => console.warn(error));
     try {
       await teardownEmbeddedVideoHost({ hide: false });
-      detached = true;
     } catch (error) {
       console.warn(error);
     }
-    await player.stop({ stopBackend: !detached }).catch((error) => console.warn(error));
   } else {
     await player.stop().catch((error) => console.warn(error));
   }
@@ -2439,6 +2470,8 @@ onBeforeUnmount(async () => {
               max="100"
               step="0.05"
               :value="isScrubbing ? scrubPct : progressPct"
+              :disabled="!seekAvailable"
+              :title="seekUnavailableTitle"
               @input="onScrubInput"
               @change="onScrubCommit"
             />
@@ -2462,7 +2495,8 @@ onBeforeUnmount(async () => {
             <button
               class="iconbtn"
               data-control="seek-back"
-              title="后退 10 秒"
+              :disabled="!seekAvailable"
+              :title="seekAvailable ? '后退 10 秒' : seekUnavailableTitle"
               @click="nudgeSeek(-10)"
             >
               <Icon icon="lucide:rotate-ccw" width="19" />
@@ -2470,7 +2504,8 @@ onBeforeUnmount(async () => {
             <button
               class="iconbtn xl primary"
               data-control="play-toggle"
-              :title="paused ? '播放' : '暂停'"
+              :disabled="!playbackControlsEnabled"
+              :title="playbackControlsEnabled ? (paused ? '播放' : '暂停') : '当前没有可控制的播放会话'"
               :aria-label="paused ? '播放' : '暂停'"
               @click="togglePlay"
             >
@@ -2479,7 +2514,8 @@ onBeforeUnmount(async () => {
             <button
               class="iconbtn"
               data-control="seek-forward"
-              title="前进 30 秒"
+              :disabled="!seekAvailable"
+              :title="seekAvailable ? '前进 30 秒' : seekUnavailableTitle"
               @click="nudgeSeek(30)"
             >
               <Icon icon="lucide:rotate-cw" width="19" />

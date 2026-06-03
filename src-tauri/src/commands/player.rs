@@ -63,6 +63,8 @@ pub struct PlaybackSourceResult {
     pub play_method: String,
     pub line_id: String,
     pub line_name: String,
+    pub range_supported: Option<bool>,
+    pub start_suppressed_non_seekable: bool,
     pub stream_url: String,
     pub duration_ms: Option<i64>,
     pub tracks: Vec<MpvTrackInfo>,
@@ -561,6 +563,8 @@ pub async fn get_playback_source(
         play_method,
         line_id: line.id.clone(),
         line_name: line.name.clone(),
+        range_supported: None,
+        start_suppressed_non_seekable: false,
         stream_url: proxy_url,
         duration_ms,
         tracks,
@@ -706,6 +710,24 @@ pub async fn play(
         .await?;
     log_visual_player_stage("play:stream-proxy-ready");
 
+    let requested_start_ms = payload.start_ms;
+    let start_suppressed_nonseekable =
+        !range_supported && requested_start_ms.unwrap_or_default() > 0;
+    let mpv_start_ms = if start_suppressed_nonseekable {
+        log_visual_player_stage(&format!(
+            "play:start-suppressed-nonseekable requested_ms={}",
+            requested_start_ms.unwrap_or_default()
+        ));
+        tracing::info!(
+            target = "player",
+            requested_start_ms = requested_start_ms.unwrap_or_default(),
+            "suppressed resume start because selected line is not range-seekable"
+        );
+        None
+    } else {
+        requested_start_ms
+    };
+
     let mut record_task_id: Option<String> = None;
     let stream_record_path = if payload.record_while_playing {
         let dir = state.downloads.download_dir()?;
@@ -752,13 +774,23 @@ pub async fn play(
     };
 
     let backend = state.mpv.backend();
+    log_visual_player_stage("play:mpv-stop-before-load-start");
+    if let Err(error) = backend.execute(MpvCommand::Stop).await {
+        log_visual_player_stage(&format!(
+            "play:mpv-stop-before-load-error {}",
+            sanitize_visual_error(&error.to_string())
+        ));
+        tracing::debug!(target = "player", error = %error, "mpv stop before load failed");
+    } else {
+        log_visual_player_stage("play:mpv-stop-before-load-complete");
+    }
     log_visual_player_stage("play:mpv-load-start");
     backend
         .execute(MpvCommand::Load {
             url: mpv_url.clone(),
             headers: Vec::new(),
             user_agent: None,
-            start_ms: payload.start_ms,
+            start_ms: mpv_start_ms,
             http_seekable: Some(range_supported),
             stream_record_path,
             autoload_subtitles: true,
@@ -811,6 +843,9 @@ pub async fn play(
             "baseUrl": line.base_url.clone(),
         },
         "rangeSupported": range_supported,
+        "requestedStartMs": requested_start_ms,
+        "mpvStartMs": mpv_start_ms,
+        "startSuppressedNonSeekable": start_suppressed_nonseekable,
     });
 
     let result = PlaybackSourceResult {
@@ -820,6 +855,8 @@ pub async fn play(
         play_method,
         line_id: line.id.clone(),
         line_name: line.name.clone(),
+        range_supported: Some(range_supported),
+        start_suppressed_non_seekable: start_suppressed_nonseekable,
         stream_url: mpv_url,
         duration_ms,
         tracks,

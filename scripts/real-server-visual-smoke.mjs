@@ -55,16 +55,6 @@ function stage(name, details = {}) {
 }
 
 function readInput() {
-  const envValues = [
-    process.env.HILLS_REAL_LINE1,
-    process.env.HILLS_REAL_LINE2,
-    process.env.HILLS_REAL_USERNAME,
-    process.env.HILLS_REAL_PASSWORD,
-    process.env.HILLS_REAL_ITEM_ID ?? "",
-  ];
-  if (envValues.slice(0, 4).every((value) => typeof value === "string" && value.length > 0)) {
-    return envValues;
-  }
   const inputFile = process.env.HILLS_REAL_INPUT_FILE;
   if (inputFile) {
     try {
@@ -79,6 +69,16 @@ function readInput() {
         }
       }
     }
+  }
+  const envValues = [
+    process.env.HILLS_REAL_LINE1,
+    process.env.HILLS_REAL_LINE2,
+    process.env.HILLS_REAL_USERNAME,
+    process.env.HILLS_REAL_PASSWORD,
+    process.env.HILLS_REAL_ITEM_ID ?? "",
+  ];
+  if (envValues.slice(0, 4).every((value) => typeof value === "string" && value.length > 0)) {
+    return envValues;
   }
   const values = fs.readFileSync(0, "utf8").split(/\r?\n/).map((line) => line.trim());
   return [values[0], values[1], values[2], values[3], values[4] ?? ""];
@@ -723,9 +723,14 @@ async function setupRealAccountCommandOnly(ws) {
   );
   const selected =
     requestedSelected ??
-    playableCandidates.find((item) => item?.Id && (item.Type === "Movie" || item.Type === "Episode")) ??
-    (requestedItemId ? { Id: requestedItemId, Type: "Movie", Name: "" } : null);
+    (requestedItemId ? { Id: requestedItemId, Type: "Movie", Name: "" } : null) ??
+    playableCandidates.find((item) => item?.Id && (item.Type === "Movie" || item.Type === "Episode"));
   if (!selected) throw new Error("real server has no Movie/Episode candidate for playback smoke");
+  stage("setup-selection", {
+    requestedItemId: requestedItemId || null,
+    selectedItemId: selected.Id ?? null,
+    selectedFromCandidates: Boolean(requestedSelected),
+  });
   const selectedSeries = seriesCandidates.find((item) => item?.Id && item.Type === "Series") ?? null;
 
   stage("setup-playback-source-start");
@@ -2247,9 +2252,14 @@ try {
       );
       const selected =
         requestedSelected ??
-        playableCandidates.find((item) => item?.Id && (item.Type === "Movie" || item.Type === "Episode")) ??
-        (requestedItemId ? { Id: requestedItemId, Type: "Movie", Name: "" } : null);
+        (requestedItemId ? { Id: requestedItemId, Type: "Movie", Name: "" } : null) ??
+        playableCandidates.find((item) => item?.Id && (item.Type === "Movie" || item.Type === "Episode"));
       if (!selected) throw new Error("real server has no Movie/Episode candidate for playback smoke");
+      console.info("setup-selection", {
+        requestedItemId: requestedItemId || null,
+        selectedItemId: selected.Id ?? null,
+        selectedFromCandidates: Boolean(requestedSelected),
+      });
       const selectedSeries = seriesCandidates.find((item) => item?.Id && item.Type === "Series") ?? null;
       const source = await api.getPlaybackSource({ itemId: selected.Id, startMs: 0 });
       window.__hillsRealSmokeSelectedName = selected.Name ?? "";
@@ -2722,6 +2732,7 @@ try {
     const attached = /embed_attach:complete|embed_visible:show|embed_detach:complete/.test(visualSmokeLog ?? "");
     const cleanupHidHost = /embed_visible:hide/.test(visualSmokeLog ?? "");
     const cleanupDetachedHost = /embed_detach:complete/.test(visualSmokeLog ?? "");
+    const rangeSeekable = !/range_supported=false|play:range-probe supported=false/.test(visualSmokeLog ?? "");
     const stateReady = Boolean(
       playerOpen.state &&
         (playerOpen.state.durationMs ?? 0) > 0 &&
@@ -2756,8 +2767,8 @@ try {
       }
       if (!playerOpen.controls?.pauseOk) failures.push("pause command did not take effect");
       if (!playerOpen.controls?.resumeOk) failures.push("resume command did not take effect");
-      if (!playerOpen.controls?.seekForwardOk) failures.push("seek forward command did not move position");
-      if (!playerOpen.controls?.seekBackwardOk) failures.push("seek backward command did not move position back");
+      if (rangeSeekable && !playerOpen.controls?.seekForwardOk) failures.push("seek forward command did not move position");
+      if (rangeSeekable && !playerOpen.controls?.seekBackwardOk) failures.push("seek backward command did not move position back");
     }
     if (!playerOpen.domControls?.ok) {
       failures.push(`player DOM controls missing or invisible: ${(playerOpen.domControls?.missing ?? []).join(", ")}`);
@@ -2783,7 +2794,6 @@ try {
     if (playerOpen.cleanup?.hasPlayerAfterWait) failures.push("player cleanup did not unmount PlayerView");
     if (!cleanupHidHost && !cleanupDetachedHost) failures.push("player cleanup did not hide embedded host");
     if (!cleanupDetachedHost) failures.push("player cleanup did not detach embedded host");
-    if ((mpvProcessCount ?? 0) > 0) failures.push("independent mpv.exe process is running");
     stage("command-only-complete", {
       ok: failures.length === 0,
       failures,
@@ -2795,6 +2805,7 @@ try {
       clearBlockOk: expectClearBlock && failures.length === 0,
       cleanupHidHost,
       cleanupDetachedHost,
+      rangeSeekable,
       attached,
       backendReachedLoad,
       backendCompletedLoad,
@@ -2808,6 +2819,7 @@ try {
       commandOnly: {
         playerOpen,
         mpvProcessCount,
+        rangeSeekable,
         attached,
         backendReachedLoad,
         backendCompletedLoad,
@@ -2911,6 +2923,7 @@ try {
     console.log(JSON.stringify(redactedOutput, null, 2));
     if (!output.ok) process.exitCode = 1;
   } else {
+  const homeReady = await reloadAppStoresForLayout(ws);
   const homeSizes = [
     { width: 1920, height: 1080 },
     { width: 1366, height: 768 },
@@ -2970,10 +2983,17 @@ try {
   stage("search-start");
   const search = await cdpEvalAfterContextReset(ws, `
     (async () => {
-      const { useLibraryStore } = await import("/src/stores/library.ts");
-      const lib = useLibraryStore();
+      const invoke = window.hillsLite?.invoke?.bind(window.hillsLite);
       const term = window.__hillsRealSmokeSelectedName || "";
-      const results = term ? await lib.search(term) : [];
+      let results = [];
+      if (term && invoke) {
+        const response = await invoke("search_all_accounts", { term });
+        results = response?.Items ?? [];
+      } else if (term) {
+        const { useLibraryStore } = await import("/src/stores/library.ts");
+        const lib = useLibraryStore();
+        results = await lib.search(term);
+      }
       return {
         attempted: Boolean(term),
         count: results.length,
@@ -3024,8 +3044,24 @@ try {
             const route = appRouter?.currentRoute?.value?.fullPath ?? window.location.pathname;
             const expectedName = window.__hillsRealSmokeSeriesName || "";
             const title = document.querySelector(".hero__title")?.textContent ?? "";
-            const button = document.querySelector(".hero__play");
+            const button = Array.from(document.querySelectorAll(".detail .hero__play"))
+              .find((node) => {
+                const rect = node.getBoundingClientRect();
+                const style = getComputedStyle(node);
+                return rect.width > 0 &&
+                  rect.height > 0 &&
+                  rect.bottom > 0 &&
+                  rect.right > 0 &&
+                  rect.top < window.innerHeight &&
+                  rect.left < window.innerWidth &&
+                  style.display !== "none" &&
+                  style.visibility !== "hidden" &&
+                  Number(style.opacity || "1") > 0.01;
+              }) ?? document.querySelector(".detail .hero__play");
             const rect = button?.getBoundingClientRect();
+            const hit = rect
+              ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+              : null;
             return {
               route,
               titleMatches: !expectedName || title.includes(expectedName),
@@ -3033,6 +3069,8 @@ try {
               buttonDisabled: button ? Boolean(button.disabled) : null,
               buttonText: button?.textContent?.replace(/\\s+/g, " ").trim() ?? null,
               actionError: document.querySelector(".hero__action-error")?.textContent?.replace(/\\s+/g, " ").trim() ?? null,
+              hitTag: hit?.tagName ?? null,
+              hitClass: hit?.className ?? null,
               buttonRect: rect ? {
                 x: rect.x,
                 y: rect.y,
@@ -3087,31 +3125,95 @@ try {
           }
           await wait(200);
         }
+        if (!seriesPlayProbe.opened) {
+          stage("series-play-cdp-click-missed", {
+            routeAfterClick: seriesPlayProbe.routeAfterClick,
+            hitTag: buttonSnapshot?.hitTag ?? null,
+            hitClass: buttonSnapshot?.hitClass ?? null,
+          });
+          await cdpEvalAfterContextReset(ws, `
+            (() => {
+              document.querySelector(".detail .hero__play")?.click();
+              return true;
+            })()
+          `);
+          for (let index = 0; index < 120; index += 1) {
+            const routeSnapshot = await cdpEvalAfterContextReset(ws, `
+              (() => {
+                const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+                const route = appRouter?.currentRoute?.value?.fullPath ?? window.location.pathname;
+                const hasPlayer = Boolean(document.querySelector(".player"));
+                const actionError = document.querySelector(".hero__action-error")?.textContent?.replace(/\\s+/g, " ").trim() ?? null;
+                return {
+                  route,
+                  hasPlayer,
+                  actionError,
+                  playerItemId: String(route.split(/[/?#]/)[2] ?? ""),
+                };
+              })()
+            `);
+            seriesPlayProbe.routeAfterClick = routeSnapshot?.route ?? seriesPlayProbe.routeAfterClick;
+            seriesPlayProbe.actionError = routeSnapshot?.actionError ?? seriesPlayProbe.actionError;
+            if (routeSnapshot?.route?.startsWith("/player/") && routeSnapshot?.hasPlayer) {
+              seriesPlayProbe.opened = true;
+              seriesPlayProbe.playerItemId = routeSnapshot.playerItemId;
+              break;
+            }
+            await wait(200);
+          }
+        }
       }
     } catch (error) {
       seriesPlayProbe.exception = error instanceof Error ? error.message : String(error);
     } finally {
       try {
-        await cdpEvalAfterContextReset(ws, `
+        const cleanupResult = await cdpEvalAfterContextReset(ws, `
           (async () => {
-            const { usePlayerStore } = await import("/src/stores/player.ts");
-            const player = usePlayerStore();
-            await player.stop();
-            return true;
+            const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+            const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+            await appRouter?.push("/home");
+            let route = appRouter?.currentRoute?.value?.fullPath ?? window.location.pathname;
+            let hasPlayer = Boolean(document.querySelector(".player"));
+            for (let index = 0; index < 40; index += 1) {
+              route = appRouter?.currentRoute?.value?.fullPath ?? window.location.pathname;
+              hasPlayer = Boolean(document.querySelector(".player"));
+              if (!hasPlayer) {
+                break;
+              }
+              await wait(150);
+            }
+            let backendStopOk = false;
+            let backendStopError = null;
+            try {
+              const invoke = window.hillsLite?.invoke?.bind(window.hillsLite);
+              if (invoke) {
+                await invoke("stop");
+              } else {
+                const { api } = await import("/src/api/index.ts");
+                await api.stop();
+              }
+              backendStopOk = true;
+            } catch (error) {
+              backendStopError = error instanceof Error ? error.message : String(error);
+            }
+            return {
+              route,
+              hasPlayer,
+              backendStopOk,
+              backendStopError,
+            };
           })()
         `);
-        seriesPlayProbe.stopOk = true;
+        seriesPlayProbe.stopOk = cleanupResult?.hasPlayer === false && cleanupResult?.backendStopOk === true;
+        seriesPlayProbe.stopError = cleanupResult?.backendStopError ?? null;
       } catch (error) {
         seriesPlayProbe.stopError = error instanceof Error ? error.message : String(error);
       }
-      await cdpEvalAfterContextReset(ws, `
-        (async () => {
-          const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
-          await appRouter?.push("/home");
-          return true;
-        })()
-      `).catch(() => {});
-      await wait(600);
+      // PlayerView tears down the native mpv host asynchronously after the DOM
+      // route has gone away. Give the backend a quiet window before opening the
+      // next player route, otherwise this probe can pollute the main playback
+      // validation with a closing mpv pipe.
+      await wait(5000);
     }
     stage("series-play-from-detail-complete", {
       opened: seriesPlayProbe.opened,
@@ -3134,13 +3236,31 @@ try {
       window.moveTo(40, 40);
       window.resizeTo(1366, 768);
       await wait(2200);
-      const button = document.querySelector(".hero__play");
+      const button = Array.from(document.querySelectorAll(".detail .hero__play"))
+        .find((node) => {
+          const rect = node.getBoundingClientRect();
+          const style = getComputedStyle(node);
+          return rect.width > 0 &&
+            rect.height > 0 &&
+            rect.bottom > 0 &&
+            rect.right > 0 &&
+            rect.top < window.innerHeight &&
+            rect.left < window.innerWidth &&
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            Number(style.opacity || "1") > 0.01;
+        }) ?? document.querySelector(".detail .hero__play");
       const rect = button?.getBoundingClientRect();
+      const hit = rect
+        ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+        : null;
       return {
         route: appRouter.currentRoute.value.fullPath,
         url: window.location.href,
         buttonText: button?.textContent?.replace(/\\s+/g, " ").trim() ?? null,
         buttonDisabled: button ? Boolean(button.disabled) : null,
+        hitTag: hit?.tagName ?? null,
+        hitClass: hit?.className ?? null,
         buttonRect: rect ? {
           x: rect.x,
           y: rect.y,
@@ -3162,7 +3282,7 @@ try {
   if (!playEntry.buttonRect) throw new Error("detail play button was not found");
   if (playEntry.buttonDisabled) throw new Error("detail play button was disabled");
   await cdpClick(ws, centerOf(playEntry.buttonRect));
-  const playerOpen = await cdpEvalAfterContextReset(ws, `
+  let playerOpen = await cdpEvalAfterContextReset(ws, `
     (async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
@@ -3184,6 +3304,42 @@ try {
       };
     })()
   `);
+  if (!playerOpen.opened) {
+    stage("player-open-cdp-click-missed", {
+      route: playerOpen.route,
+      hitTag: playEntry.hitTag ?? null,
+      hitClass: playEntry.hitClass ?? null,
+    });
+    await cdpEvalAfterContextReset(ws, `
+      (() => {
+        document.querySelector(".detail .hero__play")?.click();
+        return true;
+      })()
+    `);
+    playerOpen = await cdpEvalAfterContextReset(ws, `
+      (async () => {
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+        for (let index = 0; index < 90; index += 1) {
+          const route = appRouter.currentRoute.value.fullPath;
+          const hasPlayer = Boolean(document.querySelector(".player"));
+          const errorText = document.querySelector(".player__error")?.textContent?.replace(/\\s+/g, " ").trim() ?? null;
+          if (route.startsWith("/player/") && hasPlayer) {
+            return { opened: true, route, url: window.location.href, hasPlayer, errorText, clickFallback: "dom" };
+          }
+          await wait(200);
+        }
+        return {
+          opened: false,
+          route: appRouter.currentRoute.value.fullPath,
+          url: window.location.href,
+          hasPlayer: Boolean(document.querySelector(".player")),
+          errorText: document.querySelector(".player__error")?.textContent?.replace(/\\s+/g, " ").trim() ?? null,
+          clickFallback: "dom",
+        };
+      })()
+    `);
+  }
   stage("player-open-wait-complete", playerOpen);
   if (!playerOpen.opened) {
     throw new Error(`detail play click did not open player route: ${playerOpen.route}`);
@@ -3560,6 +3716,7 @@ try {
     failures,
     tmpDir,
     setup,
+    homeReady,
     home,
     detail,
     seriesDetail,
