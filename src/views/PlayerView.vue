@@ -13,6 +13,7 @@ import { useKeyboard } from "@/composables/useKeyboard";
 import { openFileDialog } from "@/platform";
 import { useAuthStore } from "@/stores/auth";
 import { useLibraryStore } from "@/stores/library";
+import { useDownloadsStore } from "@/stores/downloads";
 import { usePlayerStore, type DirectQueueEntry } from "@/stores/player";
 import { useServerStore } from "@/stores/server";
 import { useSettingsStore } from "@/stores/settings";
@@ -35,6 +36,7 @@ const router = useRouter();
 const player = usePlayerStore();
 const auth = useAuthStore();
 const lib = useLibraryStore();
+const downloads = useDownloadsStore();
 const serverStore = useServerStore();
 const settings = useSettingsStore();
 const routeAccountId = computed(() => {
@@ -58,6 +60,8 @@ const errorText = ref<string | null>(null);
 const errorCopyStatus = ref<string | null>(null);
 const showControls = ref(true);
 const retryingPlayback = ref(false);
+const downloadStarting = ref(false);
+const downloadActionStatus = ref<string | null>(null);
 const stageEl = ref<HTMLElement | null>(null);
 let hideTimer: number | null = null;
 let hls: Hls | null = null;
@@ -351,6 +355,10 @@ const routeLocalFilePath = computed(() => {
   const value = route.query.file;
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 });
+const routeLocalDownloadId = computed(() => {
+  const value = route.query.local;
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+});
 const localFilePath = computed(() => player.localFilePath ?? routeLocalFilePath.value);
 const localFileTitle = computed(() =>
   localFilePath.value ? fileNameFromPath(localFilePath.value) : null,
@@ -359,6 +367,15 @@ const isLocalFilePlayback = computed(() => Boolean(localFilePath.value));
 const isDirectUrlPlayback = computed(() => Boolean(player.directUrl || player.directTitle));
 const isLocalQueue = computed(() => player.queueKind === "local");
 const isDirectQueue = computed(() => player.queueKind === "direct");
+const remoteRouteItemId = computed(() =>
+  props.id !== "webdav-file" && props.id !== "alist-file" ? props.id : null,
+);
+const canDownloadCurrentRemoteItem = computed(() => {
+  if (!remoteRouteItemId.value) return false;
+  if (routeLocalDownloadId.value || isLocalFilePlayback.value || isDirectUrlPlayback.value) return false;
+  if (isLocalQueue.value || isDirectQueue.value) return false;
+  return true;
+});
 const displayTitle = computed(
   () =>
     item.value?.SeriesName ??
@@ -2000,10 +2017,31 @@ async function copyPlayerError() {
   }
 }
 
+async function startDownloadForCurrentItem() {
+  const itemId = remoteRouteItemId.value;
+  if (!itemId || downloadStarting.value || !canDownloadCurrentRemoteItem.value) return;
+  downloadStarting.value = true;
+  downloadActionStatus.value = null;
+  clearErrorCopyStatus();
+  try {
+    if (routeAccountId.value && auth.activeId !== routeAccountId.value) {
+      await auth.switchTo(routeAccountId.value);
+    }
+    const task = await downloads.start(itemId, { stealth: false, preferDirect: true });
+    downloadActionStatus.value = "已创建下载任务";
+    await router.push({ name: "downloads", query: { task: task.id } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    downloadActionStatus.value = `启动下载失败: ${message}`;
+  } finally {
+    downloadStarting.value = false;
+  }
+}
+
 async function startCurrentPlayback() {
   const start = Number(route.query.start ?? 0) || 0;
   const filePath = routeLocalFilePath.value;
-  const localId = (route.query.local as string | undefined) ?? null;
+  const localId = routeLocalDownloadId.value;
   const recordWhilePlaying = route.query.record === "1";
   const stealthWhenRecording = route.query.stealth !== "0";
   const lineId = firstQueryString(route.query.lineId) || null;
@@ -2224,10 +2262,19 @@ onBeforeUnmount(async () => {
           <GlassButton variant="primary" :loading="retryingPlayback" @click="retryPlayback">
             重试
           </GlassButton>
+          <GlassButton
+            v-if="canDownloadCurrentRemoteItem"
+            variant="secondary"
+            :loading="downloadStarting"
+            @click="startDownloadForCurrentItem"
+          >
+            下载到本地
+          </GlassButton>
           <GlassButton variant="ghost" @click="copyPlayerError">复制错误</GlassButton>
           <GlassButton variant="secondary" @click="back">返回</GlassButton>
         </div>
         <span v-if="errorCopyStatus" class="player__error-status">{{ errorCopyStatus }}</span>
+        <span v-if="downloadActionStatus" class="player__error-status">{{ downloadActionStatus }}</span>
       </div>
 
       <transition name="fade">
