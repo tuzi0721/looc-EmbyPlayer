@@ -12,6 +12,7 @@ const remotePort = process.env.HILLS_SMOKE_CDP_PORT
   : 9400 + Math.floor(Math.random() * 500);
 const appMode = process.env.HILLS_REAL_APP_MODE ?? "electron";
 const commandOnly = process.env.HILLS_REAL_COMMAND_ONLY === "1";
+const layoutMetricsOnly = process.env.HILLS_REAL_LAYOUT_METRICS === "1";
 const isTauriMode = appMode.startsWith("tauri");
 const appExe = process.env.HILLS_REAL_APP_EXE ? path.resolve(process.env.HILLS_REAL_APP_EXE) : null;
 const tmpDir = path.join(os.tmpdir(), `hills-lite-real-visual-${Date.now()}`);
@@ -1112,7 +1113,8 @@ async function verifyRuntimeCleanup(childProcess, ws) {
   };
 }
 
-function metricsExpression() {
+function metricsExpression(options = {}) {
+  const skipPlayerState = options.skipPlayerState === true;
   return `
     (async () => {
       const rect = (selector) => {
@@ -1141,11 +1143,11 @@ function metricsExpression() {
         promise,
         new Promise((resolve) => setTimeout(() => resolve({ __hillsTimeout: true }), ms)),
       ]);
-      if (!video && window.hillsLite) {
+      if (!${JSON.stringify(skipPlayerState)} && !video && window.hillsLite) {
         const result = await withTimeout(window.hillsLite.invoke("get_state").catch(() => null), 2500);
         if (result?.__hillsTimeout) mpvStateTimedOut = true;
         else mpvState = result;
-      } else if (!video) {
+      } else if (!${JSON.stringify(skipPlayerState)} && !video) {
         try {
           const { api } = await import("/src/api/index.ts");
           const result = await withTimeout(api.getState(), 2500);
@@ -1245,6 +1247,55 @@ async function resizeAndInspect(ws, route, size, name) {
   const pixels = analyzePng(filePath);
   const metrics = await cdpEvalAfterContextReset(ws, metricsExpression());
   return { size, screenshotPath: filePath, pixels, metrics };
+}
+
+async function resizeAndMeasure(ws, route, size) {
+  await cdpEvalAfterContextReset(ws, `
+    (async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+      if (appRouter && ${JSON.stringify(route)}) await appRouter.push(${JSON.stringify(route)});
+      window.moveTo(40, 40);
+      window.resizeTo(${size.width}, ${size.height});
+      await wait(1500);
+      return true;
+    })()
+  `);
+  const metrics = await cdpEvalAfterContextReset(ws, metricsExpression({ skipPlayerState: true }));
+  return { size, metrics };
+}
+
+function summarizeLayoutEntry(entry) {
+  const metrics = entry.metrics ?? {};
+  return {
+    size: entry.size,
+    viewport: metrics.viewport ?? null,
+    route: metrics.route ?? null,
+    hasHorizontalOverflow: metrics.hasHorizontalOverflow === true,
+    hero: metrics.hero
+      ? {
+          width: Math.round(metrics.hero.width),
+          height: Math.round(metrics.hero.height),
+          aspect: Number(metrics.heroAspect?.toFixed?.(3) ?? metrics.heroAspect),
+        }
+      : null,
+    firstSectionVisible: Math.round(metrics.firstSectionVisible ?? 0),
+    secondSectionVisible: Math.round(metrics.secondSectionVisible ?? 0),
+    detailHero: metrics.detailHero
+      ? {
+          width: Math.round(metrics.detailHero.width),
+          height: Math.round(metrics.detailHero.height),
+          aspect: Number(metrics.detailHeroAspect?.toFixed?.(3) ?? metrics.detailHeroAspect),
+        }
+      : null,
+    detailTitleClipped: metrics.detailTitleClipped === true,
+    detailBelowVisible: Math.round(metrics.detailBelowVisible ?? 0),
+    appSidebarVisible: metrics.appSidebarVisible === true,
+    topbarVisible: metrics.topbarVisible === true,
+    posterCount: metrics.posterCount ?? 0,
+    loadedImageCount: metrics.loadedImageCount ?? 0,
+    bodyTextLength: metrics.bodyTextLength ?? 0,
+  };
 }
 
 async function waitForPlaybackVisualReady(ws) {
@@ -1880,6 +1931,84 @@ try {
         backendReachedLoad,
         backendCompletedLoad,
         visualSmokeLog,
+      },
+      diagnostics: {
+        electronStdout,
+        electronStderr,
+        pageConsole: pageConsole.slice(-12),
+        pageExceptions,
+      },
+    };
+    const redactedOutput = JSON.parse(redactSensitiveText(JSON.stringify(output)));
+    console.log(JSON.stringify(redactedOutput, null, 2));
+    if (!output.ok) process.exitCode = 1;
+  } else if (layoutMetricsOnly) {
+    const layoutSizes = [
+      { width: 1920, height: 1080 },
+      { width: 1366, height: 768 },
+      { width: 1024, height: 768 },
+      { width: 960, height: 600 },
+      { width: 760, height: 430 },
+    ];
+    const home = [];
+    stage("layout-home-start", { count: layoutSizes.length });
+    for (const size of layoutSizes) {
+      home.push(await resizeAndMeasure(ws, "/home", size));
+      stage("layout-home-size", size);
+    }
+
+    const detail = [];
+    const itemRoute = `/item/${setup.selected.id}`;
+    stage("layout-detail-start", { count: layoutSizes.length });
+    for (const size of layoutSizes) {
+      detail.push(await resizeAndMeasure(ws, itemRoute, size));
+      stage("layout-detail-size", size);
+    }
+
+    const seriesDetail = [];
+    const seriesRoute = setup.series?.id ? `/item/${setup.series.id}` : null;
+    if (seriesRoute) {
+      stage("layout-series-detail-start", { count: layoutSizes.length });
+      for (const size of layoutSizes) {
+        seriesDetail.push(await resizeAndMeasure(ws, seriesRoute, size));
+        stage("layout-series-detail-size", size);
+      }
+    } else {
+      stage("layout-series-detail-skipped", { seriesCandidateCount: setup.seriesCandidateCount ?? 0 });
+    }
+
+    const failures = [];
+    for (const entry of home) {
+      const metrics = entry.metrics ?? {};
+      if (!metrics.hero) failures.push(`home ${entry.size.width}x${entry.size.height}: hero missing`);
+      if (metrics.hasHorizontalOverflow) failures.push(`home ${entry.size.width}x${entry.size.height}: horizontal overflow`);
+      if ((metrics.firstSectionVisible ?? 0) < 36) {
+        failures.push(`home ${entry.size.width}x${entry.size.height}: continue row not visible enough`);
+      }
+      if ((entry.size.height >= 700 || entry.size.width >= 1200) && (metrics.secondSectionVisible ?? 0) < 24) {
+        failures.push(`home ${entry.size.width}x${entry.size.height}: library row not visible enough`);
+      }
+    }
+    for (const entry of [...detail, ...seriesDetail]) {
+      const metrics = entry.metrics ?? {};
+      if (!metrics.detailHero) failures.push(`detail ${entry.size.width}x${entry.size.height}: hero missing`);
+      if (metrics.hasHorizontalOverflow) failures.push(`detail ${entry.size.width}x${entry.size.height}: horizontal overflow`);
+      if (metrics.detailTitleClipped) failures.push(`detail ${entry.size.width}x${entry.size.height}: title clipped`);
+      if ((entry.size.height >= 700 || entry.size.width >= 1200) && (metrics.detailBelowVisible ?? 0) < 24) {
+        failures.push(`detail ${entry.size.width}x${entry.size.height}: below-hero content not visible enough`);
+      }
+    }
+    stage("layout-metrics-complete", { ok: failures.length === 0, failures });
+    const output = {
+      ok: failures.length === 0,
+      failures,
+      tmpDir,
+      setup,
+      layoutMetrics: {
+        sizes: layoutSizes,
+        home: home.map(summarizeLayoutEntry),
+        detail: detail.map(summarizeLayoutEntry),
+        seriesDetail: seriesDetail.map(summarizeLayoutEntry),
       },
       diagnostics: {
         electronStdout,
