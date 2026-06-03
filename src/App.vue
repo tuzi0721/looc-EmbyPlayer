@@ -75,6 +75,16 @@ function ignoreBootstrapFailure<T>(promise: Promise<T>) {
   return withBootstrapTimeout(promise).catch(() => {});
 }
 
+async function applyPlatformClass() {
+  try {
+    if ((await withBootstrapTimeout(platformType(), 1500)) === "windows") {
+      document.documentElement.classList.add("platform-windows");
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 watch(
   () => route.name,
   (name) => {
@@ -88,14 +98,8 @@ onMounted(async () => {
   updateViewportWidth();
   window.addEventListener("resize", updateViewportWidth);
   sidebarCollapsed.value = readSidebarCollapsed();
-  try {
-    if ((await platformType()) === "windows") {
-      document.documentElement.classList.add("platform-windows");
-    }
-  } catch {
-    /* ignore */
-  }
   await Promise.all([
+    applyPlatformClass(),
     ignoreBootstrapFailure(settings.refresh()),
     ignoreBootstrapFailure(server.refresh()),
     ignoreBootstrapFailure(auth.refresh()),
