@@ -147,15 +147,16 @@ fn build_slot(settings: &AppSettings) -> AppResult<Slot> {
         MpvBackendKind::Embedded => {
             #[cfg(feature = "mpv-embedded")]
             {
-                // Creating libmpv during Tauri setup can block the WebView from
-                // ever navigating away from about:blank on some Windows hosts.
-                // Keep startup light and instantiate libmpv on embed_attach.
+                // Keep the user-facing "embedded" mode on the bundled mpv.exe
+                // IPC path. It renders into our native child window via --wid,
+                // while the libmpv path is retained only as a compile-time
+                // fallback for future investigation.
                 let ipc = Arc::new(MpvIpcBackend::new(settings.clone()));
                 Ok(Slot {
                     backend: ipc.clone(),
                     ipc: Some(ipc),
                     embedded: None,
-                    prefer_embedded: true,
+                    prefer_embedded: false,
                 })
             }
             #[cfg(not(feature = "mpv-embedded"))]

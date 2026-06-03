@@ -407,6 +407,18 @@ function pixelSampleOk(pixels) {
   return pixels && (pixels.brightRatio >= 0.18 || pixels.colorfulRatio >= 0.04);
 }
 
+async function waitForFile(filePath, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const stat = await fsp.stat(filePath);
+      if (stat.isFile() && stat.size > 0) return true;
+    } catch {}
+    await wait(120);
+  }
+  return false;
+}
+
 function validAspect(value) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0.1 && number < 10 ? number : null;
@@ -1841,7 +1853,7 @@ try {
         const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
         if (!appRouter) throw new Error("mounted Vue router not found");
         await appRouter.push(${JSON.stringify(`/player/${setup.selected.id}?start=0`)});
-        await wait(500);
+        await wait(8000);
         const runtimeInvoke = window.hillsLite?.invoke?.bind(window.hillsLite) ?? null;
         const api = runtimeInvoke
           ? {
@@ -1850,6 +1862,7 @@ try {
               resume: () => runtimeInvoke("resume"),
               seekRelative: (deltaMs) => runtimeInvoke("seek_relative", { payload: { deltaMs } }),
               stop: () => runtimeInvoke("stop"),
+              takeScreenshot: (payload) => runtimeInvoke("take_screenshot", { payload }),
               embedSetVisible: (visible) => runtimeInvoke("embed_set_visible", { visible }),
               embedDetach: () => runtimeInvoke("embed_detach"),
             }
@@ -2047,6 +2060,19 @@ try {
           }
         }
         const domControls = await inspectPlayerControls();
+        let frameScreenshot = null;
+        if (strictReady && api.takeScreenshot) {
+          frameScreenshot = await Promise.race([
+            api
+              .takeScreenshot({ title: "real-smoke-frame", includeSubtitles: true })
+              .then((result) => ({ ok: true, filePath: result?.filePath ?? null }))
+              .catch((error) => ({ ok: false, error: error?.message ?? String(error) })),
+            timeout(4500),
+          ]);
+          if (frameScreenshot?.__timeout) {
+            frameScreenshot = { ok: false, error: "take_screenshot timed out" };
+          }
+        }
         const errorText = document.querySelector(".player__error")?.innerText ?? null;
         const cleanup = {
           stop: await settle(api.stop(), 2500),
@@ -2062,10 +2088,33 @@ try {
           state: lastState ? lastSummary ?? summarizeState(lastState) : null,
           controls,
           domControls,
+          frameScreenshot,
           cleanup,
         };
       })()
     `, 3);
+    let frameEvidence = null;
+    if (playerOpen.frameScreenshot?.ok && playerOpen.frameScreenshot.filePath) {
+      const fileReady = await waitForFile(playerOpen.frameScreenshot.filePath, 5000);
+      if (fileReady) {
+        const pixels = analyzePng(playerOpen.frameScreenshot.filePath);
+        frameEvidence = {
+          width: pixels.width,
+          height: pixels.height,
+          aspect: aspectFromSize(pixels.width, pixels.height),
+          brightRatio: pixels.brightRatio,
+          colorfulRatio: pixels.colorfulRatio,
+          meaningfulRatio: pixels.meaningfulRatio,
+          contentAspect: pixels.contentBox?.aspect ?? null,
+          pixelOk: pixelSampleOk(pixels),
+        };
+        await fsp.rm(playerOpen.frameScreenshot.filePath, { force: true }).catch(() => {});
+      } else {
+        frameEvidence = { error: "mpv frame screenshot file was not written" };
+      }
+    } else {
+      frameEvidence = { error: playerOpen.frameScreenshot?.error ?? "mpv frame screenshot was not captured" };
+    }
     const visualSmokeLog = tailTextFile(path.join(localAppDataDir, "EmbyPlayer", "visual-smoke.log"), 16000);
     const mpvProcessCount = tasklistImageCount("mpv.exe");
     const backendReachedLoad = /play:mpv-load-start/.test(visualSmokeLog ?? "");
@@ -2098,6 +2147,9 @@ try {
     if (!playerOpen.domControls?.ok) {
       failures.push(`player DOM controls missing or invisible: ${(playerOpen.domControls?.missing ?? []).join(", ")}`);
     }
+    if (!frameEvidence?.pixelOk) {
+      failures.push(`mpv frame screenshot is missing or visually blank: ${frameEvidence?.error ?? "pixel sample failed"}`);
+    }
     if ((mpvProcessCount ?? 0) > 0) failures.push("independent mpv.exe process is running");
     stage("command-only-complete", {
       ok: failures.length === 0,
@@ -2105,6 +2157,7 @@ try {
       mpvProcessCount,
       stateReady,
       domControlsOk: playerOpen.domControls?.ok ?? false,
+      framePixelOk: frameEvidence?.pixelOk ?? false,
       attached,
       backendReachedLoad,
       backendCompletedLoad,
@@ -2121,6 +2174,7 @@ try {
         attached,
         backendReachedLoad,
         backendCompletedLoad,
+        frameEvidence,
         visualSmokeLog,
       },
       diagnostics: {

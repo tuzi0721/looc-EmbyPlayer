@@ -1715,12 +1715,13 @@ pub async fn embed_attach(state: State<'_, Arc<AppState>>, window: tauri::Window
     log_visual_player_stage("embed_attach:start");
     let parent = native_parent_handle(&window)?;
     log_visual_player_stage("embed_attach:parent-ready");
-    let mpv = state.mpv.clone();
     log_visual_player_stage("embed_attach:bind-start");
-    let bind_task = tauri::async_runtime::spawn_blocking(move || mpv.bind_embedded(parent));
-    let result = match tokio::time::timeout(std::time::Duration::from_secs(8), bind_task).await {
-        Ok(Ok(result)) => result,
-        Ok(Err(error)) => Err(AppError::Mpv(format!("embed attach task: {error}"))),
+    let result = match tokio::time::timeout(std::time::Duration::from_secs(8), async {
+        state.mpv.bind_embedded(parent)
+    })
+    .await
+    {
+        Ok(result) => result,
         Err(_) => Err(AppError::Mpv("embed attach timed out".into())),
     };
     log_visual_player_stage(if result.is_ok() {
