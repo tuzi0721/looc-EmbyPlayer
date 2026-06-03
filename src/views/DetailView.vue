@@ -1947,7 +1947,8 @@ async function togglePlayed() {
 
 .hero {
   position: relative;
-  min-height: clamp(560px, 74dvh, 840px);
+  height: clamp(560px, calc(100dvh - var(--topbar-h)), 860px);
+  min-height: 0;
   color: white;
   isolation: isolate;
   overflow: hidden;
@@ -2512,7 +2513,7 @@ async function togglePlayed() {
 
 @media (max-height: 620px) {
   .hero {
-    min-height: 100dvh;
+    height: calc(100dvh - var(--topbar-h));
   }
   .hero__body {
     top: 48px;
@@ -2535,7 +2536,7 @@ async function togglePlayed() {
 
 @media (max-width: 640px) {
   .hero {
-    min-height: 100dvh;
+    height: calc(100dvh - var(--topbar-h));
   }
   .hero__title {
     font-size: 28px;
