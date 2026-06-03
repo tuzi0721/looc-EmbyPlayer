@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
 
 import { api } from "@/api";
@@ -16,6 +16,7 @@ import { filterJavItems } from "@/utils/javFilter";
 import { mediaImageUrl, mediaItemImageUrl, mediaItemImageUrls, type MediaImageType } from "@/utils/mediaImages";
 
 const props = defineProps<{ id: string }>();
+const route = useRoute();
 const router = useRouter();
 const lib = useLibraryStore();
 const auth = useAuthStore();
@@ -24,7 +25,11 @@ const serverStore = useServerStore();
 const playerStore = usePlayerStore();
 const settings = useSettingsStore();
 
-const item = computed(() => lib.itemCache[props.id] ?? null);
+const routeAccountId = computed(() => {
+  const value = route.query.account;
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : auth.activeId;
+});
+const item = computed(() => lib.cachedItem(props.id, routeAccountId.value));
 const loading = ref(false);
 const loadStage = ref("");
 const loadError = ref<string | null>(null);
@@ -823,7 +828,7 @@ onBeforeUnmount(() => {
   clearShareStatus();
   clearDetailOpenTimer();
 });
-watch(() => props.id, () => void loadDetail());
+watch([() => props.id, () => route.query.account], () => void loadDetail());
 watch(
   () => `${item.value?.Id ?? ""}:${backdropUrls.value.length}`,
   () => {
@@ -857,13 +862,17 @@ async function loadDetail() {
   suppressNextSeasonWatch = false;
   activeSeasonId.value = null;
   try {
+    if (routeAccountId.value && auth.activeId !== routeAccountId.value) {
+      await auth.switchTo(routeAccountId.value);
+    }
+    if (seq !== detailLoadSeq) return;
     if (!hasPlaybackContext.value) {
       loadError.value = missingPlaybackContextError();
       void refreshPlaybackContextAndReload(seq);
       return;
     }
     loadStage.value = "正在读取媒体详情…";
-    const detail = await withDetailTimeout(lib.loadItem(props.id), "get_item_detail");
+    const detail = await withDetailTimeout(lib.loadItem(props.id, routeAccountId.value), "get_item_detail");
     if (seq !== detailLoadSeq) return;
     if (seq === detailLoadSeq) void loadSpecialFeatures(props.id, seq);
     if (seq === detailLoadSeq) void loadSimilar(props.id, seq);
@@ -1380,7 +1389,7 @@ async function toggleFavorite() {
     lib.updateItemUserData(current.Id, userData);
   } catch (e) {
     actionError.value = next ? "收藏失败，请稍后重试" : "取消收藏失败，请稍后重试";
-    await lib.loadItem(current.Id).catch(() => {});
+    await lib.loadItem(current.Id, routeAccountId.value).catch(() => {});
     console.warn(e);
   } finally {
     userDataUpdating.value = null;
@@ -1408,7 +1417,7 @@ async function togglePlayed() {
     lib.updateItemUserData(current.Id, userData);
   } catch (e) {
     actionError.value = next ? "标记已看失败，请稍后重试" : "取消已看失败，请稍后重试";
-    await lib.loadItem(current.Id).catch(() => {});
+    await lib.loadItem(current.Id, routeAccountId.value).catch(() => {});
     console.warn(e);
   } finally {
     userDataUpdating.value = null;

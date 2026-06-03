@@ -340,7 +340,7 @@ function mergeDanmakuComments(comments: DanmakuComment[]): DanmakuComment[] {
 }
 
 const currentItemId = computed(() => player.itemId ?? props.id);
-const item = computed(() => lib.itemCache[currentItemId.value] ?? lib.itemCache[props.id] ?? null);
+const item = computed(() => lib.cachedItem(currentItemId.value, auth.activeId) ?? lib.cachedItem(props.id, auth.activeId));
 const routeLocalFilePath = computed(() => {
   const value = route.query.file;
   return typeof value === "string" && value.trim().length > 0 ? value : null;
@@ -584,7 +584,7 @@ const queueEntries = computed<PlayerQueueEntry[]>(() => {
   return player.queue.map((id, index) => ({
     id,
     index,
-    item: lib.itemCache[id] ?? null,
+      item: lib.cachedItem(id, auth.activeId),
     direct: null,
     active: index === player.queueIndex,
   }));
@@ -623,8 +623,8 @@ watch(
   currentItemId,
   (id) => {
     if (props.id === "local-file" || props.id === "webdav-file") return;
-    if (id && !lib.itemCache[id]) {
-      void lib.loadItem(id).catch(() => {});
+    if (id && !lib.cachedItem(id, auth.activeId)) {
+      void lib.loadItem(id, auth.activeId).catch(() => {});
     }
   },
   { immediate: true },
@@ -979,8 +979,8 @@ async function startHtmlPlayback(
   const video = videoEl.value;
   if (!video) throw new Error("播放器尚未初始化");
 
-  if (!lib.itemCache[itemId]) {
-    await lib.loadItem(itemId);
+  if (!lib.cachedItem(itemId, auth.activeId)) {
+    await lib.loadItem(itemId, auth.activeId);
   }
 
   const source = await api.getPlaybackSource({
@@ -1282,11 +1282,11 @@ async function playHtmlVideoFromUserAction(video: HTMLVideoElement) {
 
 async function ensureQueueItems() {
   if (isLocalQueue.value || isDirectQueue.value) return;
-  const missing = player.queue.filter((id) => !lib.itemCache[id]).slice(0, 30);
+  const missing = player.queue.filter((id) => !lib.cachedItem(id, auth.activeId)).slice(0, 30);
   if (missing.length === 0) return;
   queueLoading.value = true;
   try {
-    await Promise.allSettled(missing.map((id) => lib.loadItem(id)));
+    await Promise.allSettled(missing.map((id) => lib.loadItem(id, auth.activeId)));
   } finally {
     queueLoading.value = false;
   }
@@ -2004,18 +2004,18 @@ async function startCurrentPlayback() {
       await player.refresh();
     }
   } else if (localId) {
-    if (!lib.itemCache[props.id]) {
-      await lib.loadItem(props.id);
+    if (!lib.cachedItem(props.id, auth.activeId)) {
+      await lib.loadItem(props.id, auth.activeId);
     }
     await api.playLocal(localId, start);
   } else if (useHtmlVideo) {
-    if (!lib.itemCache[props.id]) {
-      await lib.loadItem(props.id);
+    if (!lib.cachedItem(props.id, auth.activeId)) {
+      await lib.loadItem(props.id, auth.activeId);
     }
     await startHtmlPlayback(props.id, start, { lineId, mediaSourceId });
   } else {
-    if (!lib.itemCache[props.id]) {
-      await lib.loadItem(props.id);
+    if (!lib.cachedItem(props.id, auth.activeId)) {
+      await lib.loadItem(props.id, auth.activeId);
     }
     await player.play({
       itemId: props.id,

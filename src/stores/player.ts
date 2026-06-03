@@ -289,7 +289,7 @@ export const usePlayerStore = defineStore("player", () => {
       const auth = useAuthStore();
       const serverStore = useServerStore();
 
-      const item = lib.itemCache[itemId.value] ?? null;
+      const item = lib.cachedItem(itemId.value, auth.activeId);
       if (!item) return;
 
       const subtitleParts: string[] = [];

@@ -2,11 +2,13 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 
 import { api } from "@/api";
+import { useAuthStore } from "@/stores/auth";
 import { useSettingsStore } from "@/stores/settings";
 import type { MediaItem, UserData } from "@/types/models";
 import { filterJavItems } from "@/utils/javFilter";
 
 export const useLibraryStore = defineStore("library", () => {
+  const auth = useAuthStore();
   const settings = useSettingsStore();
   const views = ref<MediaItem[]>([]);
   const resume = ref<MediaItem[]>([]);
@@ -120,9 +122,18 @@ export const useLibraryStore = defineStore("library", () => {
     return filteredItems;
   }
 
-  async function loadItem(itemId: string) {
+  function itemCacheKey(itemId: string, accountId = auth.activeId) {
+    return accountId ? `${accountId}:${itemId}` : itemId;
+  }
+
+  function cachedItem(itemId: string | null | undefined, accountId = auth.activeId) {
+    if (!itemId) return null;
+    return itemCache.value[itemCacheKey(itemId, accountId)] ?? (!accountId ? itemCache.value[itemId] ?? null : null);
+  }
+
+  async function loadItem(itemId: string, accountId = auth.activeId) {
     const m = await api.getItemDetail(itemId);
-    itemCache.value = { ...itemCache.value, [itemId]: m };
+    itemCache.value = { ...itemCache.value, [itemCacheKey(itemId, accountId)]: m };
     return m;
   }
 
@@ -130,12 +141,9 @@ export const useLibraryStore = defineStore("library", () => {
     const apply = (item: MediaItem): MediaItem =>
       item.Id === itemId ? { ...item, UserData: userData } : item;
 
-    if (itemCache.value[itemId]) {
-      itemCache.value = {
-        ...itemCache.value,
-        [itemId]: apply(itemCache.value[itemId]!),
-      };
-    }
+    itemCache.value = Object.fromEntries(
+      Object.entries(itemCache.value).map(([key, item]) => [key, apply(item)]),
+    );
 
     resume.value = resume.value.map(apply);
     heroItems.value = heroItems.value.map(apply);
@@ -187,6 +195,8 @@ export const useLibraryStore = defineStore("library", () => {
     searchResults,
     totalByParent,
     loadedRangeByParent,
+    itemCacheKey,
+    cachedItem,
     refreshHome,
     loadParent,
     loadMore,
