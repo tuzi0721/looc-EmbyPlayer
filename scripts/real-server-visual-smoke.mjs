@@ -1889,6 +1889,66 @@ try {
             backendDiagnostics: state?.backendDiagnostics ?? null,
           };
         };
+        const inspectPlayerControls = async () => {
+          document.querySelector(".player")?.dispatchEvent(
+            new MouseEvent("mousemove", {
+              bubbles: true,
+              clientX: Math.floor(window.innerWidth / 2),
+              clientY: Math.floor(window.innerHeight / 2),
+            }),
+          );
+          await wait(150);
+          const rect = (selector) => {
+            const node = document.querySelector(selector);
+            if (!node) return null;
+            const r = node.getBoundingClientRect();
+            const style = getComputedStyle(node);
+            return {
+              x: r.x,
+              y: r.y,
+              top: r.top,
+              right: r.right,
+              bottom: r.bottom,
+              left: r.left,
+              width: r.width,
+              height: r.height,
+              visible:
+                r.width > 0 &&
+                r.height > 0 &&
+                style.visibility !== "hidden" &&
+                style.display !== "none" &&
+                Number(style.opacity || "1") > 0.01,
+              disabled: Boolean(node.disabled || node.getAttribute("aria-disabled") === "true"),
+            };
+          };
+          const inViewport = (r) =>
+            Boolean(
+              r &&
+                r.visible &&
+                r.bottom > 0 &&
+                r.right > 0 &&
+                r.top < window.innerHeight &&
+                r.left < window.innerWidth,
+            );
+          const controls = {
+            bottom: rect(".player__bottom"),
+            progress: rect(".bar"),
+            progressInput: rect(".bar input[type='range']"),
+            seekBack: rect('[data-control="seek-back"]'),
+            playToggle: rect('[data-control="play-toggle"]'),
+            seekForward: rect('[data-control="seek-forward"]'),
+            fullscreen: rect('[data-control="fullscreen"]'),
+          };
+          const missing = Object.entries(controls)
+            .filter(([, value]) => !inViewport(value))
+            .map(([name]) => name);
+          return {
+            viewport: { width: window.innerWidth, height: window.innerHeight },
+            controls,
+            missing,
+            ok: missing.length === 0,
+          };
+        };
         for (let attempt = 0; attempt < 45; attempt += 1) {
           const result = await Promise.race([
             api.getState().catch((error) => ({ __error: error?.message ?? String(error) })),
@@ -1986,6 +2046,7 @@ try {
             lastSummary = backwardSummary;
           }
         }
+        const domControls = await inspectPlayerControls();
         const errorText = document.querySelector(".player__error")?.innerText ?? null;
         const cleanup = {
           stop: await settle(api.stop(), 2500),
@@ -2000,6 +2061,7 @@ try {
           stateError,
           state: lastState ? lastSummary ?? summarizeState(lastState) : null,
           controls,
+          domControls,
           cleanup,
         };
       })()
@@ -2033,12 +2095,16 @@ try {
     if (!playerOpen.controls?.resumeOk) failures.push("resume command did not take effect");
     if (!playerOpen.controls?.seekForwardOk) failures.push("seek forward command did not move position");
     if (!playerOpen.controls?.seekBackwardOk) failures.push("seek backward command did not move position back");
+    if (!playerOpen.domControls?.ok) {
+      failures.push(`player DOM controls missing or invisible: ${(playerOpen.domControls?.missing ?? []).join(", ")}`);
+    }
     if ((mpvProcessCount ?? 0) > 0) failures.push("independent mpv.exe process is running");
     stage("command-only-complete", {
       ok: failures.length === 0,
       failures,
       mpvProcessCount,
       stateReady,
+      domControlsOk: playerOpen.domControls?.ok ?? false,
       attached,
       backendReachedLoad,
       backendCompletedLoad,
