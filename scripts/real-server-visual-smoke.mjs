@@ -919,6 +919,45 @@ async function reloadAppStoresForPersonal(ws) {
   return ready;
 }
 
+async function reloadAppStoresForLayout(ws) {
+  stage("layout-reload-start");
+  await cdpCall(ws, "Page.reload", { ignoreCache: true });
+  const ready = await cdpEvalAfterContextReset(ws, `
+    (async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      let last = null;
+      for (let index = 0; index < 100; index += 1) {
+        const invoke = window.hillsLite?.invoke?.bind(window.hillsLite);
+        const router = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
+        if (router?.currentRoute?.value?.path !== "/home") {
+          await router?.push("/home").catch(() => {});
+        }
+        let accountCount = null;
+        if (invoke) {
+          try {
+            const accounts = await invoke("list_accounts");
+            accountCount = Array.isArray(accounts) ? accounts.length : null;
+          } catch {}
+        }
+        last = {
+          hasBridge: Boolean(invoke),
+          hasRouter: Boolean(router),
+          readyState: document.readyState,
+          route: router?.currentRoute?.value?.fullPath ?? (location.hash || location.pathname),
+          accountCount,
+          heroPresent: Boolean(document.querySelector(".hero.hero--cinema")),
+          rowSectionCount: document.querySelectorAll(".row-section").length,
+        };
+        if (last.hasBridge && last.hasRouter && accountCount >= 1 && last.heroPresent) return last;
+        await wait(250);
+      }
+      return last;
+    })()
+  `);
+  stage("layout-reload-complete", ready);
+  return ready;
+}
+
 async function inspectPersonalAllAccount(ws, setup, secondAccount) {
   const mediaFields = "PrimaryImageAspectRatio,ProductionYear,Overview,UserData,SeriesInfo,RunTimeTicks,ParentBackdropItemId,ParentBackdropImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,ParentLogoItemId,ParentLogoImageTag,SeriesPrimaryImageTag,SeriesThumbImageTag";
   const imageParams = [
@@ -2761,6 +2800,7 @@ try {
       { width: 760, height: 430 },
     ];
     const home = [];
+    const layoutReady = await reloadAppStoresForLayout(ws);
     stage("layout-home-start", { count: layoutSizes.length });
     for (const size of layoutSizes) {
       home.push(await resizeAndMeasure(ws, child.pid, "/home", size));
@@ -2788,14 +2828,16 @@ try {
     }
 
     const failures = [];
+    const hasResumeRows = (setup.resumeCount ?? 0) > 0;
     for (const entry of home) {
       const metrics = entry.metrics ?? {};
       if (!metrics.hero) failures.push(`home ${entry.size.width}x${entry.size.height}: hero missing`);
       if (metrics.hasHorizontalOverflow) failures.push(`home ${entry.size.width}x${entry.size.height}: horizontal overflow`);
-      if ((metrics.firstSectionVisible ?? 0) < 36) {
+      if (hasResumeRows && (metrics.firstSectionVisible ?? 0) < 36) {
         failures.push(`home ${entry.size.width}x${entry.size.height}: continue row not visible enough`);
       }
-      if ((entry.size.height >= 700 || entry.size.width >= 1200) && (metrics.secondSectionVisible ?? 0) < 24) {
+      const libraryVisible = hasResumeRows ? metrics.secondSectionVisible : metrics.firstSectionVisible;
+      if ((entry.size.height >= 700 || entry.size.width >= 1200) && (libraryVisible ?? 0) < 24) {
         failures.push(`home ${entry.size.width}x${entry.size.height}: library row not visible enough`);
       }
     }
@@ -2815,6 +2857,7 @@ try {
       tmpDir,
       setup,
       layoutMetrics: {
+        layoutReady,
         sizes: layoutSizes,
         home: home.map(summarizeLayoutEntry),
         detail: detail.map(summarizeLayoutEntry),

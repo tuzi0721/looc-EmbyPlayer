@@ -237,8 +237,7 @@ onUnmounted(() => {
   margin: 0;
   aspect-ratio: 16 / 7;
   height: auto;
-  max-height: min(68dvh, calc(100dvh - 250px));
-  min-height: 300px;
+  min-height: 0;
   border-radius: 0;
   overflow: hidden;
   flex-shrink: 0;
@@ -407,8 +406,7 @@ onUnmounted(() => {
     width: 100%;
     aspect-ratio: 16 / 7;
     height: auto;
-    max-height: min(52dvh, calc(100dvh - 210px));
-    min-height: 220px;
+    min-height: 0;
   }
   .hero--cinema {
     aspect-ratio: 16 / 7;
@@ -434,8 +432,7 @@ onUnmounted(() => {
   .hero {
     aspect-ratio: 16 / 7;
     height: auto;
-    max-height: calc(100dvh - 230px);
-    min-height: 280px;
+    min-height: 0;
   }
   .hero--cinema {
     aspect-ratio: 16 / 7;
@@ -467,8 +464,7 @@ onUnmounted(() => {
   .hero {
     aspect-ratio: 16 / 7;
     height: auto;
-    max-height: calc(100dvh - 205px);
-    min-height: 230px;
+    min-height: 0;
   }
   .hero--cinema {
     aspect-ratio: 16 / 7;
@@ -502,9 +498,8 @@ onUnmounted(() => {
   .hero,
   .hero--cinema {
     width: 100%;
-    aspect-ratio: 3 / 1;
+    aspect-ratio: 16 / 7;
     height: auto;
-    max-height: none;
     min-height: 0;
   }
   .hero--cinema .hero__content {
