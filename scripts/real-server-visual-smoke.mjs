@@ -1670,6 +1670,9 @@ try {
         const api = runtimeInvoke
           ? {
               getState: () => runtimeInvoke("get_state"),
+              pause: () => runtimeInvoke("pause"),
+              resume: () => runtimeInvoke("resume"),
+              seekRelative: (deltaMs) => runtimeInvoke("seek_relative", { payload: { deltaMs } }),
               stop: () => runtimeInvoke("stop"),
               embedSetVisible: (visible) => runtimeInvoke("embed_set_visible", { visible }),
               embedDetach: () => runtimeInvoke("embed_detach"),
@@ -1736,6 +1739,77 @@ try {
           }
           await wait(700);
         }
+        let controls = null;
+        const strictReady = Boolean(
+          lastSummary &&
+            lastSummary.durationMs > 0 &&
+            lastSummary.videoTrackCount > 0 &&
+            (lastSummary.hasVideoParams ||
+              lastSummary.hasVideoOutParams ||
+              lastSummary.videoCodec ||
+              lastSummary.positionMs >= 3000)
+        );
+        if (strictReady && api.pause && api.resume && api.seekRelative) {
+          controls = {
+            pauseOk: false,
+            resumeOk: false,
+            seekForwardOk: false,
+            seekBackwardOk: false,
+            startPositionMs: lastSummary.positionMs,
+            pausedPositionMs: null,
+            resumedPositionMs: null,
+            forwardPositionMs: null,
+            backwardPositionMs: null,
+          };
+          await api.pause().catch(() => {});
+          await wait(350);
+          const pausedState = await Promise.race([
+            api.getState().catch(() => null),
+            timeout(1200),
+          ]);
+          if (pausedState && !pausedState.__timeout) {
+            const pausedSummary = summarizeState(pausedState);
+            controls.pauseOk = pausedSummary.paused === true;
+            controls.pausedPositionMs = pausedSummary.positionMs;
+          }
+          await api.resume().catch(() => {});
+          await wait(700);
+          const resumedState = await Promise.race([
+            api.getState().catch(() => null),
+            timeout(1200),
+          ]);
+          if (resumedState && !resumedState.__timeout) {
+            const resumedSummary = summarizeState(resumedState);
+            controls.resumeOk = resumedSummary.paused === false;
+            controls.resumedPositionMs = resumedSummary.positionMs;
+          }
+          await api.seekRelative(30000).catch(() => {});
+          await wait(900);
+          const forwardState = await Promise.race([
+            api.getState().catch(() => null),
+            timeout(1200),
+          ]);
+          if (forwardState && !forwardState.__timeout) {
+            const forwardSummary = summarizeState(forwardState);
+            controls.forwardPositionMs = forwardSummary.positionMs;
+            controls.seekForwardOk = forwardSummary.positionMs >= controls.startPositionMs + 15000;
+          }
+          await api.seekRelative(-10000).catch(() => {});
+          await wait(900);
+          const backwardState = await Promise.race([
+            api.getState().catch(() => null),
+            timeout(1200),
+          ]);
+          if (backwardState && !backwardState.__timeout) {
+            const backwardSummary = summarizeState(backwardState);
+            controls.backwardPositionMs = backwardSummary.positionMs;
+            controls.seekBackwardOk =
+              controls.forwardPositionMs != null &&
+              backwardSummary.positionMs <= controls.forwardPositionMs - 3000;
+            lastState = backwardState;
+            lastSummary = backwardSummary;
+          }
+        }
         const errorText = document.querySelector(".player__error")?.innerText ?? null;
         const cleanup = {
           stop: await settle(api.stop(), 2500),
@@ -1749,15 +1823,16 @@ try {
           stateTimedOut: timedOut,
           stateError,
           state: lastState ? lastSummary ?? summarizeState(lastState) : null,
+          controls,
           cleanup,
         };
       })()
     `, 3);
-    const visualSmokeLog = tailTextFile(path.join(localAppDataDir, "EmbyPlayer", "visual-smoke.log"), 6000);
+    const visualSmokeLog = tailTextFile(path.join(localAppDataDir, "EmbyPlayer", "visual-smoke.log"), 16000);
     const mpvProcessCount = tasklistImageCount("mpv.exe");
     const backendReachedLoad = /play:mpv-load-start/.test(visualSmokeLog ?? "");
     const backendCompletedLoad = /play:mpv-load-complete/.test(visualSmokeLog ?? "");
-    const attached = /embed_attach:complete/.test(visualSmokeLog ?? "");
+    const attached = /embed_attach:complete|embed_visible:show|embed_detach:complete/.test(visualSmokeLog ?? "");
     const stateReady = Boolean(
       playerOpen.state &&
         (playerOpen.state.durationMs ?? 0) > 0 &&
@@ -1778,6 +1853,10 @@ try {
     if (!stateReady && playerOpen.state?.backendDiagnostics?.lastError) {
       failures.push(`mpv diagnostic error: ${playerOpen.state.backendDiagnostics.lastError}`);
     }
+    if (!playerOpen.controls?.pauseOk) failures.push("pause command did not take effect");
+    if (!playerOpen.controls?.resumeOk) failures.push("resume command did not take effect");
+    if (!playerOpen.controls?.seekForwardOk) failures.push("seek forward command did not move position");
+    if (!playerOpen.controls?.seekBackwardOk) failures.push("seek backward command did not move position back");
     if ((mpvProcessCount ?? 0) > 0) failures.push("independent mpv.exe process is running");
     stage("command-only-complete", {
       ok: failures.length === 0,
