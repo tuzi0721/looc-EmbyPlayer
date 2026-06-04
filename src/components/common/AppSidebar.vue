@@ -17,6 +17,7 @@ const settings = useSettingsStore();
 
 const props = defineProps<{
   collapsed?: boolean;
+  overlay?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -30,6 +31,7 @@ const visibleServers = computed(() =>
 
 const activeServerId = computed(() => auth.activeAccount?.serverId ?? null);
 const isCollapsed = computed(() => props.collapsed === true);
+const isOverlay = computed(() => props.overlay === true);
 
 function loggedInOn(serverId: string): boolean {
   return auth.accounts.some((a) => a.serverId === serverId);
@@ -70,12 +72,13 @@ function gotoAggregate() {
 </script>
 
 <template>
-  <aside class="sb glass" :class="{ 'is-collapsed': isCollapsed }">
+  <aside class="sb glass" :class="{ 'is-collapsed': isCollapsed, 'is-overlay': isOverlay }">
     <header class="sb__brand">
       <button
         class="brand-menu"
         type="button"
         :aria-label="isCollapsed ? '展开边栏' : '折叠边栏'"
+        :aria-expanded="!isCollapsed"
         :title="isCollapsed ? '展开边栏' : '折叠边栏'"
         @click="emit('toggle-collapsed')"
       >
@@ -208,6 +211,10 @@ function gotoAggregate() {
 .sb.is-collapsed {
   width: 64px;
   padding: 8px 7px 12px;
+}
+.sb.is-overlay {
+  width: var(--sidebar-w);
+  padding: 8px 10px 12px;
 }
 
 .sb__brand {

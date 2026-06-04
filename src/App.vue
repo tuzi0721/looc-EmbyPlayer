@@ -24,12 +24,18 @@ const player = usePlayerStore();
 const router = useRouter();
 const route = useRoute();
 const bootstrapped = ref(false);
-const sidebarCollapsed = ref(false);
+const desktopSidebarCollapsed = ref(false);
+const mobileSidebarExpanded = ref(false);
 const viewportWidth = ref(1280);
 
 const isFullscreen = computed(() => Boolean(route.meta?.fullscreen));
 const autoSidebarCollapsed = computed(() => viewportWidth.value < 900);
-const effectiveSidebarCollapsed = computed(() => sidebarCollapsed.value || autoSidebarCollapsed.value);
+const effectiveSidebarCollapsed = computed(() =>
+  autoSidebarCollapsed.value ? !mobileSidebarExpanded.value : desktopSidebarCollapsed.value,
+);
+const sidebarOverlayOpen = computed(
+  () => autoSidebarCollapsed.value && mobileSidebarExpanded.value && !isFullscreen.value,
+);
 
 function readSidebarCollapsed() {
   try {
@@ -48,10 +54,29 @@ function persistSidebarCollapsed(value: boolean) {
 }
 
 function toggleSidebarCollapsed() {
-  sidebarCollapsed.value = !sidebarCollapsed.value;
+  if (autoSidebarCollapsed.value) {
+    mobileSidebarExpanded.value = !mobileSidebarExpanded.value;
+    return;
+  }
+  desktopSidebarCollapsed.value = !desktopSidebarCollapsed.value;
 }
 
-watch(sidebarCollapsed, persistSidebarCollapsed);
+function closeSidebarOverlay() {
+  mobileSidebarExpanded.value = false;
+}
+
+watch(desktopSidebarCollapsed, persistSidebarCollapsed);
+
+watch(autoSidebarCollapsed, (auto) => {
+  if (!auto) closeSidebarOverlay();
+});
+
+watch(
+  () => route.fullPath,
+  () => {
+    closeSidebarOverlay();
+  },
+);
 
 function updateViewportWidth() {
   viewportWidth.value = window.innerWidth;
@@ -97,7 +122,7 @@ watch(
 onMounted(async () => {
   updateViewportWidth();
   window.addEventListener("resize", updateViewportWidth);
-  sidebarCollapsed.value = readSidebarCollapsed();
+  desktopSidebarCollapsed.value = readSidebarCollapsed();
   await Promise.all([
     applyPlatformClass(),
     ignoreBootstrapFailure(settings.refresh()),
@@ -154,13 +179,24 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'is-fullscreen': isFullscreen }">
+  <div
+    class="app-shell"
+    :class="{ 'is-fullscreen': isFullscreen, 'sidebar-overlay-open': sidebarOverlayOpen }"
+  >
     <div class="app-backdrop" />
     <AppSidebar
       v-if="!isFullscreen"
       class="app-sidebar"
       :collapsed="effectiveSidebarCollapsed"
+      :overlay="sidebarOverlayOpen"
       @toggle-collapsed="toggleSidebarCollapsed"
+    />
+    <button
+      v-if="sidebarOverlayOpen"
+      class="sidebar-scrim"
+      type="button"
+      aria-label="关闭侧栏"
+      @click="closeSidebarOverlay"
     />
     <div class="app-right" :class="{ 'is-fullscreen': isFullscreen }">
       <TopBar v-if="!isFullscreen" />
@@ -189,6 +225,26 @@ onBeforeUnmount(() => {
 }
 .app-sidebar {
   flex-shrink: 0;
+}
+.app-shell.sidebar-overlay-open .app-sidebar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 60;
+  box-shadow: 18px 0 48px rgba(0, 0, 0, 0.28);
+}
+.sidebar-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  padding: 0;
+  border: 0;
+  background: rgba(0, 0, 0, 0.34);
+  cursor: default;
+}
+:root[data-theme="light"] .sidebar-scrim {
+  background: rgba(18, 24, 38, 0.16);
 }
 .app-right {
   flex: 1;
