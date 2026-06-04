@@ -188,6 +188,57 @@ impl MpvIpcBackend {
         }
     }
 
+    async fn send_command_if_started_with_timeout(
+        &self,
+        args: Vec<Value>,
+        reply_timeout: Duration,
+    ) -> AppResult<Option<Value>> {
+        let tx = {
+            let mut guard = self.inner.lock();
+            let Some(inner) = guard.as_mut() else {
+                return Ok(None);
+            };
+            match inner.child.try_wait() {
+                Ok(None) => inner.cmd_tx.clone(),
+                Ok(Some(_status)) => {
+                    guard.take();
+                    return Ok(None);
+                }
+                Err(e) => return Err(AppError::Mpv(format!("mpv wait: {e}"))),
+            }
+        };
+
+        let req_id = next_id();
+        let payload = json!({ "command": args, "request_id": req_id });
+        let (reply_tx, reply_rx) = oneshot::channel();
+        tx.send(OutgoingCommand {
+            request_id: req_id,
+            payload,
+            reply: reply_tx,
+        })
+        .await
+        .map_err(|e| AppError::Mpv(format!("ipc send: {e}")))?;
+
+        let reply = timeout(reply_timeout, reply_rx)
+            .await
+            .map_err(|_| AppError::Mpv("mpv ipc timeout".into()))?
+            .map_err(|e| AppError::Mpv(format!("ipc recv: {e}")))?;
+
+        if reply.get("error").and_then(Value::as_str) == Some("success")
+            || reply.get("error").is_none()
+        {
+            Ok(Some(reply))
+        } else {
+            Err(AppError::Mpv(format!(
+                "mpv error: {}",
+                reply
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+            )))
+        }
+    }
+
     async fn send_command_once(&self, args: Vec<Value>) -> AppResult<Value> {
         self.send_command_once_with_timeout(args, Duration::from_secs(5))
             .await
@@ -607,7 +658,19 @@ impl MpvBackend for MpvIpcBackend {
             MpvCommand::Pause => self.set_property("pause", json!(true)).await,
             MpvCommand::Resume => self.set_property("pause", json!(false)).await,
             MpvCommand::Stop => {
-                self.send_command(vec![json!("stop")]).await?;
+                match self
+                    .send_command_if_started_with_timeout(
+                        vec![json!("stop")],
+                        Duration::from_secs(2),
+                    )
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) if Self::is_stale_ipc(&e) => {
+                        self.shutdown().await?;
+                    }
+                    Err(e) => return Err(e),
+                }
                 Ok(())
             }
             MpvCommand::Seek { position_ms } => {

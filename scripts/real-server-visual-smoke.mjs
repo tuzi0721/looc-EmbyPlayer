@@ -797,6 +797,7 @@ async function setupRealAccountCommandOnly(ws) {
     heroCount: heroItems.length,
     selected: {
       id: selected.Id,
+      name: selected.Name ?? "",
       type: selected.Type,
       hasOverview: Boolean(selected.Overview),
       hasBackdrop: Boolean(selected.BackdropImageTags?.length),
@@ -806,6 +807,7 @@ async function setupRealAccountCommandOnly(ws) {
     },
     series: selectedSeries ? {
       id: selectedSeries.Id,
+      name: selectedSeries.Name ?? "",
       type: selectedSeries.Type,
       hasOverview: Boolean(selectedSeries.Overview),
       hasBackdrop: Boolean(selectedSeries.BackdropImageTags?.length),
@@ -1625,6 +1627,33 @@ function listTopLevelPlaybackWindows(rootPid) {
   const pid = Number(rootPid) || 0;
   if (!pid || process.platform !== "win32") return [];
   const script = `
+    Add-Type @"
+      using System;
+      using System.Text;
+      using System.Runtime.InteropServices;
+      public struct RECT {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+      }
+      public static class Win32 {
+        public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+        [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+        [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+        [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+        [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
+        [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+        [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+        [DllImport("user32.dll")] public static extern IntPtr GetParent(IntPtr hWnd);
+        [DllImport("user32.dll", EntryPoint="GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
+        [DllImport("user32.dll", EntryPoint="GetWindowLongW")] public static extern int GetWindowLong32(IntPtr hWnd, int nIndex);
+        public static long GetWindowLongPtrValue(IntPtr hWnd, int nIndex) {
+          if (IntPtr.Size == 8) return GetWindowLongPtr64(hWnd, nIndex).ToInt64();
+          return GetWindowLong32(hWnd, nIndex);
+        }
+      }
+"@
     $root = ${pid}
     $all = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine
     $ids = New-Object 'System.Collections.Generic.HashSet[int]'
@@ -1641,23 +1670,46 @@ function listTopLevelPlaybackWindows(rootPid) {
       }
       $frontier = $next
     }
-    $windows = @()
-    foreach ($id in $ids) {
-      try {
-        $p = Get-Process -Id $id -ErrorAction Stop
-      } catch {
-        continue
-      }
-      if ($p.MainWindowHandle -eq 0) { continue }
-      $info = $all | Where-Object { $_.ProcessId -eq $id } | Select-Object -First 1
-      $windows += [PSCustomObject]@{
-        processId = [int]$id
-        processName = [string]$p.ProcessName
-        title = [string]$p.MainWindowTitle
-        hwnd = [int64]$p.MainWindowHandle
-        commandLine = [string]$info.CommandLine
-      }
+
+    $procById = @{}
+    foreach ($p in $all) {
+      $procById[[int]$p.ProcessId] = $p
     }
+
+    $windows = New-Object System.Collections.Generic.List[object]
+    $callback = [Win32+EnumWindowsProc]{
+      param([IntPtr]$hWnd, [IntPtr]$lParam)
+      $windowPid = 0
+      [Win32]::GetWindowThreadProcessId($hWnd, [ref]$windowPid) | Out-Null
+      if (-not $ids.Contains([int]$windowPid)) { return $true }
+      if (-not [Win32]::IsWindowVisible($hWnd)) { return $true }
+      $rect = New-Object RECT
+      if (-not [Win32]::GetWindowRect($hWnd, [ref]$rect)) { return $true }
+      $width = $rect.Right - $rect.Left
+      $height = $rect.Bottom - $rect.Top
+      if ($width -lt 16 -or $height -lt 16) { return $true }
+      $length = [Win32]::GetWindowTextLength($hWnd)
+      $titleBuilder = New-Object System.Text.StringBuilder([Math]::Max(1, $length + 1))
+      [Win32]::GetWindowText($hWnd, $titleBuilder, $titleBuilder.Capacity) | Out-Null
+      $proc = $procById[[int]$windowPid]
+      if (-not $proc) { return $true }
+      $windows.Add([PSCustomObject]@{
+        processId = [int]$windowPid
+        processName = [string]$proc.Name
+        title = $titleBuilder.ToString()
+        hwnd = $hWnd.ToInt64()
+        parentHwnd = [Win32]::GetParent($hWnd).ToInt64()
+        style = [Win32]::GetWindowLongPtrValue($hWnd, -16)
+        exStyle = [Win32]::GetWindowLongPtrValue($hWnd, -20)
+        commandLine = [string]$proc.CommandLine
+        x = $rect.Left
+        y = $rect.Top
+        width = $width
+        height = $height
+      })
+      return $true
+    }
+    [Win32]::EnumWindows($callback, [IntPtr]::Zero) | Out-Null
     $windows | ConvertTo-Json -Compress
   `;
   const result = run("powershell", ["-NoProfile", "-Command", script], {
@@ -2340,6 +2392,7 @@ try {
         heroCount: heroItems.length,
         selected: {
           id: selected.Id,
+          name: selected.Name ?? "",
           type: selected.Type,
           hasOverview: Boolean(selected.Overview),
           hasBackdrop: Boolean(selected.BackdropImageTags?.length),
@@ -2349,6 +2402,7 @@ try {
         },
         series: selectedSeries ? {
           id: selectedSeries.Id,
+          name: selectedSeries.Name ?? "",
           type: selectedSeries.Type,
           hasOverview: Boolean(selectedSeries.Overview),
           hasBackdrop: Boolean(selectedSeries.BackdropImageTags?.length),
@@ -3136,10 +3190,40 @@ try {
           posterCount: document.querySelectorAll(".poster, .history-card").length,
           loadedImageCount: document.querySelectorAll(".poster__art img.loaded, .history-card img.loaded").length,
           errorCount: document.querySelectorAll(".empty--error, .toast--error").length,
-          emptyTextPresent: /暂无|没有|空/.test(document.body.innerText),
+          emptyTextPresent: ["\\u6682\\u65e0", "\\u6ca1\\u6709", "\\u7a7a"].some((text) => document.body.innerText.includes(text)),
         });
       }
-      return result;
+      const settled = [];
+      for (const route of ["/favorites", "/history", "/aggregate"]) {
+        await appRouter.push(route);
+        let snapshot = null;
+        for (let waitedMs = 0; waitedMs <= 10000; waitedMs += 250) {
+          if (waitedMs > 0) await wait(250);
+          const imageNodes = Array.from(document.querySelectorAll(".poster__art img, .history-card img"));
+          const posterCount = document.querySelectorAll(".poster, .history-card").length;
+          const loadedImageCount = imageNodes.filter((img) =>
+            img.classList.contains("loaded") && img.complete && img.naturalWidth > 0
+          ).length;
+          const brokenImageCount = imageNodes.filter((img) => img.complete && img.naturalWidth < 1).length;
+          const errorCount = document.querySelectorAll(".empty--error, .toast--error").length;
+          const emptyTextPresent = ["\\u6682\\u65e0", "\\u6ca1\\u6709", "\\u7a7a"].some((text) => document.body.innerText.includes(text));
+          snapshot = {
+            route,
+            posterCount,
+            imageCount: imageNodes.length,
+            loadedImageCount,
+            brokenImageCount,
+            errorCount,
+            emptyTextPresent,
+            waitedMs,
+          };
+          if (errorCount > 0) break;
+          if (posterCount > 0 && loadedImageCount >= Math.min(imageNodes.length || posterCount, 2)) break;
+          if (posterCount === 0 && emptyTextPresent && waitedMs >= 1500) break;
+        }
+        settled.push(snapshot);
+      }
+      return settled;
     })()
   `);
   stage("personal-routes-complete", { count: routes.length });
@@ -3148,7 +3232,7 @@ try {
   const search = await cdpEvalAfterContextReset(ws, `
     (async () => {
       const invoke = window.hillsLite?.invoke?.bind(window.hillsLite);
-      const term = window.__hillsRealSmokeSelectedName || "";
+      const term = ${JSON.stringify(setup.selected?.name ?? "")};
       let results = [];
       if (term && invoke) {
         const response = await invoke("search_all_accounts", { term });
@@ -3206,7 +3290,7 @@ try {
           (() => {
             const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
             const route = appRouter?.currentRoute?.value?.fullPath ?? window.location.pathname;
-            const expectedName = window.__hillsRealSmokeSeriesName || "";
+            const expectedName = ${JSON.stringify(setup.series?.name ?? "")};
             const title = document.querySelector(".hero__title")?.textContent ?? "";
             const button = Array.from(document.querySelectorAll(".detail .hero__play"))
               .find((node) => {
@@ -3254,7 +3338,8 @@ try {
         if (
           buttonSnapshot?.route?.startsWith(seriesRoute) &&
           buttonSnapshot?.hasButton &&
-          buttonSnapshot?.titleMatches
+          buttonSnapshot?.titleMatches &&
+          buttonSnapshot?.hitPlayButton
         ) {
           break;
         }
@@ -3413,46 +3498,52 @@ try {
       await appRouter.push(${JSON.stringify(itemRoute)});
       window.moveTo(40, 40);
       window.resizeTo(1366, 768);
-      await wait(2200);
-      const button = Array.from(document.querySelectorAll(".detail .hero__play"))
-        .find((node) => {
-          const rect = node.getBoundingClientRect();
-          const style = getComputedStyle(node);
-          return rect.width > 0 &&
-            rect.height > 0 &&
-            rect.bottom > 0 &&
-            rect.right > 0 &&
-            rect.top < window.innerHeight &&
-            rect.left < window.innerWidth &&
-            style.display !== "none" &&
-            style.visibility !== "hidden" &&
-            Number(style.opacity || "1") > 0.01;
-        }) ?? document.querySelector(".detail .hero__play");
-      const rect = button?.getBoundingClientRect();
-      const hit = rect
-        ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
-        : null;
-      const hitPlayButton = hit?.closest?.(".hero__play") ?? null;
-      return {
-        route: appRouter.currentRoute.value.fullPath,
-        url: window.location.href,
-        buttonText: button?.textContent?.replace(/\\s+/g, " ").trim() ?? null,
-        buttonDisabled: button ? Boolean(button.disabled) : null,
-        hitTag: hit?.tagName ?? null,
-        hitClass: hit?.className ?? null,
-        hitPlayButton: Boolean(hitPlayButton),
-        hitPlayButtonClass: hitPlayButton?.className ?? null,
-        buttonRect: rect ? {
-          x: rect.x,
-          y: rect.y,
-          width: rect.width,
-          height: rect.height,
-          top: rect.top,
-          left: rect.left,
-          bottom: rect.bottom,
-          right: rect.right,
-        } : null,
-      };
+      await wait(600);
+      let snapshot = null;
+      for (let index = 0; index < 80; index += 1) {
+        const button = Array.from(document.querySelectorAll(".detail .hero__play"))
+          .find((node) => {
+            const rect = node.getBoundingClientRect();
+            const style = getComputedStyle(node);
+            return rect.width > 0 &&
+              rect.height > 0 &&
+              rect.bottom > 0 &&
+              rect.right > 0 &&
+              rect.top < window.innerHeight &&
+              rect.left < window.innerWidth &&
+              style.display !== "none" &&
+              style.visibility !== "hidden" &&
+              Number(style.opacity || "1") > 0.01;
+          }) ?? document.querySelector(".detail .hero__play");
+        const rect = button?.getBoundingClientRect();
+        const hit = rect
+          ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+          : null;
+        const hitPlayButton = hit?.closest?.(".hero__play") ?? null;
+        snapshot = {
+          route: appRouter.currentRoute.value.fullPath,
+          url: window.location.href,
+          buttonText: button?.textContent?.replace(/\\s+/g, " ").trim() ?? null,
+          buttonDisabled: button ? Boolean(button.disabled) : null,
+          hitTag: hit?.tagName ?? null,
+          hitClass: hit?.className ?? null,
+          hitPlayButton: Boolean(hitPlayButton),
+          hitPlayButtonClass: hitPlayButton?.className ?? null,
+          buttonRect: rect ? {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            top: rect.top,
+            left: rect.left,
+            bottom: rect.bottom,
+            right: rect.right,
+          } : null,
+        };
+        if (snapshot.hitPlayButton) return snapshot;
+        await wait(150);
+      }
+      return snapshot;
     })()
   `);
   stage("player-open-detail-ready", {
