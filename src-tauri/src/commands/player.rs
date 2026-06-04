@@ -388,6 +388,29 @@ fn playback_headers_for_line(
     (user_agent, headers)
 }
 
+/// Ordered candidate stream URLs to probe for a line: the configured path
+/// first, then an `/emby`-prefixed variant. Some Emby reverse proxies only
+/// pass HTTP Range and disable buffering under the `/emby/` location, so the
+/// bare path returns `200` (no Range) while `/emby/...` returns `206`.
+fn stream_url_candidates(primary: &Url) -> Vec<Url> {
+    let mut out = vec![primary.clone()];
+    if let Some(emby) = with_emby_prefix(primary) {
+        out.push(emby);
+    }
+    out
+}
+
+fn with_emby_prefix(url: &Url) -> Option<Url> {
+    let path = url.path();
+    if path == "/emby" || path.starts_with("/emby/") {
+        return None;
+    }
+    let trimmed = path.strip_prefix('/').unwrap_or(path);
+    let mut next = url.clone();
+    next.set_path(&format!("/emby/{trimmed}"));
+    Some(next)
+}
+
 async fn select_playback_line(
     state: &AppState,
     server: &Server,
@@ -406,7 +429,7 @@ async fn select_playback_line(
     let mut saw_range_broken_mp4 = false;
 
     for line in candidates {
-        let url = state.emby.build_stream_url_for_line(
+        let primary = state.emby.build_stream_url_for_line(
             server,
             account,
             item,
@@ -416,81 +439,116 @@ async fn select_playback_line(
             Some(&line.id),
         )?;
         let (user_agent, headers) = playback_headers_for_line(server, account, &line);
-        log_visual_player_stage(&format!("play:range-probe-line-start id={}", line.id));
-        let range_supported = match state
-            .stream_proxy
-            .probe_range_support(url.clone(), headers.clone(), user_agent.clone())
-            .await
-        {
-            Ok(supported) => supported,
-            Err(error) => {
-                saw_range_probe_error = true;
-                log_visual_player_stage(&format!(
-                    "play:range-probe-line-error id={} {}",
-                    line.id,
-                    sanitize_visual_error(&error.to_string())
-                ));
-                continue;
-            }
-        };
-        log_visual_player_stage(&format!(
-            "play:range-probe-line-complete id={} supported={range_supported}",
-            line.id
-        ));
+        let url_candidates = stream_url_candidates(&primary);
 
-        let selection = PlaybackLineSelection {
-            line,
-            url,
-            headers,
-            user_agent,
-            range_supported,
-        };
-
-        if range_supported {
+        // Per-line: try each candidate URL (configured path + `/emby` variant).
+        // Reverse proxies sometimes only pass HTTP Range / disable buffering on
+        // the `/emby/` location, so the bare path returns `200` (no Range) or a
+        // `404`. Prefer a `206` candidate; skip `404`/error candidates.
+        let mut seekable_url: Option<Url> = None;
+        let mut nonseekable_url: Option<Url> = None;
+        let mut range_broken_url: Option<Url> = None;
+        for cand in url_candidates {
             log_visual_player_stage(&format!(
-                "play:range-probe-candidate id={} supported=true",
-                selection.line.id
+                "play:range-probe-line-start id={} path={}",
+                line.id,
+                cand.path()
             ));
-            seekable.push(selection);
-            continue;
-        }
-
-        if source_requires_streamable_mp4_prefix(source) {
-            log_visual_player_stage(&format!(
-                "play:mp4-prefix-probe-start id={}",
-                selection.line.id
-            ));
-            let streamable_prefix = match state
+            let (status, range_supported) = match state
                 .stream_proxy
-                .probe_mp4_streamable_prefix(
-                    selection.url.clone(),
-                    selection.headers.clone(),
-                    selection.user_agent.clone(),
-                )
+                .probe_range_support(cand.clone(), headers.clone(), user_agent.clone())
                 .await
             {
-                Ok(streamable) => streamable,
+                Ok(result) => result,
                 Err(error) => {
+                    saw_range_probe_error = true;
                     log_visual_player_stage(&format!(
-                        "play:mp4-prefix-probe-error id={} {}",
-                        selection.line.id,
+                        "play:range-probe-line-error id={} {}",
+                        line.id,
                         sanitize_visual_error(&error.to_string())
                     ));
-                    false
+                    continue;
                 }
             };
             log_visual_player_stage(&format!(
-                "play:mp4-prefix-probe id={} streamable={streamable_prefix}",
-                selection.line.id
+                "play:range-probe-line-complete id={} status={status} supported={range_supported} path={}",
+                line.id,
+                cand.path()
             ));
-            if !streamable_prefix {
-                saw_range_broken_mp4 = true;
-                range_broken.push(selection);
+
+            if status >= 400 {
+                // Wrong path / not found on this candidate; try the next one.
                 continue;
+            }
+            if range_supported {
+                seekable_url = Some(cand);
+                break;
+            }
+            // 2xx without Range. For MP4/MOV, only usable if the prefix is
+            // streamable (faststart); otherwise it is a cache-then-local source.
+            if source_requires_streamable_mp4_prefix(source) {
+                log_visual_player_stage(&format!("play:mp4-prefix-probe-start id={}", line.id));
+                let streamable_prefix = match state
+                    .stream_proxy
+                    .probe_mp4_streamable_prefix(cand.clone(), headers.clone(), user_agent.clone())
+                    .await
+                {
+                    Ok(streamable) => streamable,
+                    Err(error) => {
+                        log_visual_player_stage(&format!(
+                            "play:mp4-prefix-probe-error id={} {}",
+                            line.id,
+                            sanitize_visual_error(&error.to_string())
+                        ));
+                        false
+                    }
+                };
+                log_visual_player_stage(&format!(
+                    "play:mp4-prefix-probe id={} streamable={streamable_prefix}",
+                    line.id
+                ));
+                if streamable_prefix {
+                    if nonseekable_url.is_none() {
+                        nonseekable_url = Some(cand);
+                    }
+                } else if range_broken_url.is_none() {
+                    range_broken_url = Some(cand);
+                }
+            } else if nonseekable_url.is_none() {
+                nonseekable_url = Some(cand);
             }
         }
 
-        nonseekable.push(selection);
+        if let Some(url) = seekable_url {
+            log_visual_player_stage(&format!(
+                "play:range-probe-candidate id={} supported=true",
+                line.id
+            ));
+            seekable.push(PlaybackLineSelection {
+                line,
+                url,
+                headers,
+                user_agent,
+                range_supported: true,
+            });
+        } else if let Some(url) = nonseekable_url {
+            nonseekable.push(PlaybackLineSelection {
+                line,
+                url,
+                headers,
+                user_agent,
+                range_supported: false,
+            });
+        } else if let Some(url) = range_broken_url {
+            saw_range_broken_mp4 = true;
+            range_broken.push(PlaybackLineSelection {
+                line,
+                url,
+                headers,
+                user_agent,
+                range_supported: false,
+            });
+        }
     }
 
     if !seekable.is_empty() {

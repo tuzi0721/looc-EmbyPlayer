@@ -101,16 +101,24 @@ impl StreamProxy {
         Ok(format!("http://{addr}/stream/{id}"))
     }
 
+    /// Probe a candidate stream URL. Returns the upstream HTTP status and
+    /// whether real HTTP Range is supported (`206` + `Content-Range`). The
+    /// status lets the caller skip `404`/error candidates (e.g. a wrong path
+    /// prefix) instead of treating them as a non-seekable stream.
     pub async fn probe_range_support(
         &self,
         url: Url,
         headers: Vec<(String, String)>,
         user_agent: Option<String>,
-    ) -> AppResult<bool> {
+    ) -> AppResult<(u16, bool)> {
         let mut upstream = self.inner.client.get(url);
+        // Use an open-ended `bytes=0-` like browsers / official players do.
+        // A degenerate `bytes=0-0` makes some origins/CDNs (e.g. Cloudflare in
+        // front of Emby) answer `200` without `Content-Range`, which we would
+        // misread as "Range unsupported" and needlessly fall back to caching.
         upstream = upstream
             .header(ACCEPT_ENCODING, "identity")
-            .header(RANGE, "bytes=0-0");
+            .header(RANGE, "bytes=0-");
         if let Some(ua) = user_agent.as_deref().filter(|ua| !ua.trim().is_empty()) {
             upstream = upstream.header(USER_AGENT, ua);
         }
@@ -144,7 +152,7 @@ impl StreamProxy {
             content_type,
             supported
         ));
-        Ok(supported)
+        Ok((status.as_u16(), supported))
     }
 
     pub async fn probe_mp4_streamable_prefix(
