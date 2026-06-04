@@ -69,6 +69,12 @@ export const usePlayerStore = defineStore("player", () => {
     directTitle.value = null;
     directSourceLabel.value = null;
     lastEof = false;
+    // Range-broken / non-faststart MP4: the backend is caching the file to disk
+    // and mpv is not loaded yet. PlayerView drives the cache-wait + local play;
+    // do not poll mpv state or report progress while caching.
+    if (source?.prefetching) {
+      return sessionId;
+    }
     void pushNowPlaying();
     startPolling();
     return sessionId;

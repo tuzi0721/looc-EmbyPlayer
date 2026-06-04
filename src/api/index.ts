@@ -54,6 +54,18 @@ export interface PlaybackSource {
   headers?: [string, string][];
   userAgent?: string | null;
   diagnostics?: unknown;
+  /** Range-broken / non-faststart MP4 being cached to a local file first. */
+  prefetching?: boolean;
+}
+
+export interface PrefetchState {
+  active: boolean;
+  itemId?: string | null;
+  downloadedBytes: number;
+  totalBytes?: number | null;
+  ready: boolean;
+  localPath?: string | null;
+  error?: string | null;
 }
 
 export interface PlaybackMediaSource {
@@ -405,6 +417,8 @@ export const api = {
   }) => invoke<void>("embed_set_rect", { rect }),
   embedSetVisible: (visible: boolean) => invoke<void>("embed_set_visible", { visible }),
   embedDetach: () => invoke<void>("embed_detach"),
+  getPrefetchState: () => invoke<PrefetchState>("get_prefetch_state"),
+  cancelPrefetch: () => invoke<void>("cancel_prefetch"),
   getEmbedState: () => invoke<{
     mode: string;
     hostKind: string;

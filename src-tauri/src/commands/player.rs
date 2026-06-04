@@ -74,6 +74,12 @@ pub struct PlaybackSourceResult {
     pub headers: Vec<(String, String)>,
     pub user_agent: Option<String>,
     pub diagnostics: serde_json::Value,
+    /// When true, the source is a Range-broken / non-faststart MP4 that cannot
+    /// be streamed directly. The backend has started caching it to a local file
+    /// (see `get_prefetch_state`); the player should show download progress and
+    /// then play the cached local file once it is ready.
+    #[serde(default)]
+    pub prefetching: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -301,6 +307,17 @@ struct PlaybackLineChoice {
     fallbacks: Vec<PlaybackLineSelection>,
 }
 
+/// Outcome of choosing how to play a source.
+enum PlaybackPlan {
+    /// A line can be streamed directly into mpv (seekable, or non-seekable but
+    /// streamable). The normal load path applies.
+    Stream(PlaybackLineChoice),
+    /// The source is a Range-broken, non-faststart MP4/MOV: it cannot be
+    /// streamed. The backend must cache it to a local file first, then play the
+    /// local file. Carries the best line to download from.
+    CacheThenLocal(PlaybackLineSelection),
+}
+
 struct ReadyPlaybackLine {
     selection: PlaybackLineSelection,
     mpv_url: String,
@@ -380,10 +397,11 @@ async fn select_playback_line(
     play_session_id: &str,
     prefer_direct: bool,
     line_id: Option<&str>,
-) -> AppResult<PlaybackLineChoice> {
+) -> AppResult<PlaybackPlan> {
     let candidates = playback_line_candidates(server, line_id)?;
     let mut seekable: Vec<PlaybackLineSelection> = Vec::new();
     let mut nonseekable: Vec<PlaybackLineSelection> = Vec::new();
+    let mut range_broken: Vec<PlaybackLineSelection> = Vec::new();
     let mut saw_range_probe_error = false;
     let mut saw_range_broken_mp4 = false;
 
@@ -467,6 +485,7 @@ async fn select_playback_line(
             ));
             if !streamable_prefix {
                 saw_range_broken_mp4 = true;
+                range_broken.push(selection);
                 continue;
             }
         }
@@ -486,10 +505,10 @@ async fn select_playback_line(
             selection.line.id,
             fallbacks.len()
         ));
-        return Ok(PlaybackLineChoice {
+        return Ok(PlaybackPlan::Stream(PlaybackLineChoice {
             selected: selection,
             fallbacks,
-        });
+        }));
     }
 
     nonseekable.sort_by_key(|selection| {
@@ -505,13 +524,25 @@ async fn select_playback_line(
             selection.line.id,
             nonseekable.len()
         ));
-        return Ok(PlaybackLineChoice {
+        return Ok(PlaybackPlan::Stream(PlaybackLineChoice {
             selected: selection,
             fallbacks: nonseekable.collect(),
-        });
+        }));
     }
 
     if saw_range_broken_mp4 {
+        // Range-broken + non-faststart MP4/MOV: cannot stream. Cache to a local
+        // file first, then play the local copy (which is seekable on disk).
+        range_broken.sort_by_key(|selection| {
+            (
+                selection.line.priority,
+                selection.line.last_latency_ms.unwrap_or(u32::MAX),
+            )
+        });
+        if let Some(selection) = range_broken.into_iter().next() {
+            log_visual_player_stage(&format!("play:cache-then-local id={}", selection.line.id));
+            return Ok(PlaybackPlan::CacheThenLocal(selection));
+        }
         log_visual_player_stage("play:blocked-range-broken-mp4");
         return Err(AppError::InvalidState(RANGE_BROKEN_MP4_ERROR.into()));
     }
@@ -617,6 +648,7 @@ pub async fn get_playback_source(
         headers: Vec::new(),
         user_agent: None,
         diagnostics,
+        prefetching: false,
     })
 }
 
@@ -701,7 +733,7 @@ pub async fn play(
     };
     log_visual_player_stage("play:source-selected");
 
-    let line_choice = select_playback_line(
+    let line_choice = match select_playback_line(
         &state,
         &server,
         &account,
@@ -711,7 +743,13 @@ pub async fn play(
         payload.prefer_direct,
         line_id,
     )
-    .await?;
+    .await?
+    {
+        PlaybackPlan::Stream(choice) => choice,
+        PlaybackPlan::CacheThenLocal(selection) => {
+            return start_prefetch_result(&state, &server, &item, &pb, &source, selection).await;
+        }
+    };
     log_visual_player_stage("play:stream-url-ready");
     let play_method = source.local_decode_play_method().to_string();
     let tracks = source.media_streams.iter().map(stream_to_track).collect();
@@ -882,9 +920,89 @@ pub async fn play(
         headers: Vec::new(),
         user_agent: None,
         diagnostics,
+        prefetching: false,
     };
     log_visual_player_stage("play:return");
     Ok(result)
+}
+
+/// Range-broken / non-faststart MP4: start caching the source to a local file
+/// and return a `prefetching` result. The frontend polls `get_prefetch_state`
+/// and plays the local cache file via `play_file` once it is ready.
+async fn start_prefetch_result(
+    state: &AppState,
+    server: &Server,
+    item: &MediaItem,
+    pb: &PlaybackInfo,
+    source: &MediaSource,
+    selection: PlaybackLineSelection,
+) -> AppResult<PlaybackSourceResult> {
+    let extension = source.container.clone().unwrap_or_else(|| "mp4".into());
+    state.prefetch.start(
+        &item.id,
+        selection.url.clone(),
+        selection.headers.clone(),
+        selection.user_agent.clone(),
+        &extension,
+    )?;
+    log_visual_player_stage("play:prefetch-start");
+
+    // No live mpv session yet; the local file is loaded once caching completes.
+    *state.current_play_session.lock().await = None;
+
+    let play_method = source.local_decode_play_method().to_string();
+    let tracks = source.media_streams.iter().map(stream_to_track).collect();
+    let media_sources = pb
+        .media_sources
+        .iter()
+        .enumerate()
+        .map(|(index, candidate)| media_source_result(candidate, index, &source.id))
+        .collect();
+    let lines = server
+        .lines
+        .iter()
+        .map(|candidate| PlaybackLineOptionResult {
+            id: candidate.id.clone(),
+            name: candidate.name.clone(),
+            base_url: candidate.base_url.clone(),
+            enabled: candidate.enabled,
+            status: candidate.last_status,
+            latency_ms: candidate.last_latency_ms,
+            selected: candidate.id == selection.line.id,
+        })
+        .collect();
+    let duration_ms = item.run_time_ticks.map(|ticks| (ticks / 10_000).max(0));
+    let diagnostics = json!({
+        "sourceKind": "cache-then-local",
+        "streamKind": "local-cache",
+        "serverTranscodingAllowed": false,
+        "rangeBroken": true,
+        "line": {
+            "id": selection.line.id.clone(),
+            "name": selection.line.name.clone(),
+            "baseUrl": selection.line.base_url.clone(),
+        },
+    });
+
+    Ok(PlaybackSourceResult {
+        item_id: item.id.clone(),
+        play_session_id: pb.play_session_id.clone(),
+        media_source_id: source.id.clone(),
+        play_method,
+        line_id: selection.line.id.clone(),
+        line_name: selection.line.name.clone(),
+        range_supported: Some(true),
+        start_suppressed_non_seekable: false,
+        stream_url: String::new(),
+        duration_ms,
+        tracks,
+        media_sources,
+        lines,
+        headers: Vec::new(),
+        user_agent: None,
+        diagnostics,
+        prefetching: true,
+    })
 }
 
 async fn load_ready_playback_line(
@@ -2352,6 +2470,16 @@ pub async fn embed_detach(state: State<'_, Arc<AppState>>) -> AppResult<()> {
         "embed_detach:error"
     });
     result
+}
+
+#[tauri::command]
+pub fn get_prefetch_state(state: State<'_, Arc<AppState>>) -> crate::mp4_prefetch::PrefetchState {
+    state.prefetch.snapshot()
+}
+
+#[tauri::command]
+pub fn cancel_prefetch(state: State<'_, Arc<AppState>>) {
+    state.prefetch.cancel();
 }
 
 #[tauri::command]

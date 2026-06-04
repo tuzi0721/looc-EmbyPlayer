@@ -11,6 +11,7 @@ use crate::config::ConfigStore;
 use crate::download::DownloadManager;
 use crate::emby::{EmbyClient, EmbySocket, SessionController};
 use crate::error::AppResult;
+use crate::mp4_prefetch::PrefetchManager;
 use crate::mpv::MpvManager;
 use crate::network::{build_client, HealthScheduler, HeartbeatScheduler};
 use crate::notifications::NotificationCenter;
@@ -26,6 +27,7 @@ pub struct AppState {
     pub downloads: DownloadManager,
     pub notifications: NotificationCenter,
     pub stream_proxy: StreamProxy,
+    pub prefetch: PrefetchManager,
     pub session_controller: Arc<SessionController>,
     pub shortcuts: ShortcutRegistry,
     pub system_media: Arc<SystemMediaController>,
@@ -64,6 +66,7 @@ impl AppState {
         let mpv = MpvManager::new(&settings)?;
         let notifications = NotificationCenter::new(config.clone(), handle.clone());
         let stream_proxy = StreamProxy::new()?;
+        let prefetch = PrefetchManager::new()?;
         let downloads = DownloadManager::new(
             config.clone(),
             emby.clone(),
@@ -86,6 +89,7 @@ impl AppState {
             downloads,
             notifications,
             stream_proxy,
+            prefetch,
             session_controller,
             shortcuts: ShortcutRegistry::default(),
             system_media: Arc::new(SystemMediaController::new()),
@@ -128,6 +132,7 @@ impl AppState {
         }
         let _ = self.current_play_session.lock().await.take();
         self.stream_proxy.clear();
+        self.prefetch.cancel();
         self.system_media.clear();
     }
 

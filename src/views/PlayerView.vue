@@ -56,6 +56,10 @@ const errorText = ref<string | null>(null);
 const errorCopyStatus = ref<string | null>(null);
 const showControls = ref(true);
 const retryingPlayback = ref(false);
+const cachingActive = ref(false);
+const cachingDownloaded = ref(0);
+const cachingTotal = ref<number | null>(null);
+const cachingPct = ref(0);
 const downloadStarting = ref(false);
 const downloadActionStatus = ref<string | null>(null);
 const stageEl = ref<HTMLElement | null>(null);
@@ -2118,6 +2122,52 @@ async function startDownloadForCurrentItem() {
   }
 }
 
+function formatCacheBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 MB";
+  const mb = bytes / (1024 * 1024);
+  if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`;
+  return `${mb.toFixed(1)} MB`;
+}
+
+const cachingLabel = computed(() => {
+  const downloaded = formatCacheBytes(cachingDownloaded.value);
+  if (cachingTotal.value && cachingTotal.value > 0) {
+    return `${cachingPct.value}%（${downloaded} / ${formatCacheBytes(cachingTotal.value)}）`;
+  }
+  return downloaded;
+});
+
+// Range-broken / non-faststart MP4: the backend caches the file to disk; wait
+// for it to finish, then play the local copy (which supports seeking).
+async function waitForPrefetchAndPlayLocal(startMs: number) {
+  cachingActive.value = true;
+  cachingDownloaded.value = 0;
+  cachingTotal.value = null;
+  cachingPct.value = 0;
+  showControls.value = true;
+  try {
+    while (!playerUnmounted) {
+      const st = await api.getPrefetchState();
+      if (st.error) throw new Error(st.error);
+      if (!st.active) throw new Error("缓存任务已取消");
+      cachingDownloaded.value = st.downloadedBytes;
+      cachingTotal.value = st.totalBytes ?? null;
+      cachingPct.value =
+        st.totalBytes && st.totalBytes > 0
+          ? Math.min(100, Math.round((st.downloadedBytes / st.totalBytes) * 100))
+          : 0;
+      if (st.ready && st.localPath) {
+        if (playerUnmounted) return;
+        await player.playFile({ filePath: st.localPath, startMs, title: item.value?.Name ?? null });
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+  } finally {
+    cachingActive.value = false;
+  }
+}
+
 async function startCurrentPlayback() {
   const start = Number(route.query.start ?? 0) || 0;
   const filePath = routeLocalFilePath.value;
@@ -2175,6 +2225,9 @@ async function startCurrentPlayback() {
       recordWhilePlaying,
       stealthWhenRecording,
     });
+    if (player.playbackSource?.prefetching) {
+      await waitForPrefetchAndPlayLocal(start);
+    }
   }
   await applyPictureMode();
   bumpControls();
@@ -2263,6 +2316,8 @@ onBeforeUnmount(async () => {
     cleanupTasks.push(api.setSecondaryDisplayBlackout(false));
   }
   player.stopPolling();
+  cachingActive.value = false;
+  cleanupTasks.push(api.cancelPrefetch().catch((error) => console.warn(error)));
   if (embedVideo) {
     await player.stop().catch((error) => console.warn(error));
     try {
@@ -2351,6 +2406,16 @@ onBeforeUnmount(async () => {
           </button>
         </div>
       </transition>
+
+      <div v-if="cachingActive && !errorText" class="player__caching glass glass-strong">
+        <Icon icon="lucide:download-cloud" width="26" />
+        <h3>正在缓存以便播放</h3>
+        <p>该源服务器不支持 HTTP Range 且非 faststart，正在下载到本地后播放。</p>
+        <div class="player__caching-bar">
+          <div class="player__caching-fill" :style="{ width: `${cachingPct}%` }" />
+        </div>
+        <span class="player__caching-status">{{ cachingLabel }}</span>
+      </div>
 
       <div v-if="errorText" class="player__error glass glass-strong">
         <Icon icon="lucide:triangle-alert" width="22" />
@@ -3087,6 +3152,52 @@ onBeforeUnmount(async () => {
 }
 .player__error-status {
   min-height: 18px;
+  color: var(--fg-secondary);
+  font-size: 12px;
+}
+
+.player__caching {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  padding: 26px;
+  max-width: 460px;
+  max-height: fit-content;
+  margin: auto;
+  text-align: center;
+  border-radius: 18px;
+  color: var(--fg-primary);
+}
+.player__caching h3 {
+  margin: 4px 0 0;
+  font-size: 16px;
+}
+.player__caching p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 13px;
+  max-width: min(640px, 100%);
+}
+.player__caching-bar {
+  width: min(320px, 80%);
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.16));
+  overflow: hidden;
+}
+.player__caching-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--brand, #7c5cff);
+  transition: width 0.3s ease;
+}
+.player__caching-status {
+  font-variant-numeric: tabular-nums;
   color: var(--fg-secondary);
   font-size: 12px;
 }

@@ -4,6 +4,7 @@ mod danmaku;
 mod download;
 mod emby;
 mod error;
+mod mp4_prefetch;
 mod mpv;
 mod network;
 mod notifications;
@@ -136,6 +137,8 @@ pub fn run() {
             commands::player::embed_set_visible,
             commands::player::embed_detach,
             commands::player::get_embed_state,
+            commands::player::get_prefetch_state,
+            commands::player::cancel_prefetch,
             commands::settings::get_settings,
             commands::settings::update_settings,
             commands::settings::export_config,
