@@ -1,6 +1,7 @@
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
 use serde_json::json;
 use tauri::{AppHandle, Emitter};
@@ -30,16 +31,23 @@ impl NotificationCenter {
     pub fn new(config: ConfigStore, handle: AppHandle) -> Self {
         let cleared_keys: HashSet<String> =
             config.cleared_notification_keys().into_iter().collect();
+        let cleared_at = config.notifications_cleared_at();
         let initial = config.notifications();
         let mut deque = VecDeque::with_capacity(MAX_KEPT.max(initial.len()));
-        for n in initial {
-            if notification_key(&n).is_some_and(|key| cleared_keys.contains(&key)) {
+        let mut changed = false;
+        for n in initial.iter().cloned() {
+            if notification_is_cleared(&n, &cleared_keys, cleared_at) {
+                changed = true;
                 continue;
             }
             if deque.len() == MAX_KEPT {
                 deque.pop_front();
+                changed = true;
             }
             deque.push_back(n);
+        }
+        if changed {
+            let _ = config.replace_notifications(deque.iter().cloned().collect());
         }
         Self {
             inner: Arc::new(RwLock::new(deque)),
@@ -62,14 +70,25 @@ impl NotificationCenter {
     /// Push a new notification. Emits `notification:new` and updates unread
     /// count. Returns the materialized notification (with id / timestamp).
     pub fn push(&self, spec: NotificationSpec) -> AppResult<Notification> {
-        let n = spec.build();
-        if notification_key(&n).is_some_and(|key| self.cleared_keys().contains(&key)) {
+        let mut n = spec.build();
+        let key = notification_key(&n);
+        if key
+            .as_ref()
+            .is_some_and(|key| self.cleared_keys().contains(key))
+        {
             return Ok(n);
         }
         {
             let mut g = self.inner.write();
-            if let Some(key) = notification_key(&n) {
-                g.retain(|existing| notification_key(existing).as_deref() != Some(key.as_str()));
+            if let Some(key) = key.as_deref() {
+                if let Some(existing) = g
+                    .iter()
+                    .find(|existing| notification_key(existing).as_deref() == Some(key))
+                {
+                    n.id = existing.id.clone();
+                    n.read = existing.read;
+                }
+                g.retain(|existing| notification_key(existing).as_deref() != Some(key));
             }
             if g.len() == MAX_KEPT {
                 g.pop_front();
@@ -208,6 +227,17 @@ fn notification_key(n: &Notification) -> Option<String> {
     ))
 }
 
+fn notification_is_cleared(
+    n: &Notification,
+    cleared_keys: &HashSet<String>,
+    cleared_at: Option<DateTime<Utc>>,
+) -> bool {
+    if notification_key(n).is_some_and(|key| cleared_keys.contains(&key)) {
+        return true;
+    }
+    cleared_at.is_some_and(|cleared_at| n.created_at <= cleared_at)
+}
+
 fn category_key(category: crate::notifications::types::NotificationCategory) -> &'static str {
     match category {
         crate::notifications::types::NotificationCategory::Download => "download",
@@ -223,5 +253,46 @@ fn kind_key(kind: crate::notifications::types::NotificationKind) -> &'static str
         crate::notifications::types::NotificationKind::Success => "success",
         crate::notifications::types::NotificationKind::Warning => "warning",
         crate::notifications::types::NotificationKind::Error => "error",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Duration, Utc};
+
+    use super::*;
+    use crate::notifications::types::{NotificationCategory, NotificationKind, NotificationSpec};
+
+    #[test]
+    fn cleared_timestamp_filters_sourceless_notifications() {
+        let cleared_at = Utc::now();
+        let mut notification = NotificationSpec::new(
+            NotificationKind::Info,
+            NotificationCategory::System,
+            "Remote message",
+        )
+        .build();
+        notification.created_at = cleared_at - Duration::seconds(1);
+
+        assert!(notification_is_cleared(
+            &notification,
+            &HashSet::new(),
+            Some(cleared_at),
+        ));
+    }
+
+    #[test]
+    fn cleared_key_filters_newer_repeat_notifications() {
+        let notification = NotificationSpec::new(
+            NotificationKind::Error,
+            NotificationCategory::Server,
+            "Line down",
+        )
+        .source("server-a")
+        .build();
+        let key = notification_key(&notification).expect("source notification has key");
+        let cleared_keys = HashSet::from([key]);
+
+        assert!(notification_is_cleared(&notification, &cleared_keys, None));
     }
 }

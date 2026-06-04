@@ -44,9 +44,18 @@ export const useNotificationsStore = defineStore("notifications", () => {
 
   function _addLocal(n: AppNotification) {
     const idx = items.value.findIndex((x) => x.id === n.id);
+    const previous = idx >= 0 ? items.value[idx] : null;
     if (idx >= 0) items.value[idx] = n;
     else items.value.unshift(n);
     if (items.value.length > MAX_KEEP) items.value.length = MAX_KEEP;
+    if (previous) {
+      if (previous.read && !n.read) unread.value += 1;
+      else if (!previous.read && n.read) unread.value = Math.max(0, unread.value - 1);
+      toastQueue.value = toastQueue.value.map((t) =>
+        t.id === n.id ? { ...t, ...n } : t,
+      );
+      return;
+    }
     if (!n.read) unread.value += 1;
     toastQueue.value.push({ ...n, spawnedAt: Date.now() });
   }

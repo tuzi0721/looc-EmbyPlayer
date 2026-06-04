@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -287,6 +288,15 @@ impl ConfigStore {
 
     pub fn cleared_notification_keys(&self) -> Vec<String> {
         normalize_string_list(self.store.get(KEY_CLEARED_NOTIFICATION_KEYS), 250)
+    }
+
+    pub fn notifications_cleared_at(&self) -> Option<DateTime<Utc>> {
+        match self.store.get(KEY_NOTIFICATIONS_CLEARED_AT) {
+            Some(Value::String(text)) => DateTime::parse_from_rfc3339(text.trim())
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc)),
+            _ => None,
+        }
     }
 
     pub fn replace_cleared_notification_keys(&self, keys: Vec<String>) -> AppResult<()> {
