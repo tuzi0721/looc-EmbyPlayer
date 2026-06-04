@@ -8,7 +8,7 @@ use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
 use tokio::time::timeout;
 
 use crate::config::models::AppSettings;
@@ -31,6 +31,22 @@ pub struct MpvIpcBackend {
     inner: Arc<Mutex<Option<Inner>>>,
     settings: AppSettings,
     host: Arc<Mutex<Option<Arc<HostWindow>>>>,
+    /// Native parent window the current host child is attached to. Used to make
+    /// `bind_embedded` idempotent: re-attaching the same parent must NOT tear
+    /// down a running session.
+    current_parent: Arc<Mutex<Option<isize>>>,
+    /// Serializes the destructive embedded-lifecycle operations (attach,
+    /// the mpv spawn inside `ensure_started`, and detach) so a re-attach or
+    /// detach can never kill the mpv child while a `play` is mid-spawn.
+    lifecycle: Arc<AsyncMutex<()>>,
+}
+
+fn parent_key(parent: &ParentHandle) -> Option<isize> {
+    match parent {
+        #[cfg(target_os = "windows")]
+        ParentHandle::Win32(handle) => Some(*handle),
+        ParentHandle::Unsupported => None,
+    }
 }
 
 struct Inner {
@@ -50,15 +66,34 @@ impl MpvIpcBackend {
             inner: Arc::new(Mutex::new(None)),
             settings,
             host: Arc::new(Mutex::new(None)),
+            current_parent: Arc::new(Mutex::new(None)),
+            lifecycle: Arc::new(AsyncMutex::new(())),
         }
     }
 
-    /// Create a native child window; mpv renders into it via `--wid`.
-    pub fn bind_embedded(&self, parent: ParentHandle) -> AppResult<()> {
-        if let Some(mut inner) = self.inner.lock().take() {
-            drop(inner.cmd_tx);
-            let _ = inner.child.start_kill();
+    /// Create (or reuse) a native child window; mpv renders into it via `--wid`.
+    ///
+    /// Idempotent: when the same parent window already has a live host child,
+    /// the existing host and any running mpv session are kept as-is. This is
+    /// what stops PlayerView re-mounts (which call `embed_attach` every time)
+    /// from killing an in-flight `play` and producing the
+    /// "mpv ipc write failed: pipe is being closed" / black-screen race.
+    pub async fn bind_embedded(&self, parent: ParentHandle) -> AppResult<()> {
+        let _lifecycle = self.lifecycle.lock().await;
+        let new_key = parent_key(&parent);
+
+        let reuse = {
+            let host_present = self.host.lock().is_some();
+            let same_parent = *self.current_parent.lock() == new_key;
+            host_present && same_parent
+        };
+        if reuse {
+            return Ok(());
         }
+
+        // Parent changed (or no host yet): stop mpv FIRST, then destroy the old
+        // host window, so mpv never renders into a destroyed `--wid`.
+        self.shutdown().await?;
         let old = {
             let mut guard = self.host.lock();
             guard.take()
@@ -66,10 +101,11 @@ impl MpvIpcBackend {
         if let Some(old) = old {
             let _ = old.destroy();
         }
+
         let host = Arc::new(HostWindow::create_child(parent)?);
         host.show(false)?;
-        let mut guard = self.host.lock();
-        *guard = Some(host);
+        *self.host.lock() = Some(host);
+        *self.current_parent.lock() = new_key;
         Ok(())
     }
 
@@ -95,11 +131,13 @@ impl MpvIpcBackend {
 
     /// Tear down mpv IPC and destroy the native child window.
     pub async fn detach_embedded(&self) -> AppResult<()> {
+        let _lifecycle = self.lifecycle.lock().await;
         self.shutdown().await?;
         let host = {
             let mut guard = self.host.lock();
             guard.take()
         };
+        *self.current_parent.lock() = None;
         if let Some(h) = host {
             h.destroy()?;
         }
@@ -107,6 +145,28 @@ impl MpvIpcBackend {
     }
 
     async fn ensure_started(&self) -> AppResult<()> {
+        // Hot path: a live mpv session already exists. Stay lock-free so the
+        // per-property snapshot fan-out is not serialized behind the lifecycle
+        // lock.
+        {
+            let mut guard = self.inner.lock();
+            if let Some(inner) = guard.as_mut() {
+                match inner.child.try_wait() {
+                    Ok(None) => return Ok(()),
+                    Ok(Some(_status)) => {
+                        guard.take();
+                    }
+                    Err(e) => return Err(AppError::Mpv(format!("mpv wait: {e}"))),
+                }
+            }
+        }
+
+        // Slow path: we must spawn mpv. Serialize with attach/detach so the
+        // host child window cannot be destroyed underneath the spawning mpv
+        // (`--wid`), and so a concurrent re-attach cannot kill this child.
+        let _lifecycle = self.lifecycle.lock().await;
+
+        // Another task may have started mpv while we waited for the lock.
         {
             let mut guard = self.inner.lock();
             if let Some(inner) = guard.as_mut() {

@@ -2285,9 +2285,10 @@ pub async fn embed_attach(state: State<'_, Arc<AppState>>, window: tauri::Window
     let parent = native_parent_handle(&window)?;
     log_visual_player_stage("embed_attach:parent-ready");
     log_visual_player_stage("embed_attach:bind-start");
-    let result = match tokio::time::timeout(std::time::Duration::from_secs(8), async {
-        state.mpv.bind_embedded(parent)
-    })
+    let result = match tokio::time::timeout(
+        std::time::Duration::from_secs(8),
+        state.mpv.bind_embedded(parent),
+    )
     .await
     {
         Ok(result) => result,

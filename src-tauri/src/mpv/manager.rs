@@ -45,7 +45,7 @@ impl MpvManager {
         Ok(())
     }
 
-    pub fn bind_embedded(&self, parent: ParentHandle) -> AppResult<()> {
+    pub async fn bind_embedded(&self, parent: ParentHandle) -> AppResult<()> {
         #[cfg(feature = "mpv-embedded")]
         {
             let (existing, prefer_embedded) = {
@@ -81,9 +81,9 @@ impl MpvManager {
                 return Ok(());
             }
         }
-        let g = self.inner.read();
-        if let Some(ipc) = g.ipc.as_ref() {
-            return ipc.bind_embedded(parent);
+        let ipc = self.inner.read().ipc.clone();
+        if let Some(ipc) = ipc {
+            return ipc.bind_embedded(parent).await;
         }
         let _ = parent;
         Err(AppError::Mpv("no mpv backend available".into()))
