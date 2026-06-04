@@ -407,6 +407,7 @@ async fn spawn_mpv_ipc(
     let exe_display = exe.display().to_string();
 
     let mut args: Vec<String> = vec![
+        "--no-config".into(),
         "--idle=yes".into(),
         "--keep-open=yes".into(),
         "--no-terminal".into(),

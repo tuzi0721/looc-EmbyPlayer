@@ -1643,6 +1643,7 @@ function listTopLevelPlaybackWindows(rootPid) {
         [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
         [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
         [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
+        [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
         [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
         [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
         [DllImport("user32.dll")] public static extern IntPtr GetParent(IntPtr hWnd);
@@ -1691,12 +1692,15 @@ function listTopLevelPlaybackWindows(rootPid) {
       $length = [Win32]::GetWindowTextLength($hWnd)
       $titleBuilder = New-Object System.Text.StringBuilder([Math]::Max(1, $length + 1))
       [Win32]::GetWindowText($hWnd, $titleBuilder, $titleBuilder.Capacity) | Out-Null
+      $classBuilder = New-Object System.Text.StringBuilder(256)
+      [Win32]::GetClassName($hWnd, $classBuilder, $classBuilder.Capacity) | Out-Null
       $proc = $procById[[int]$windowPid]
       if (-not $proc) { return $true }
       $windows.Add([PSCustomObject]@{
         processId = [int]$windowPid
         processName = [string]$proc.Name
         title = $titleBuilder.ToString()
+        className = $classBuilder.ToString()
         hwnd = $hWnd.ToInt64()
         parentHwnd = [Win32]::GetParent($hWnd).ToInt64()
         style = [Win32]::GetWindowLongPtrValue($hWnd, -16)
@@ -1724,8 +1728,20 @@ function listTopLevelPlaybackWindows(rootPid) {
 
 function playbackWindowConflicts(windows) {
   const list = Array.isArray(windows) ? windows : [];
-  const externalMpv = list.filter((windowInfo) => /mpv/i.test(windowInfo.processName ?? ""));
-  const hillsWindows = list.filter((windowInfo) => String(windowInfo.title ?? "").trim() === "Hills Lite");
+  const externalMpv = list.filter((windowInfo) => {
+    const processName = String(windowInfo.processName ?? "");
+    const commandLine = String(windowInfo.commandLine ?? "");
+    const className = String(windowInfo.className ?? "");
+    return (
+      /^mpv(\.exe)?$/i.test(processName) ||
+      /[\\/]mpv[\\/]mpv\.exe/i.test(commandLine) ||
+      /hills-lite-mpv/i.test(commandLine) ||
+      /^mpv/i.test(className)
+    );
+  });
+  const hillsWindows = list.filter(
+    (windowInfo) => String(windowInfo.title ?? "").trim() === "Hills Lite" && !externalMpv.includes(windowInfo),
+  );
   return {
     externalMpv,
     hillsWindowCount: hillsWindows.length,
