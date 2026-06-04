@@ -1966,7 +1966,7 @@ async function resizeAndInspect(ws, rootPid, route, size, name) {
   return { size, nativeWindow, screenshotPath: filePath, pixels, metrics };
 }
 
-async function resizeAndMeasure(ws, rootPid, route, size) {
+async function resizeAndMeasure(ws, rootPid, route, size, captureName = null) {
   await cdpEvalAfterContextReset(ws, `
     (async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -1980,8 +1980,14 @@ async function resizeAndMeasure(ws, rootPid, route, size) {
   `);
   const nativeWindow = resizeNativeRootWindow(rootPid, size);
   if (nativeWindow) await wait(700);
+  let screenshotPath = null;
+  let pixels = null;
+  if (captureName) {
+    screenshotPath = await capture(ws, captureName);
+    pixels = analyzePng(screenshotPath);
+  }
   const metrics = await cdpEvalAfterContextReset(ws, metricsExpression({ skipPlayerState: true }));
-  return { size, nativeWindow, metrics };
+  return { size, nativeWindow, screenshotPath, pixels, metrics };
 }
 
 function summarizeLayoutEntry(entry) {
@@ -2021,6 +2027,8 @@ function summarizeLayoutEntry(entry) {
     posterCount: metrics.posterCount ?? 0,
     loadedImageCount: metrics.loadedImageCount ?? 0,
     bodyTextLength: metrics.bodyTextLength ?? 0,
+    screenshotPath: entry.screenshotPath ?? null,
+    screenshotPixelOk: entry.pixels ? pixelSampleOk(entry.pixels) : null,
   };
 }
 
@@ -3129,7 +3137,7 @@ try {
     const layoutReady = await reloadAppStoresForLayout(ws);
     stage("layout-home-start", { count: layoutSizes.length });
     for (const size of layoutSizes) {
-      home.push(await resizeAndMeasure(ws, child.pid, "/home", size));
+      home.push(await resizeAndMeasure(ws, child.pid, "/home", size, `layout-home-${size.width}x${size.height}`));
       stage("layout-home-size", size);
     }
 
@@ -3137,7 +3145,7 @@ try {
     const itemRoute = `/item/${setup.selected.id}`;
     stage("layout-detail-start", { count: layoutSizes.length });
     for (const size of layoutSizes) {
-      detail.push(await resizeAndMeasure(ws, child.pid, itemRoute, size));
+      detail.push(await resizeAndMeasure(ws, child.pid, itemRoute, size, `layout-detail-${size.width}x${size.height}`));
       stage("layout-detail-size", size);
     }
 
@@ -3146,7 +3154,7 @@ try {
     if (seriesRoute) {
       stage("layout-series-detail-start", { count: layoutSizes.length });
       for (const size of layoutSizes) {
-        seriesDetail.push(await resizeAndMeasure(ws, child.pid, seriesRoute, size));
+        seriesDetail.push(await resizeAndMeasure(ws, child.pid, seriesRoute, size, `layout-series-detail-${size.width}x${size.height}`));
         stage("layout-series-detail-size", size);
       }
     } else {
@@ -3163,8 +3171,12 @@ try {
         failures.push(`home ${entry.size.width}x${entry.size.height}: continue row not visible enough`);
       }
       const libraryVisible = hasResumeRows ? metrics.secondSectionVisible : metrics.firstSectionVisible;
-      if ((entry.size.height >= 700 || entry.size.width >= 1200) && (libraryVisible ?? 0) < 24) {
+      const requireLibraryPeek = entry.size.height >= 700 || entry.size.width >= 1200 || (entry.size.width <= 800 && entry.size.height <= 500);
+      if (requireLibraryPeek && (libraryVisible ?? 0) < 24) {
         failures.push(`home ${entry.size.width}x${entry.size.height}: library row not visible enough`);
+      }
+      if (entry.screenshotPath && !pixelSampleOk(entry.pixels)) {
+        failures.push(`home ${entry.size.width}x${entry.size.height}: screenshot is visually blank`);
       }
     }
     for (const entry of [...detail, ...seriesDetail]) {
@@ -3174,6 +3186,9 @@ try {
       if (metrics.detailTitleClipped) failures.push(`detail ${entry.size.width}x${entry.size.height}: title clipped`);
       if ((entry.size.height >= 700 || entry.size.width >= 1200) && (metrics.detailBelowVisible ?? 0) < 24) {
         failures.push(`detail ${entry.size.width}x${entry.size.height}: below-hero content not visible enough`);
+      }
+      if (entry.screenshotPath && !pixelSampleOk(entry.pixels)) {
+        failures.push(`detail ${entry.size.width}x${entry.size.height}: screenshot is visually blank`);
       }
     }
     stage("layout-metrics-complete", { ok: failures.length === 0, failures });

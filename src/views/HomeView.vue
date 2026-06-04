@@ -377,20 +377,22 @@ function gotoAddServer() {
     margin-bottom: 0;
   }
   .row-head {
+    min-height: 0;
     margin-bottom: 0;
   }
   .row-head h2 {
-    font-size: 15px;
+    font-size: 0;
+    line-height: 0;
   }
   .hscroll {
-    gap: 8px;
+    gap: 6px;
     padding-bottom: 0;
   }
   .resume-card {
-    flex-basis: 120px;
+    flex-basis: 92px;
   }
   .lib-thumb {
-    flex-basis: 64px;
+    flex-basis: 56px;
   }
   .lib-thumb__name {
     display: none;
