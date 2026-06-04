@@ -2451,8 +2451,16 @@ try {
     if (!output.ok) process.exitCode = 1;
   } else if (hitTestOnly) {
     stage("hit-test-only-start");
-    const hitTest = await cdpEvalAfterContextReset(ws, `
-      (async () => {
+    const hitTestSizes = [
+      { width: 1366, height: 768 },
+      { width: 960, height: 600 },
+      { width: 760, height: 430 },
+    ];
+    const inspectHitTestRoute = async (route, size) => {
+      const nativeWindow = resizeNativeRootWindow(child.pid, size);
+      if (nativeWindow) await wait(700);
+      const entry = await cdpEvalAfterContextReset(ws, `
+        (async () => {
         const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
         const appRouter = document.querySelector("#app")?.__vue_app__?.config?.globalProperties?.$router;
         if (!appRouter) throw new Error("mounted Vue router not found");
@@ -2486,10 +2494,9 @@ try {
             ariaLabel: node.getAttribute?.("aria-label") ?? null,
             isHeroPlay: Boolean(node.closest?.(".hero__play")),
           }));
-        const inspect = async (route) => {
-          await appRouter.push(route);
-          window.moveTo(40, 40);
-          window.resizeTo(1366, 768);
+        const inspect = async () => {
+          await appRouter.push(${JSON.stringify(route)});
+          window.scrollTo(0, 0);
           await wait(2600);
           const buttons = Array.from(document.querySelectorAll(".detail .hero__play")).map((button, index) => {
             const rect = button.getBoundingClientRect();
@@ -2537,6 +2544,7 @@ try {
             route: appRouter.currentRoute.value.fullPath,
             url: window.location.href,
             viewport: { width: window.innerWidth, height: window.innerHeight },
+            requestedSize: ${JSON.stringify(size)},
             title: document.querySelector(".hero__title")?.textContent?.replace(/\\s+/g, " ").trim() ?? null,
             hero: rectOf(".hero"),
             heroBody: rectOf(".hero__body"),
@@ -2545,24 +2553,36 @@ try {
             buttons,
           };
         };
-        return {
-          movie: await inspect(${JSON.stringify(`/item/${setup.selected.id}`)}),
-          series: ${setup.series?.id ? `await inspect(${JSON.stringify(`/item/${setup.series.id}`)})` : "null"},
-        };
-      })()
-    `, 4);
+        return inspect();
+        })()
+      `, 4);
+      return { ...entry, nativeWindow };
+    };
+    const selectedHitTestRoute = `/item/${setup.selected.id}`;
+    const seriesHitTestRoute = setup.series?.id ? `/item/${setup.series.id}` : null;
+    const hitTest = { movie: [], series: setup.series?.id ? [] : null };
+    for (const size of hitTestSizes) {
+      hitTest.movie.push(await inspectHitTestRoute(selectedHitTestRoute, size));
+      if (seriesHitTestRoute) {
+        hitTest.series.push(await inspectHitTestRoute(seriesHitTestRoute, size));
+      }
+    }
     const failures = [];
     for (const [name, entry] of Object.entries(hitTest)) {
       if (!entry) continue;
-      const playButton = entry.buttons?.[0] ?? null;
-      if (!playButton) {
-        failures.push(`${name}: play button missing`);
-        continue;
-      }
-      if (playButton.disabled) failures.push(`${name}: play button disabled`);
-      const center = playButton.points?.find((point) => point.name === "center");
-      if (!center?.hitPlayButton) {
-        failures.push(`${name}: play button center hit ${center?.hitTag ?? "none"}.${center?.hitClass ?? ""}`);
+      const entries = Array.isArray(entry) ? entry : [entry];
+      for (const sizedEntry of entries) {
+        const label = `${name} ${sizedEntry.requestedSize?.width ?? "?"}x${sizedEntry.requestedSize?.height ?? "?"}`;
+        const playButton = sizedEntry.buttons?.[0] ?? null;
+        if (!playButton) {
+          failures.push(`${label}: play button missing`);
+          continue;
+        }
+        if (playButton.disabled) failures.push(`${label}: play button disabled`);
+        const center = playButton.points?.find((point) => point.name === "center");
+        if (!center?.hitPlayButton) {
+          failures.push(`${label}: play button center hit ${center?.hitTag ?? "none"}.${center?.hitClass ?? ""}`);
+        }
       }
     }
     stage("hit-test-only-complete", { ok: failures.length === 0, failures });

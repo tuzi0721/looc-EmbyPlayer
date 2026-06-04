@@ -2567,6 +2567,7 @@ async function togglePlayed() {
   }
   .hero__body {
     top: 48px;
+    align-content: start;
   }
   .hero__title {
     font-size: clamp(24px, 3.6vw, 34px);
