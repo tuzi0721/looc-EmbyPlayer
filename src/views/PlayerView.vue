@@ -405,7 +405,10 @@ const activeServer = computed(() => {
 });
 
 function playerImageUrl(target: MediaItem, imageType: MediaImageType, maxWidth = 2200): string | null {
-  return mediaItemImageUrl(activeServer.value, target, imageType, maxWidth);
+  return mediaItemImageUrl(activeServer.value, target, imageType, maxWidth, {
+    accountId: auth.activeAccount?.id,
+    accessToken: auth.activeAccount?.accessToken,
+  });
 }
 
 const backdropUrl = computed(() => (item.value ? playerImageUrl(item.value, "Backdrop", 2600) : null));

@@ -51,6 +51,7 @@ function imageUrl(candidate: ImageCandidate | null | undefined, options: { width
   const server = serverStore.byId(acc.serverId);
   return mediaImageUrl(server, candidate.itemId, candidate.imageType, {
     accountId: acc.id,
+    accessToken: acc.accessToken,
     tag: candidate.tag,
     width: options.width,
     maxWidth: options.maxWidth,

@@ -1027,11 +1027,19 @@ async function inspectPersonalAllAccount(ws, setup, secondAccount) {
       const routeSnapshot = (route, waitedMs) => {
         const bodyText = document.body.innerText || "";
         const posterCount = document.querySelectorAll(".poster, .history-card").length;
+        const imageNodes = Array.from(document.querySelectorAll(".poster__art img, .history-card img"));
+        const loadedImageCount = imageNodes.filter((img) =>
+          img.classList.contains("loaded") && img.complete && img.naturalWidth > 0
+        ).length;
+        const brokenImageCount = imageNodes.filter((img) => img.complete && img.naturalWidth < 1).length;
         const sourceLabelCount = document.querySelectorAll(".poster__source").length;
         return {
           route,
           fullPath: appRouter.currentRoute?.value?.fullPath ?? (location.hash || location.pathname),
           posterCount,
+          imageCount: imageNodes.length,
+          loadedImageCount,
+          brokenImageCount,
           sourceLabelCount,
           errorCount: document.querySelectorAll(".empty--error, .toast--error").length,
           noAccountPrompt: /请先登录|璇峰厛鐧诲綍|user-x/i.test(bodyText),
@@ -1049,7 +1057,11 @@ async function inspectPersonalAllAccount(ws, setup, secondAccount) {
           await wait(250);
           snapshot = routeSnapshot(route, waitedMs);
           if (snapshot.errorCount > 0 || snapshot.noAccountPrompt) break;
-          if (snapshot.expectContent && snapshot.posterCount > 0) break;
+          if (
+            snapshot.expectContent &&
+            snapshot.posterCount > 0 &&
+            snapshot.loadedImageCount >= Math.min(snapshot.posterCount, 2)
+          ) break;
           if (!snapshot.expectContent && !snapshot.loadingPresent) break;
         }
         routeResults.push(snapshot);
@@ -1061,6 +1073,8 @@ async function inspectPersonalAllAccount(ws, setup, secondAccount) {
       const term = ${JSON.stringify(searchTerm)};
       let clicked = null;
       let searchPosterCount = 0;
+      let searchLoadedImageCount = 0;
+      let searchBrokenImageCount = 0;
       let searchSourceLabelCount = 0;
       let searchWaitedMs = 0;
       let searchLoadingPresent = false;
@@ -1083,12 +1097,17 @@ async function inspectPersonalAllAccount(ws, setup, secondAccount) {
           await wait(250);
           const bodyText = document.body.innerText || "";
           searchPosterCount = document.querySelectorAll(".aggregate-section .poster").length;
+          const searchImages = Array.from(document.querySelectorAll(".aggregate-section .poster__art img"));
+          searchLoadedImageCount = searchImages.filter((img) =>
+            img.classList.contains("loaded") && img.complete && img.naturalWidth > 0
+          ).length;
+          searchBrokenImageCount = searchImages.filter((img) => img.complete && img.naturalWidth < 1).length;
           searchSourceLabelCount = document.querySelectorAll(".aggregate-section .poster__source").length;
           searchLoadingPresent = /搜索中|鎼滅储涓|loader/i.test(bodyText);
           searchEmptyPresent = Boolean(document.querySelector(".aggregate-section .empty--compact"));
           searchInputValue = input.value;
           searchWaitedMs = waitedMs;
-          if (searchPosterCount > 0) break;
+          if (searchPosterCount > 0 && searchLoadedImageCount >= Math.min(searchPosterCount, 2)) break;
           if (!searchLoadingPresent && searchEmptyPresent && waitedMs >= 1500) break;
         }
         const posters = Array.from(document.querySelectorAll(".poster"));
@@ -1121,6 +1140,8 @@ async function inspectPersonalAllAccount(ws, setup, secondAccount) {
         search: {
           attempted: Boolean(input && term),
           posterCount: searchPosterCount,
+          loadedImageCount: searchLoadedImageCount,
+          brokenImageCount: searchBrokenImageCount,
           sourceLabelCount: searchSourceLabelCount,
           waitedMs: searchWaitedMs,
           loadingPresent: searchLoadingPresent,
@@ -1135,6 +1156,7 @@ async function inspectPersonalAllAccount(ws, setup, secondAccount) {
   stage("personal-ui-routes-complete", {
     routes: ui?.routes?.length ?? null,
     searchPosterCount: ui?.search?.posterCount ?? null,
+    searchLoadedImageCount: ui?.search?.loadedImageCount ?? null,
     clickedPath: ui?.clicked?.path ?? null,
   });
 
@@ -1160,9 +1182,17 @@ async function inspectPersonalAllAccount(ws, setup, secondAccount) {
     if (route.expectContent && route.sourceLabelCount < 1) {
       failures.push(`${route.route}: rendered personal-media cards without source labels`);
     }
+    if (route.expectContent && route.loadedImageCount < Math.min(route.posterCount, 2)) {
+      failures.push(`${route.route}: visible cards did not load images`);
+    }
+    if (route.brokenImageCount > 0) failures.push(`${route.route}: rendered broken image elements`);
   }
   if (!ui?.search?.attempted) failures.push("aggregate UI search was not attempted");
   if ((ui?.search?.posterCount ?? 0) < 1) failures.push("aggregate UI search rendered no result cards");
+  if ((ui?.search?.loadedImageCount ?? 0) < Math.min(ui?.search?.posterCount ?? 0, 2)) {
+    failures.push("aggregate UI search result images did not load");
+  }
+  if ((ui?.search?.brokenImageCount ?? 0) > 0) failures.push("aggregate UI search rendered broken image elements");
   if ((ui?.search?.sourceLabelCount ?? 0) < 1) failures.push("aggregate UI search rendered no source labels");
   if (!ui?.clicked?.path?.startsWith("/item/")) failures.push("clicking aggregate search result did not open an item detail route");
   if (!ui?.clicked?.queryAccount || !ui?.clicked?.queryServer) failures.push("clicked personal-media result did not preserve account/server query");

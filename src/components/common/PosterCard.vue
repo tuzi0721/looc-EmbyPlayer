@@ -39,10 +39,16 @@ const resolvedAspect = computed<PosterAspect>(() => {
   return "portrait";
 });
 
+const imageAccount = computed(() => {
+  const sourceAccountId = props.item._source?.accountId;
+  if (sourceAccountId) return auth.accounts.find((account) => account.id === sourceAccountId) ?? null;
+  return auth.activeAccount;
+});
+
 const activeServer = computed(() => {
   const sourceServerId = props.item._source?.serverId;
   if (sourceServerId) return serverStore.byId(sourceServerId) ?? null;
-  const acc = auth.activeAccount;
+  const acc = imageAccount.value;
   if (!acc) return null;
   return serverStore.byId(acc.serverId) ?? null;
 });
@@ -109,7 +115,8 @@ const imageUrl = computed(() => {
   if (!candidate) return null;
   const maxWidth = resolvedAspect.value === "backdrop" ? "640" : "320";
   return mediaImageUrl(server, candidate.itemId, candidate.imageType, {
-    accountId: props.item._source?.accountId,
+    accountId: props.item._source?.accountId ?? imageAccount.value?.id,
+    accessToken: imageAccount.value?.accessToken,
     maxWidth,
     quality: 82,
     format: "webp",

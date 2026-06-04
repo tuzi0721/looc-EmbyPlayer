@@ -4,6 +4,7 @@ export type MediaImageType = "Primary" | "Backdrop" | "Thumb" | "Logo";
 
 export interface MediaImageOptions {
   accountId?: string | null;
+  accessToken?: string | null;
   tag?: string | null;
   maxWidth?: number | string | null;
   width?: number | string | null;
@@ -38,7 +39,10 @@ function imageParams(options: MediaImageOptions): URLSearchParams {
 }
 
 function hasElectronImageCache(): boolean {
-  return typeof window !== "undefined" && Boolean(window.hillsLite);
+  if (typeof window === "undefined" || !window.hillsLite) return false;
+  if (window.__TAURI_INTERNALS__ || window.__TAURI__ || window.__TAURI_IPC__) return false;
+  const { hostname, protocol } = window.location;
+  return hostname !== "tauri.localhost" && protocol !== "tauri:";
 }
 
 export function mediaImageUrl(
@@ -65,6 +69,7 @@ export function mediaImageUrl(
   }
 
   const sep = line.baseUrl.endsWith("/") ? "" : "/";
+  appendParam(params, "api_key", options.accessToken);
   const query = params.toString();
   return `${line.baseUrl}${sep}Items/${encodeURIComponent(itemId)}/Images/${imageType}${query ? `?${query}` : ""}`;
 }
@@ -74,6 +79,7 @@ export function mediaItemImageUrls(
   item: MediaItem | null | undefined,
   imageType: MediaImageType = "Backdrop",
   maxWidth = 1600,
+  options: Pick<MediaImageOptions, "accountId" | "accessToken"> = {},
 ): string[] {
   if (!item) return [];
   const allowParent = item.Type === "Episode";
@@ -123,7 +129,8 @@ export function mediaItemImageUrls(
   return candidates
     .map((candidate) =>
       mediaImageUrl(server, candidate.itemId, candidate.imageType, {
-        accountId: item._source?.accountId,
+        accountId: options.accountId ?? item._source?.accountId,
+        accessToken: options.accessToken,
         maxWidth,
         quality: 82,
         format: "webp",
@@ -138,6 +145,7 @@ export function mediaItemImageUrl(
   item: MediaItem | null | undefined,
   imageType: MediaImageType = "Backdrop",
   maxWidth = 1600,
+  options: Pick<MediaImageOptions, "accountId" | "accessToken"> = {},
 ): string | null {
-  return mediaItemImageUrls(server, item, imageType, maxWidth)[0] ?? null;
+  return mediaItemImageUrls(server, item, imageType, maxWidth, options)[0] ?? null;
 }

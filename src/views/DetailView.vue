@@ -224,6 +224,8 @@ function itemImageUrl(
   maxWidth = 1600,
 ): string | null {
   return mediaImageUrl(activeServer.value, itemId, imageType, {
+    accountId: routeAccount.value?.id,
+    accessToken: routeAccount.value?.accessToken,
     maxWidth,
     quality: 82,
     format: "webp",
@@ -252,11 +254,19 @@ function imageUrl(
   imageType: MediaImageType = "Backdrop",
   maxWidth = 1600,
 ): string | null {
-  return mediaItemImageUrl(activeServer.value, target, imageType, maxWidth);
+  return mediaItemImageUrl(activeServer.value, target, imageType, maxWidth, {
+    accountId: routeAccount.value?.id,
+    accessToken: routeAccount.value?.accessToken,
+  });
 }
 
 const backdropUrls = computed(() =>
-  item.value ? mediaItemImageUrls(activeServer.value, item.value, "Backdrop", 2200) : [],
+  item.value
+    ? mediaItemImageUrls(activeServer.value, item.value, "Backdrop", 2200, {
+        accountId: routeAccount.value?.id,
+        accessToken: routeAccount.value?.accessToken,
+      })
+    : [],
 );
 const backdropUrl = computed(() => {
   const urls = backdropUrls.value;

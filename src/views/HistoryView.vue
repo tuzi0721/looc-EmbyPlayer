@@ -206,6 +206,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadHistory());
             <PosterCard
               :item="item"
               aspect="portrait"
+              eager
               :activate-handler="openItem"
             />
             <div class="history-card__meta">
