@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::Arc,
+    time::Duration,
 };
 
 use chrono::Local;
@@ -203,6 +204,7 @@ const MAX_LOCAL_FOLDER_VIDEOS: usize = 500;
 const MAX_LOCAL_NFO_BYTES: u64 = 256 * 1024;
 const RANGE_BROKEN_MP4_ERROR: &str = "无法本机直连播放：这个 MP4/MOV 源所在服务器不支持 HTTP Range，且文件开头没有可流式播放的索引。Hills Lite 已阻止黑屏起播，并且不会请求服务器解码/转码。请先下载到本地后播放，或换一个支持 Range/已 faststart 处理的媒体源或线路。";
 const STREAM_PROBE_ERROR: &str = "无法本机直连播放：播放流连接或 Range 探测失败。Hills Lite 已阻止继续进入黑屏起播，并且不会请求服务器解码/转码。请稍后重试、切换线路，或先下载到本地后播放。";
+const MPV_READY_ERROR: &str = "无法本机直连播放：mpv 已接收到播放流，但没有在本机解析出可播放的媒体轨道。Hills Lite 已阻止黑屏起播，并且不会请求服务器解码/转码。请切换支持 HTTP Range 的线路，或先下载到本地后播放。";
 
 #[derive(Debug, Clone)]
 struct LocalPosterCandidate {
@@ -294,6 +296,19 @@ struct PlaybackLineSelection {
     range_supported: bool,
 }
 
+struct PlaybackLineChoice {
+    selected: PlaybackLineSelection,
+    fallbacks: Vec<PlaybackLineSelection>,
+}
+
+struct ReadyPlaybackLine {
+    selection: PlaybackLineSelection,
+    mpv_url: String,
+    effective_mpv_start_ms: Option<i64>,
+    start_suppressed_nonseekable: bool,
+    start_fallback_zero: bool,
+}
+
 fn playback_line_candidates(server: &Server, line_id: Option<&str>) -> AppResult<Vec<Line>> {
     if let Some(id) = line_id.filter(|id| !id.trim().is_empty()) {
         let line = server
@@ -365,9 +380,10 @@ async fn select_playback_line(
     play_session_id: &str,
     prefer_direct: bool,
     line_id: Option<&str>,
-) -> AppResult<PlaybackLineSelection> {
+) -> AppResult<PlaybackLineChoice> {
     let candidates = playback_line_candidates(server, line_id)?;
-    let mut first_nonseekable: Option<PlaybackLineSelection> = None;
+    let mut seekable: Vec<PlaybackLineSelection> = Vec::new();
+    let mut nonseekable: Vec<PlaybackLineSelection> = Vec::new();
     let mut saw_range_probe_error = false;
     let mut saw_range_broken_mp4 = false;
 
@@ -414,10 +430,11 @@ async fn select_playback_line(
 
         if range_supported {
             log_visual_player_stage(&format!(
-                "play:range-probe-selected id={} supported=true",
+                "play:range-probe-candidate id={} supported=true",
                 selection.line.id
             ));
-            return Ok(selection);
+            seekable.push(selection);
+            continue;
         }
 
         if source_requires_streamable_mp4_prefix(source) {
@@ -454,17 +471,44 @@ async fn select_playback_line(
             }
         }
 
-        if first_nonseekable.is_none() {
-            first_nonseekable = Some(selection);
-        }
+        nonseekable.push(selection);
     }
 
-    if let Some(selection) = first_nonseekable {
+    if !seekable.is_empty() {
+        let mut seekable = seekable.into_iter();
+        let selection = seekable
+            .next()
+            .expect("seekable candidates checked as non-empty");
+        let mut fallbacks: Vec<PlaybackLineSelection> = seekable.collect();
+        fallbacks.extend(nonseekable);
         log_visual_player_stage(&format!(
-            "play:range-probe-selected id={} supported=false",
-            selection.line.id
+            "play:range-probe-selected id={} supported=true fallbacks={}",
+            selection.line.id,
+            fallbacks.len()
         ));
-        return Ok(selection);
+        return Ok(PlaybackLineChoice {
+            selected: selection,
+            fallbacks,
+        });
+    }
+
+    nonseekable.sort_by_key(|selection| {
+        (
+            selection.line.priority,
+            selection.line.last_latency_ms.unwrap_or(u32::MAX),
+        )
+    });
+    let mut nonseekable = nonseekable.into_iter();
+    if let Some(selection) = nonseekable.next() {
+        log_visual_player_stage(&format!(
+            "play:range-probe-selected id={} supported=false fallbacks={}",
+            selection.line.id,
+            nonseekable.len()
+        ));
+        return Ok(PlaybackLineChoice {
+            selected: selection,
+            fallbacks: nonseekable.collect(),
+        });
     }
 
     if saw_range_broken_mp4 {
@@ -657,7 +701,7 @@ pub async fn play(
     };
     log_visual_player_stage("play:source-selected");
 
-    let selected_line = select_playback_line(
+    let line_choice = select_playback_line(
         &state,
         &server,
         &account,
@@ -669,13 +713,6 @@ pub async fn play(
     )
     .await?;
     log_visual_player_stage("play:stream-url-ready");
-    let PlaybackLineSelection {
-        line,
-        url,
-        headers,
-        user_agent,
-        range_supported,
-    } = selected_line;
     let play_method = source.local_decode_play_method().to_string();
     let tracks = source.media_streams.iter().map(stream_to_track).collect();
     let media_sources = pb
@@ -684,51 +721,8 @@ pub async fn play(
         .enumerate()
         .map(|(index, candidate)| media_source_result(candidate, index, &source.id))
         .collect();
-    let lines = server
-        .lines
-        .iter()
-        .map(|candidate| PlaybackLineOptionResult {
-            id: candidate.id.clone(),
-            name: candidate.name.clone(),
-            base_url: candidate.base_url.clone(),
-            enabled: candidate.enabled,
-            status: candidate.last_status,
-            latency_ms: candidate.last_latency_ms,
-            selected: candidate.id == line.id,
-        })
-        .collect();
-
-    log_visual_player_stage(&format!("play:range-probe supported={range_supported}"));
-    let mpv_url = state
-        .stream_proxy
-        .register_with_range_support(
-            url.clone(),
-            headers.clone(),
-            user_agent.clone(),
-            range_supported,
-        )
-        .await?;
-    log_visual_player_stage("play:stream-proxy-ready");
 
     let requested_start_ms = payload.start_ms;
-    let start_suppressed_nonseekable =
-        !range_supported && requested_start_ms.unwrap_or_default() > 0;
-    let mpv_start_ms = if start_suppressed_nonseekable {
-        log_visual_player_stage(&format!(
-            "play:start-suppressed-nonseekable requested_ms={}",
-            requested_start_ms.unwrap_or_default()
-        ));
-        tracing::info!(
-            target = "player",
-            requested_start_ms = requested_start_ms.unwrap_or_default(),
-            "suppressed resume start because selected line is not range-seekable"
-        );
-        None
-    } else {
-        requested_start_ms
-    };
-
-    let mut record_task_id: Option<String> = None;
     let stream_record_path = if payload.record_while_playing {
         let dir = state.downloads.download_dir()?;
         let safe = item
@@ -746,8 +740,50 @@ pub async fn play(
             uuid::Uuid::new_v4().simple(),
             container
         ));
-        let path_str = path.to_string_lossy().to_string();
+        Some(path.to_string_lossy().to_string())
+    } else {
+        None
+    };
 
+    let backend = state.mpv.backend();
+    let ready_line = load_ready_playback_line(
+        &state,
+        &backend,
+        line_choice,
+        requested_start_ms,
+        stream_record_path.clone(),
+    )
+    .await?;
+    let ReadyPlaybackLine {
+        selection:
+            PlaybackLineSelection {
+                line,
+                url,
+                range_supported,
+                ..
+            },
+        mpv_url,
+        effective_mpv_start_ms,
+        start_suppressed_nonseekable,
+        start_fallback_zero,
+    } = ready_line;
+
+    let lines = server
+        .lines
+        .iter()
+        .map(|candidate| PlaybackLineOptionResult {
+            id: candidate.id.clone(),
+            name: candidate.name.clone(),
+            base_url: candidate.base_url.clone(),
+            enabled: candidate.enabled,
+            status: candidate.last_status,
+            latency_ms: candidate.last_latency_ms,
+            selected: candidate.id == line.id,
+        })
+        .collect();
+
+    let mut record_task_id: Option<String> = None;
+    if let Some(path_str) = stream_record_path.clone() {
         let mut task = crate::download::DownloadTask::new(crate::download::DownloadTaskRequest {
             server_id: server.id.clone(),
             account_id: account.id.clone(),
@@ -755,7 +791,7 @@ pub async fn play(
             media_source_id: source.id.clone(),
             play_session_id: pb.play_session_id.clone(),
             title: item.name.clone(),
-            file_path: path_str.clone(),
+            file_path: path_str,
             stream_url: url.to_string(),
             container: source.container.clone(),
             total_bytes: source.size.map(|s| s as u64),
@@ -766,37 +802,17 @@ pub async fn play(
         // downloads view shows it correctly; mpv events update the file on
         // disk and the user can resume from local file later.
         task.status = crate::download::DownloadStatus::Running;
-        record_task_id = Some(task.id.clone());
-        state.config.upsert_download(task)?;
-        Some(path_str)
-    } else {
-        None
-    };
-
-    let backend = state.mpv.backend();
-    log_visual_player_stage("play:mpv-stop-before-load-start");
-    if let Err(error) = backend.execute(MpvCommand::Stop).await {
-        log_visual_player_stage(&format!(
-            "play:mpv-stop-before-load-error {}",
-            sanitize_visual_error(&error.to_string())
-        ));
-        tracing::debug!(target = "player", error = %error, "mpv stop before load failed");
-    } else {
-        log_visual_player_stage("play:mpv-stop-before-load-complete");
+        let task_id = task.id.clone();
+        if let Err(error) = state.config.upsert_download(task) {
+            log_visual_player_stage(&format!(
+                "play:record-task-error {}",
+                sanitize_visual_error(&error.to_string())
+            ));
+            let _ = backend.execute(MpvCommand::Stop).await;
+            return Err(error);
+        }
+        record_task_id = Some(task_id);
     }
-    log_visual_player_stage("play:mpv-load-start");
-    backend
-        .execute(MpvCommand::Load {
-            url: mpv_url.clone(),
-            headers: Vec::new(),
-            user_agent: None,
-            start_ms: mpv_start_ms,
-            http_seekable: Some(range_supported),
-            stream_record_path,
-            autoload_subtitles: true,
-        })
-        .await?;
-    log_visual_player_stage("play:mpv-load-complete");
 
     let settings = state.config.settings();
     let subtitle_style = SubtitleStyle {
@@ -844,8 +860,9 @@ pub async fn play(
         },
         "rangeSupported": range_supported,
         "requestedStartMs": requested_start_ms,
-        "mpvStartMs": mpv_start_ms,
+        "mpvStartMs": effective_mpv_start_ms,
         "startSuppressedNonSeekable": start_suppressed_nonseekable,
+        "startFallbackZero": start_fallback_zero,
     });
 
     let result = PlaybackSourceResult {
@@ -868,6 +885,294 @@ pub async fn play(
     };
     log_visual_player_stage("play:return");
     Ok(result)
+}
+
+async fn load_ready_playback_line(
+    state: &AppState,
+    backend: &Arc<dyn MpvBackend>,
+    choice: PlaybackLineChoice,
+    requested_start_ms: Option<i64>,
+    stream_record_path: Option<String>,
+) -> AppResult<ReadyPlaybackLine> {
+    let mut attempts = Vec::with_capacity(choice.fallbacks.len() + 1);
+    attempts.push(choice.selected);
+    attempts.extend(choice.fallbacks);
+
+    let mut last_error: Option<AppError> = None;
+    for (attempt_index, selection) in attempts.into_iter().enumerate() {
+        let line_id = selection.line.id.clone();
+        let range_supported = selection.range_supported;
+        log_visual_player_stage(&format!(
+            "play:mpv-line-attempt-start id={} attempt={} range={range_supported}",
+            line_id,
+            attempt_index + 1
+        ));
+
+        let mpv_url = match state
+            .stream_proxy
+            .register_with_range_support(
+                selection.url.clone(),
+                selection.headers.clone(),
+                selection.user_agent.clone(),
+                range_supported,
+            )
+            .await
+        {
+            Ok(url) => url,
+            Err(error) => {
+                log_visual_player_stage(&format!(
+                    "play:stream-proxy-line-error id={} {}",
+                    line_id,
+                    sanitize_visual_error(&error.to_string())
+                ));
+                last_error = Some(error);
+                continue;
+            }
+        };
+        log_visual_player_stage(&format!("play:stream-proxy-ready id={line_id}"));
+
+        let start_suppressed_nonseekable =
+            !range_supported && requested_start_ms.unwrap_or_default() > 0;
+        let mut effective_mpv_start_ms = if start_suppressed_nonseekable {
+            log_visual_player_stage(&format!(
+                "play:start-suppressed-nonseekable id={} requested_ms={}",
+                line_id,
+                requested_start_ms.unwrap_or_default()
+            ));
+            tracing::info!(
+                target = "player",
+                line_id = %line_id,
+                requested_start_ms = requested_start_ms.unwrap_or_default(),
+                "suppressed resume start because selected line is not range-seekable"
+            );
+            None
+        } else {
+            requested_start_ms
+        };
+
+        log_visual_player_stage(&format!("play:mpv-stop-before-load-start id={line_id}"));
+        if let Err(error) = backend.execute(MpvCommand::Stop).await {
+            log_visual_player_stage(&format!(
+                "play:mpv-stop-before-load-error id={} {}",
+                line_id,
+                sanitize_visual_error(&error.to_string())
+            ));
+            tracing::debug!(target = "player", error = %error, "mpv stop before load failed");
+        } else {
+            log_visual_player_stage(&format!("play:mpv-stop-before-load-complete id={line_id}"));
+        }
+
+        log_visual_player_stage(&format!("play:mpv-load-start id={line_id}"));
+        if let Err(error) = backend
+            .execute(MpvCommand::Load {
+                url: mpv_url.clone(),
+                headers: Vec::new(),
+                user_agent: None,
+                start_ms: effective_mpv_start_ms,
+                http_seekable: Some(range_supported),
+                stream_record_path: stream_record_path.clone(),
+                autoload_subtitles: true,
+            })
+            .await
+        {
+            log_visual_player_stage(&format!(
+                "play:mpv-load-error id={} {}",
+                line_id,
+                sanitize_visual_error(&error.to_string())
+            ));
+            let _ = backend.execute(MpvCommand::Stop).await;
+            last_error = Some(error);
+            continue;
+        }
+        log_visual_player_stage(&format!("play:mpv-load-complete id={line_id}"));
+        log_visual_player_stage(&format!("play:mpv-ready-wait-start id={line_id}"));
+        match wait_for_loaded_mpv_state(backend, Duration::from_secs(18)).await {
+            Ok(_) => {
+                log_visual_player_stage(&format!("play:mpv-ready-wait-complete id={line_id}"));
+                return Ok(ReadyPlaybackLine {
+                    selection,
+                    mpv_url,
+                    effective_mpv_start_ms,
+                    start_suppressed_nonseekable,
+                    start_fallback_zero: false,
+                });
+            }
+            Err(error) if effective_mpv_start_ms.is_some() && stream_record_path.is_none() => {
+                log_visual_player_stage(&format!(
+                    "play:mpv-ready-wait-error id={} {}",
+                    line_id,
+                    sanitize_visual_error(&error.to_string())
+                ));
+                log_visual_player_stage(&format!("play:mpv-retry-zero-start id={line_id}"));
+                let _ = backend.execute(MpvCommand::Stop).await;
+                effective_mpv_start_ms = None;
+                if let Err(retry_load_error) = backend
+                    .execute(MpvCommand::Load {
+                        url: mpv_url.clone(),
+                        headers: Vec::new(),
+                        user_agent: None,
+                        start_ms: effective_mpv_start_ms,
+                        http_seekable: Some(range_supported),
+                        stream_record_path: None,
+                        autoload_subtitles: true,
+                    })
+                    .await
+                {
+                    log_visual_player_stage(&format!(
+                        "play:mpv-retry-zero-load-error id={} {}",
+                        line_id,
+                        sanitize_visual_error(&retry_load_error.to_string())
+                    ));
+                    let _ = backend.execute(MpvCommand::Stop).await;
+                    last_error = Some(retry_load_error);
+                    continue;
+                }
+                log_visual_player_stage(&format!("play:mpv-retry-zero-load-complete id={line_id}"));
+                match wait_for_loaded_mpv_state(backend, Duration::from_secs(18)).await {
+                    Ok(_) => {
+                        log_visual_player_stage(&format!(
+                            "play:mpv-retry-zero-complete id={line_id}"
+                        ));
+                        return Ok(ReadyPlaybackLine {
+                            selection,
+                            mpv_url,
+                            effective_mpv_start_ms,
+                            start_suppressed_nonseekable,
+                            start_fallback_zero: true,
+                        });
+                    }
+                    Err(retry_error) => {
+                        log_visual_player_stage(&format!(
+                            "play:mpv-retry-zero-error id={} {}",
+                            line_id,
+                            sanitize_visual_error(&retry_error.to_string())
+                        ));
+                        let _ = backend.execute(MpvCommand::Stop).await;
+                        last_error = Some(retry_error);
+                    }
+                }
+            }
+            Err(error) => {
+                log_visual_player_stage(&format!(
+                    "play:mpv-ready-wait-error id={} {}",
+                    line_id,
+                    sanitize_visual_error(&error.to_string())
+                ));
+                let _ = backend.execute(MpvCommand::Stop).await;
+                last_error = Some(error);
+            }
+        }
+
+        log_visual_player_stage(&format!("play:mpv-line-attempt-failed id={line_id}"));
+    }
+
+    Err(playback_ready_error(last_error.unwrap_or_else(|| {
+        AppError::InvalidState("no playback line became ready".into())
+    })))
+}
+
+async fn wait_for_loaded_mpv_state(
+    backend: &Arc<dyn MpvBackend>,
+    max_wait: Duration,
+) -> AppResult<MpvSnapshot> {
+    let deadline = tokio::time::Instant::now() + max_wait;
+    let mut last_error: Option<String> = None;
+    let mut last_unready: Option<String> = None;
+
+    loop {
+        match tokio::time::timeout(Duration::from_millis(1300), backend.snapshot()).await {
+            Ok(Ok(snapshot)) => {
+                if mpv_snapshot_has_media(&snapshot) {
+                    return Ok(snapshot);
+                }
+                last_unready = Some(mpv_snapshot_unready_detail(&snapshot));
+            }
+            Ok(Err(error)) => {
+                last_error = Some(error.to_string());
+            }
+            Err(_) => {
+                last_error = Some("mpv state timed out".into());
+            }
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(450)).await;
+    }
+
+    let detail = last_unready
+        .or(last_error)
+        .unwrap_or_else(|| "no mpv state returned".into());
+    Err(AppError::Mpv(format!(
+        "mpv did not become ready after load: {detail}"
+    )))
+}
+
+fn mpv_snapshot_has_media(snapshot: &MpvSnapshot) -> bool {
+    let url_present = snapshot
+        .url
+        .as_deref()
+        .is_some_and(|url| !url.trim().is_empty());
+    let has_track = !snapshot.tracks.is_empty();
+    let has_stream_shape = snapshot.duration_ms > 0
+        || snapshot
+            .video_codec
+            .as_deref()
+            .is_some_and(|value| !value.is_empty())
+        || snapshot
+            .audio_codec
+            .as_deref()
+            .is_some_and(|value| !value.is_empty())
+        || snapshot.video_params.is_some()
+        || snapshot.video_out_params.is_some()
+        || snapshot.audio_params.is_some()
+        || snapshot
+            .demuxer
+            .as_deref()
+            .is_some_and(|value| !value.is_empty())
+        || snapshot
+            .file_format
+            .as_deref()
+            .is_some_and(|value| !value.is_empty());
+    let not_idle = snapshot.idle_active != Some(true);
+    url_present && not_idle && !snapshot.eof && (has_track || has_stream_shape)
+}
+
+fn mpv_snapshot_unready_detail(snapshot: &MpvSnapshot) -> String {
+    format!(
+        "urlPresent={} idle={} eof={} durationMs={} tracks={} videoCodec={} audioCodec={} demuxer={} format={}",
+        snapshot
+            .url
+            .as_deref()
+            .is_some_and(|url| !url.trim().is_empty()),
+        snapshot
+            .idle_active
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "unknown".into()),
+        snapshot.eof,
+        snapshot.duration_ms,
+        snapshot.tracks.len(),
+        snapshot.video_codec.as_deref().unwrap_or("none"),
+        snapshot.audio_codec.as_deref().unwrap_or("none"),
+        snapshot.demuxer.as_deref().unwrap_or("none"),
+        snapshot.file_format.as_deref().unwrap_or("none"),
+    )
+}
+
+fn playback_ready_error(error: AppError) -> AppError {
+    AppError::InvalidState(format!(
+        "{MPV_READY_ERROR}\n\n诊断：{}",
+        strip_error_prefix(&error.to_string())
+    ))
+}
+
+fn strip_error_prefix(message: &str) -> String {
+    message
+        .strip_prefix("mpv error: ")
+        .or_else(|| message.strip_prefix("invalid state: "))
+        .unwrap_or(message)
+        .to_string()
 }
 
 fn pick_local_media_source(

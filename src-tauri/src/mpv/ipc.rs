@@ -121,7 +121,12 @@ impl MpvIpcBackend {
         }
 
         let settings = self.settings.clone();
-        let wid = self.host.lock().as_ref().map(|h| h.wid());
+        let wid = self.host.lock().as_ref().map(|h| h.wid()).ok_or_else(|| {
+            AppError::Mpv(
+                "embedded mpv host is not attached; refusing to launch standalone mpv window"
+                    .into(),
+            )
+        })?;
         let (child, reader, writer) = spawn_mpv_ipc(&settings, wid).await?;
         let (cmd_tx, cmd_rx) = mpsc::channel::<OutgoingCommand>(64);
         let inner_ref = self.inner.clone();
@@ -392,7 +397,7 @@ impl MpvIpcBackend {
 
 async fn spawn_mpv_ipc(
     settings: &AppSettings,
-    wid: Option<i64>,
+    wid: i64,
 ) -> AppResult<(
     Child,
     Box<dyn AsyncRead + Unpin + Send>,
@@ -408,12 +413,8 @@ async fn spawn_mpv_ipc(
         "--msg-level=all=warn".into(),
     ];
 
-    if let Some(wid) = wid {
-        args.push(format!("--wid={wid}"));
-        args.push("--force-window=no".into());
-    } else {
-        args.push("--force-window=yes".into());
-    }
+    args.push(format!("--wid={wid}"));
+    args.push("--force-window=no".into());
     args.push("--title=Hills Lite".into());
 
     if settings.hardware_decoding {

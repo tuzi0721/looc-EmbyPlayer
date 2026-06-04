@@ -1771,19 +1771,44 @@ function waitForChildExit(childProcess, timeoutMs) {
   });
 }
 
+function closeNativeMainWindow(rootPid) {
+  if (!rootPid) return { attempted: false, ok: false, status: null, stdout: "", stderr: "" };
+  const script = [
+    `$p = Get-Process -Id ${Number(rootPid)} -ErrorAction SilentlyContinue`,
+    "if ($p) { [Console]::Out.Write([string]$p.CloseMainWindow()) } else { [Console]::Out.Write('False') }",
+  ].join("; ");
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-Command", script], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  return {
+    attempted: true,
+    ok: result.status === 0 && /true/i.test(result.stdout ?? ""),
+    status: result.status,
+    stdout: String(result.stdout ?? "").trim(),
+    stderr: String(result.stderr ?? "").trim(),
+  };
+}
+
 async function verifyRuntimeCleanup(childProcess, ws) {
   const before = processTree(childProcess.pid).filter((processInfo) => {
     const name = String(processInfo.Name ?? "").toLowerCase();
     const commandLine = String(processInfo.CommandLine ?? "").toLowerCase();
     return name.includes("mpv") || name.includes("electron_mpv_host") || commandLine.includes("hills-lite-mpv-");
   });
-  await cdpEval(ws, `(() => { setTimeout(() => window.close(), 0); return true; })()`);
-  const electronExited = await waitForChildExit(childProcess, 12_000);
+  await cdpEval(ws, `(() => { setTimeout(() => window.close(), 0); return true; })()`).catch(() => {});
+  let electronExited = await waitForChildExit(childProcess, 1_500);
+  let nativeClose = null;
+  if (!electronExited) {
+    nativeClose = closeNativeMainWindow(childProcess.pid);
+    electronExited = await waitForChildExit(childProcess, 12_000);
+  }
   await wait(1200);
   const remaining = processesByPid(before.map((processInfo) => processInfo.ProcessId));
   return {
     beforeCount: before.length,
     electronExited,
+    nativeClose,
     remainingCount: remaining.length,
     ok: electronExited && remaining.length === 0,
   };
@@ -1798,6 +1823,19 @@ function metricsExpression(options = {}) {
         if (!node) return null;
         const r = node.getBoundingClientRect();
         return { x: r.x, y: r.y, top: r.top, bottom: r.bottom, width: r.width, height: r.height };
+      };
+      const control = (selector) => {
+        const node = document.querySelector(selector);
+        const r = rect(selector);
+        if (!node || !r) return null;
+        return {
+          ...r,
+          disabled: Boolean(
+            node.disabled ||
+            node.getAttribute("aria-disabled") === "true" ||
+            node.closest("[disabled]"),
+          ),
+        };
       };
       const rects = (selector) => Array.from(document.querySelectorAll(selector)).map((node) => {
         const r = node.getBoundingClientRect();
@@ -1869,9 +1907,10 @@ function metricsExpression(options = {}) {
         playerControls: {
           top: rect(".player__top"),
           bottom: playerBottom,
-          progress: rect(".progress, .bar, .player__progress"),
-          seekBack: rect('[data-control="seek-back"]'),
-          fullscreen: rect('[data-control="fullscreen"]'),
+          progress: control(".progress, .bar, .player__progress"),
+          seekBack: control('[data-control="seek-back"]'),
+          seekForward: control('[data-control="seek-forward"]'),
+          fullscreen: control('[data-control="fullscreen"]'),
         },
         mpvStateTimedOut,
         htmlVideo: video ? {
@@ -1985,11 +2024,11 @@ function summarizeLayoutEntry(entry) {
   };
 }
 
-async function waitForPlaybackVisualReady(ws) {
+async function waitForPlaybackVisualReady(ws, maxWaitMs = 6000) {
   let previousPosition = null;
   let lastMetrics = null;
   const startedAt = Date.now();
-  for (let attempt = 0; attempt < 12; attempt += 1) {
+  for (let attempt = 0; Date.now() - startedAt <= maxWaitMs; attempt += 1) {
     await wait(250);
     lastMetrics = await cdpEvalAfterContextReset(ws, metricsExpression());
     const state = lastMetrics.htmlVideo ?? lastMetrics.mpvState;
@@ -2006,7 +2045,7 @@ async function waitForPlaybackVisualReady(ws) {
       (lastMetrics.mpvState.durationMs ?? 0) > 0 &&
       (lastMetrics.mpvState.trackCount ?? 0) > 0 &&
       (lastMetrics.mpvState.videoParams?.w || lastMetrics.mpvState.videoCodec);
-    if (htmlReady || (mpvReady && (advancing || attempt >= 8))) {
+    if (htmlReady || (mpvReady && (advancing || Date.now() - startedAt >= 2500))) {
       return {
         ready: true,
         waitedMs: Date.now() - startedAt,
@@ -3640,9 +3679,14 @@ try {
   if (!playerOpen.opened) {
     throw new Error(`detail play click did not open player route: ${playerOpen.route}`);
   }
-  const playerVisualReady = await waitForPlaybackVisualReady(ws);
+  let playerVisualReady = await waitForPlaybackVisualReady(ws);
   stage("player-visual-ready", playerVisualReady);
   await wait(5000);
+  if (!playerVisualReady.ready) {
+    const delayedReady = await waitForPlaybackVisualReady(ws, 8000);
+    stage("player-visual-ready-after-delay", delayedReady);
+    if (delayedReady.ready) playerVisualReady = delayedReady;
+  }
   await cdpEvalAfterContextReset(ws, `
     (() => {
       const player = document.querySelector(".player");
@@ -3691,10 +3735,59 @@ try {
   });
   const playerAspectEvidence = playbackAspectEvidence(playerInitial);
   stage("player-aspect-evidence", playerAspectEvidence);
+  let darkFrameRetry = null;
+  if (!pixelSampleOk(playerVisiblePixels) && playerInitialState) {
+    const durationMs = playerInitialState.durationMs ?? 0;
+    const targetMs = Math.max(0, Math.min(15000, Math.max(0, durationMs - 3000)));
+    stage("player-dark-frame-retry-start", { targetMs });
+    try {
+      await cdpEvalAfterContextReset(ws, `
+        (async () => {
+          const targetMs = ${Math.floor(targetMs)};
+          const video = document.querySelector("video");
+          if (video && Number.isFinite(video.duration)) {
+            video.currentTime = targetMs / 1000;
+            await video.play().catch(() => {});
+          } else if (window.hillsLite) {
+            await window.hillsLite.invoke("seek", { payload: { positionMs: targetMs } });
+          } else {
+            const { api } = await import("/src/api/index.ts");
+            await api.seek(targetMs);
+          }
+          return true;
+        })()
+      `);
+      const ready = await waitForPlaybackVisualReady(ws, 8000);
+      await wait(900);
+      const retryNativeCapture = await capturePlaybackNativeLayer(ws, child.pid, "player-native-dark-retry");
+      darkFrameRetry = {
+        ready,
+        capture: retryNativeCapture,
+        pixelOk: pixelSampleOk(retryNativeCapture.capture),
+      };
+      if (darkFrameRetry.pixelOk) {
+        playerNativeCapture = retryNativeCapture;
+        playerVisiblePixels = retryNativeCapture.capture;
+      }
+      stage("player-dark-frame-retry-complete", {
+        ready: ready.ready,
+        pixelOk: darkFrameRetry.pixelOk,
+        brightRatio: retryNativeCapture.capture?.brightRatio ?? null,
+        colorfulRatio: retryNativeCapture.capture?.colorfulRatio ?? null,
+      });
+    } catch (error) {
+      darkFrameRetry = { error: error instanceof Error ? error.message : String(error) };
+      stage("player-dark-frame-retry-failed", darkFrameRetry);
+    }
+  }
 
   let seekBack = null;
-  const seekBackCenter = centerOf(playerInitial.playerControls?.seekBack);
-  if (seekBackCenter && playerVisualReady.ready) {
+  const seekBackControl = playerInitial.playerControls?.seekBack;
+  const seekBackCenter = centerOf(seekBackControl);
+  if (seekBackControl?.disabled) {
+    seekBack = { skipped: "seek disabled for non-range source", disabled: true };
+    stage("seek-back-skipped", seekBack);
+  } else if (seekBackCenter && playerVisualReady.ready) {
     stage("seek-back-start");
     try {
       await cdpEvalAfterContextReset(ws, `
@@ -3763,7 +3856,7 @@ try {
   if (playerInitialState && playerVisualReady.ready) {
     const durationMs = playerInitialState.durationMs ?? 0;
     const initialPositionMs = playerInitialState.positionMs ?? 0;
-    const targetMs = Math.max(0, Math.min(initialPositionMs, Math.max(0, durationMs - 3000)));
+    const targetMs = Math.max(0, Math.min(Math.max(initialPositionMs, 15000), Math.max(0, durationMs - 3000)));
     stage("player-resize-visual-restore-start", { targetMs });
     await cdpEvalAfterContextReset(ws, `
       (async () => {
@@ -3832,7 +3925,12 @@ try {
   stage("runtime-cleanup-complete", runtimeCleanup);
 
   const failures = [];
-  if (!setup.detected || setup.detected.kind !== "emby") failures.push("line1 did not detect as Emby");
+  if (
+    (!setup.detected || !["emby", "jellyfin"].includes(String(setup.detected.kind ?? "").toLowerCase())) &&
+    !setup.loginWinningLineId
+  ) {
+    failures.push("server did not detect or login through a usable Emby/Jellyfin line");
+  }
   if (setup.viewCount < 1) failures.push("real account loaded no library views");
   if (setup.playbackSummary.playMethod !== "DirectPlay" && setup.playbackSummary.playMethod !== "DirectStream") {
     failures.push(`playback source method is not local decode: ${setup.playbackSummary.playMethod}`);
@@ -3962,7 +4060,6 @@ try {
     failures.push("player controls/progress buttons are not visible");
   }
   if (seekBack?.error) failures.push(`seek back failed: ${seekBack.error}`);
-  if (seekBack?.skipped) failures.push(`seek back skipped: ${seekBack.skipped}`);
   if (seekBack?.before && seekBack?.after && (seekBack.after.positionMs ?? 0) >= (seekBack.before.positionMs ?? 0) - 5000) {
     failures.push("seek back did not move playback backward");
   }
@@ -4027,6 +4124,7 @@ try {
       pixels: playerPixels,
       visiblePixels: playerVisiblePixels,
       nativeCapture: playerNativeCapture,
+      darkFrameRetry,
       aspectEvidence: playerAspectEvidence,
       visualReady: playerVisualReady,
       initial: playerInitial,

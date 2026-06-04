@@ -1473,11 +1473,6 @@ async function nudgeSeek(deltaSec: number) {
     bumpControls();
     return;
   }
-  if (!useHtmlVideo) {
-    await player.seekRelative(deltaSec * 1000);
-    bumpControls();
-    return;
-  }
   await seekToMs(positionMs.value + deltaSec * 1000);
   bumpControls();
 }
