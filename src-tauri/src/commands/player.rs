@@ -388,16 +388,79 @@ fn playback_headers_for_line(
     (user_agent, headers)
 }
 
-/// Ordered candidate stream URLs to probe for a line: the configured path
-/// first, then an `/emby`-prefixed variant. Some Emby reverse proxies only
-/// pass HTTP Range and disable buffering under the `/emby/` location, so the
-/// bare path returns `200` (no Range) while `/emby/...` returns `206`.
-fn stream_url_candidates(primary: &Url) -> Vec<Url> {
-    let mut out = vec![primary.clone()];
-    if let Some(emby) = with_emby_prefix(primary) {
-        out.push(emby);
+/// Ordered candidate stream URLs to probe for a line. Emby/Jellyfin servers
+/// differ in how they expose the stream (root vs `/emby/` subfolder vs a custom
+/// base), and reverse proxies often only pass HTTP Range under one location.
+/// We therefore probe, in order:
+///   1. the server-provided `DirectStreamUrl` (authoritative per Emby's
+///      Playback Guidelines), and its `/emby` variant,
+///   2. our synthesized `/Videos/{id}/stream.ext`, and its `/emby` variant,
+/// then pick the first candidate that returns `206` (skipping `404`/errors).
+fn stream_url_candidates(
+    primary: &Url,
+    source: &MediaSource,
+    base_url: &str,
+    access_token: &str,
+) -> Vec<Url> {
+    let mut out: Vec<Url> = Vec::new();
+    let mut push = |url: Url| {
+        if !out.iter().any(|existing| existing.as_str() == url.as_str()) {
+            out.push(url);
+        }
+    };
+
+    if let Some(direct) = source
+        .direct_stream_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if let Some(url) = prepare_direct_stream_url(
+            base_url,
+            direct,
+            source.add_api_key_to_direct_stream_url,
+            access_token,
+        ) {
+            if let Some(emby) = with_emby_prefix(&url) {
+                push(url.clone());
+                push(emby);
+            } else {
+                push(url);
+            }
+        }
     }
+
+    if let Some(emby) = with_emby_prefix(primary) {
+        push(primary.clone());
+        push(emby);
+    } else {
+        push(primary.clone());
+    }
+
     out
+}
+
+/// Resolve a `DirectStreamUrl` (absolute or relative to the line base) and add
+/// the api key when the server asks for it (`AddApiKeyToDirectStreamUrl`, or by
+/// default when no token is present in the URL).
+fn prepare_direct_stream_url(
+    base_url: &str,
+    direct: &str,
+    add_api_key: Option<bool>,
+    access_token: &str,
+) -> Option<Url> {
+    let mut url = match Url::parse(direct) {
+        Ok(url) => url,
+        Err(_) => Url::parse(base_url).ok()?.join(direct).ok()?,
+    };
+    let has_token = url.query_pairs().any(|(key, _)| {
+        key.eq_ignore_ascii_case("api_key") || key.eq_ignore_ascii_case("x-emby-token")
+    });
+    let wants_key = add_api_key.unwrap_or(true) && !has_token && !access_token.is_empty();
+    if wants_key {
+        url.query_pairs_mut().append_pair("api_key", access_token);
+    }
+    Some(url)
 }
 
 fn with_emby_prefix(url: &Url) -> Option<Url> {
@@ -439,7 +502,8 @@ async fn select_playback_line(
             Some(&line.id),
         )?;
         let (user_agent, headers) = playback_headers_for_line(server, account, &line);
-        let url_candidates = stream_url_candidates(&primary);
+        let url_candidates =
+            stream_url_candidates(&primary, source, &line.base_url, &account.access_token);
 
         // Per-line: try each candidate URL (configured path + `/emby` variant).
         // Reverse proxies sometimes only pass HTTP Range / disable buffering on

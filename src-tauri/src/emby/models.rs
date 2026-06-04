@@ -473,6 +473,8 @@ pub struct MediaSource {
     pub path: Option<String>,
     #[serde(default, deserialize_with = "optional_string")]
     pub direct_stream_url: Option<String>,
+    #[serde(default, deserialize_with = "optional_bool")]
+    pub add_api_key_to_direct_stream_url: Option<bool>,
     #[serde(default, deserialize_with = "null_to_default")]
     pub media_streams: Vec<MediaStream>,
 }
