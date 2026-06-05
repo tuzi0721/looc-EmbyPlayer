@@ -2010,7 +2010,7 @@ async function togglePlayed() {
   pointer-events: none;
   background:
     linear-gradient(90deg, rgba(10, 10, 12, 0.82) 0%, rgba(10, 10, 12, 0.3) 43%, rgba(10, 10, 12, 0.14) 100%),
-    linear-gradient(0deg, rgba(10, 10, 12, 0.9) 0%, rgba(10, 10, 12, 0.42) 34%, rgba(10, 10, 12, 0.05) 72%);
+    linear-gradient(0deg, var(--bg-base) 0%, rgba(10, 10, 12, 0.5) 26%, rgba(10, 10, 12, 0.06) 64%);
 }
 .hero__back {
   position: absolute;
@@ -2263,10 +2263,20 @@ async function togglePlayed() {
 .hero__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
   margin-top: 10px;
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+}
+.hero__meta span {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--r-pill, 999px);
+  white-space: nowrap;
 }
 .hero__studios {
   position: relative;
