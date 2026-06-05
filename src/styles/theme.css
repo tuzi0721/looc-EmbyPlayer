@@ -1,16 +1,37 @@
 :root {
-  /* iOS-like base palette (dark) */
-  --bg-base: #0a0a0c;
+  /* Cinematic dark base (default, primary theme) */
+  --bg-base: #0b0b0f;
   --bg-elevated: rgba(28, 28, 32, 0.7);
   --bg-overlay: rgba(0, 0, 0, 0.25);
 
-  --fg-primary: rgba(255, 255, 255, 0.92);
-  --fg-secondary: rgba(255, 255, 255, 0.62);
-  --fg-tertiary: rgba(255, 255, 255, 0.42);
+  --fg-primary: rgba(255, 255, 255, 0.95);
+  --fg-secondary: rgba(255, 255, 255, 0.66);
+  --fg-tertiary: rgba(255, 255, 255, 0.45);
   --fg-quaternary: rgba(255, 255, 255, 0.18);
 
   --separator: rgba(255, 255, 255, 0.08);
   --separator-strong: rgba(255, 255, 255, 0.14);
+
+  /* Spacing scale (4/8 based) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-12: 48px;
+
+  /* Radius scale */
+  --r-card: 14px;
+  --r-lg: 20px;
+  --r-pill: 999px;
+
+  /* Elevation */
+  --shadow-card: 0 14px 40px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 18px 48px rgba(0, 0, 0, 0.55);
+
+  /* Ambient color extracted from current backdrop (falls back to accent). */
+  --ambient: #a855f7;
 
   /* Hills Lite purple accent */
   --accent: #a855f7;
@@ -88,6 +109,10 @@
   --glass-border: rgba(15, 23, 42, 0.15);
   --glass-border-strong: rgba(15, 23, 42, 0.24);
   --glass-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
+
+  --shadow-card: 0 12px 30px rgba(15, 23, 42, 0.14);
+  --shadow-pop: 0 16px 40px rgba(15, 23, 42, 0.18);
+  --ambient: #7c3aed;
 
   --line-unknown: rgba(0, 0, 0, 0.32);
 

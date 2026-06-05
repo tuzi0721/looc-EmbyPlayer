@@ -310,6 +310,23 @@ function gotoAggregate() {
 .nav-btn.active {
   background: var(--accent-soft);
   color: var(--accent);
+  font-weight: 600;
+}
+/* Left accent indicator on the active nav item. */
+.nav-btn.active::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+}
+.sb.is-collapsed .nav-btn.active::before {
+  left: 4px;
+  height: 50%;
 }
 .sb.is-collapsed .nav-btn {
   justify-content: center;

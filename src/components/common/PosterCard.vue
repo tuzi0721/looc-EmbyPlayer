@@ -205,14 +205,19 @@ function activate() {
 .poster__art {
   position: relative;
   overflow: hidden;
-  border-radius: 14px;
+  border-radius: var(--r-card);
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--glass-border);
-  transition: transform 240ms var(--easing-spring), box-shadow 240ms var(--easing-glide);
+  transition: transform 260ms var(--easing-spring), box-shadow 260ms var(--easing-glide);
 }
-.poster:hover .poster__art {
-  transform: translateY(-3px) scale(1.02);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+.poster:hover .poster__art,
+.poster:focus-visible .poster__art {
+  transform: translateY(-4px) scale(1.04);
+  box-shadow: var(--shadow-pop);
+  border-color: var(--glass-border-strong);
+}
+.poster:focus-visible {
+  outline: none;
 }
 .poster--portrait .poster__art {
   aspect-ratio: 2 / 3;
@@ -268,7 +273,7 @@ function activate() {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: rgba(10, 132, 255, 0.9);
+  background: var(--accent);
   display: grid;
   place-items: center;
   color: white;
