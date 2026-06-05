@@ -1477,7 +1477,15 @@ async function nudgeSeek(deltaSec: number) {
     bumpControls();
     return;
   }
-  await seekToMs(positionMs.value + deltaSec * 1000);
+  if (useHtmlVideo && videoEl.value) {
+    // The <video> element holds the true current position.
+    await seekToMs(videoEl.value.currentTime * 1000 + deltaSec * 1000);
+  } else {
+    // Native mpv: seek relative to mpv's REAL current position instead of the
+    // store's cached `positionMs`, which can be stale right after a programmatic
+    // seek or a resume, causing a nudge to jump to the wrong absolute target.
+    await player.seekRelative(deltaSec * 1000);
+  }
   bumpControls();
 }
 

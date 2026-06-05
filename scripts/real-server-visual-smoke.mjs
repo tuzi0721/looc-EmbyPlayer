@@ -3319,10 +3319,16 @@ try {
   stage("personal-routes-complete", { count: routes.length });
 
   stage("search-start");
+  // Emby search returns Movies/Series, not Episodes by their episode title, so
+  // for an episode selection search the parent series name (which is indexed).
+  const searchableName =
+    setup.selected?.type === "Episode" && setup.series?.name
+      ? setup.series.name
+      : setup.selected?.name ?? "";
   const search = await cdpEvalAfterContextReset(ws, `
     (async () => {
       const invoke = window.hillsLite?.invoke?.bind(window.hillsLite);
-      const term = ${JSON.stringify(setup.selected?.name ?? "")};
+      const term = ${JSON.stringify(searchableName)};
       let results = [];
       if (term && invoke) {
         const response = await invoke("search_all_accounts", { term });
