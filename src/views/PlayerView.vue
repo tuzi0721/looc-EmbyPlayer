@@ -453,6 +453,18 @@ const bufferedMs = computed(() =>
 const buffering = computed(() =>
   useHtmlVideo ? htmlBuffering.value : player.snapshot?.buffering ?? false,
 );
+// Whether real video is on screen yet (used to show a loading overlay during
+// the initial prepare/buffer wait instead of a blank black screen).
+const playbackHasFrame = computed(() => {
+  if (useHtmlVideo) return htmlHasFrame.value;
+  const s = player.snapshot;
+  if (!s) return false;
+  const hasMedia = (s.durationMs ?? 0) > 0 || (s.tracks?.length ?? 0) > 0;
+  return hasMedia && s.idleActive !== true;
+});
+const showLoadingOverlay = computed(
+  () => !errorText.value && !cachingActive.value && !playbackHasFrame.value,
+);
 const danmakuMergedAway = computed(() =>
   Math.max(0, danmakuRawCount.value - danmakuComments.value.length),
 );
@@ -2431,6 +2443,11 @@ onBeforeUnmount(async () => {
         </div>
       </transition>
 
+      <div v-if="showLoadingOverlay" class="player__spinner">
+        <Icon icon="lucide:loader-circle" width="38" class="player__spinner-icon" />
+        <span>加载中…</span>
+      </div>
+
       <div v-if="cachingActive && !errorText" class="player__caching glass glass-strong">
         <Icon icon="lucide:download-cloud" width="26" />
         <h3>正在缓存以便播放</h3>
@@ -3185,6 +3202,29 @@ onBeforeUnmount(async () => {
   font-size: 12px;
 }
 
+.player__spinner {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  margin: auto;
+  pointer-events: none;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
+}
+.player__spinner-icon {
+  animation: player-spin 0.9s linear infinite;
+}
+@keyframes player-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .player__caching {
   position: absolute;
   inset: 0;
