@@ -1262,8 +1262,12 @@ function onPlayerPointerMove(event: PointerEvent) {
 function bumpControls() {
   showControls.value = true;
   scheduleEmbedRectLayoutSync();
-  if (embedVideo) return;
   clearControlsHideTimer();
+  // Embedded native video: only auto-hide controls in fullscreen. In a normal
+  // window we keep them, because hiding them resizes the reserved video area.
+  // HTML video always auto-hides like a normal player.
+  const embedAutoHide = embedVideo && (nativeFullscreen.value || documentFullscreen.value);
+  if (embedVideo && !embedAutoHide) return;
   hideTimer = window.setTimeout(() => {
     if (!hasOpenPlayerPanel()) showControls.value = false;
   }, 3200);
@@ -1598,6 +1602,7 @@ async function toggleFullscreen() {
       nativeFullscreen.value = await api.setFullscreen(next);
       await syncSecondaryDisplayBlackout();
       scheduleEmbedRectSync();
+      bumpControls();
       return;
     } catch {
       nativeFullscreen.value = false;
@@ -2343,7 +2348,7 @@ onBeforeUnmount(async () => {
 <template>
   <main
     class="player"
-    :class="{ 'player--embedded': embedVideo }"
+    :class="{ 'player--embedded': embedVideo, 'player--hide-cursor': !showControls }"
     @mousemove="bumpControls"
     @pointerdown="onPlayerPointerDown"
     @pointermove="onPlayerPointerMove"
@@ -2970,6 +2975,11 @@ onBeforeUnmount(async () => {
    app surface opaque so Windows composition cannot leak desktop pixels. */
 .player--embedded {
   background: #000;
+}
+/* Hide the cursor when player controls are auto-hidden (fullscreen playback). */
+.player--hide-cursor,
+.player--hide-cursor * {
+  cursor: none !important;
 }
 .player__stage {
   position: absolute;
