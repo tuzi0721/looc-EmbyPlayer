@@ -1666,7 +1666,10 @@ function currentEmbedRect() {
   if (bottomControls) {
     const controlsRect = bottomControls.getBoundingClientRect();
     if (controlsRect.top < bottom && controlsRect.bottom > top) {
-      bottom = Math.max(top + 1, Math.min(bottom, controlsRect.top));
+      // Reserve a few extra px above the control bar so the native mpv window
+      // never overlaps the draggable progress bar (which sits at the very top
+      // of the control bar), keeping it clickable/draggable.
+      bottom = Math.max(top + 1, Math.min(bottom, controlsRect.top - 6));
     }
   }
   const width = Math.max(1, Math.round(rect.width));
@@ -1840,7 +1843,15 @@ async function teardownEmbeddedVideoHost(options: { hide?: boolean } = {}) {
   await withTimeout(api.embedDetach(), 4500, "embedded mpv host detach timed out");
 }
 
-watch(showControls, () => scheduleEmbedRectLayoutSync());
+watch(showControls, async () => {
+  if (!embedVideo) return;
+  // Resize the native window promptly when controls appear/disappear so the
+  // freshly shown control bar is immediately clear of the native window (the
+  // progress bar becomes draggable without a lag), and the video fills the
+  // stage again as soon as controls hide.
+  await nextTick();
+  await syncEmbedRect().catch((error) => console.warn(error));
+});
 
 const playerShortcutHandlers: Record<PlayerShortcutAction, () => void | Promise<void>> = {
   "toggle-play": togglePlay,
@@ -3317,6 +3328,15 @@ onBeforeUnmount(async () => {
   padding: 0 var(--player-edge-x);
   z-index: 5;
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.55), transparent);
+}
+/* Embedded native playback reserves the header's height as a dead strip above
+   the video, so keep that strip narrow to maximize the visible video area. */
+.player--embedded .player__top {
+  min-height: 40px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.6), transparent);
+}
+.player--embedded .player__top .player__title h2 {
+  font-size: 13px;
 }
 .player__top-inner {
   width: 100%;
