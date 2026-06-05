@@ -129,15 +129,62 @@ function episodeSubtitle(item: MediaItem): string | null {
   return parts.length ? parts.join(" · ") : null;
 }
 
-function metaLine(item: MediaItem): string {
-  const parts: string[] = [];
-  if (item.Type === "Series") parts.push("剧集");
-  if (item.Type === "Movie") parts.push("电影");
-  if (item.Type === "Episode") parts.push("剧集");
-  if (item.CommunityRating != null) parts.push(`★ ${item.CommunityRating.toFixed(1)}`);
-  if (item.ProductionYear) parts.push(String(item.ProductionYear));
-  if (item.OfficialRating) parts.push(item.OfficialRating);
-  return parts.join(" · ");
+function formatRuntime(item: MediaItem): string | null {
+  const ticks = item.RunTimeTicks ?? 0;
+  if (!ticks) return null;
+  const totalMin = Math.round(ticks / 10_000_000 / 60);
+  if (totalMin <= 0) return null;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h}h${m > 0 ? ` ${m}m` : ""}` : `${m}分钟`;
+}
+
+const resumeMs = computed(() => {
+  const ticks = current.value?.UserData?.PlaybackPositionTicks ?? 0;
+  return ticks > 0 ? Math.floor(ticks / 10_000) : 0;
+});
+const resumePct = computed(() => Math.round(current.value?.UserData?.PlayedPercentage ?? 0));
+const isResume = computed(() => resumeMs.value > 0 && resumePct.value > 0 && resumePct.value < 100);
+const playable = computed(
+  () => current.value?.Type === "Movie" || current.value?.Type === "Episode",
+);
+const primaryLabel = computed(() => (isResume.value ? "继续观看" : "播放"));
+
+const heroPills = computed<string[]>(() => {
+  const item = current.value;
+  if (!item) return [];
+  const pills: string[] = [];
+  if (item.Type === "Series") pills.push("剧集");
+  else if (item.Type === "Movie") pills.push("电影");
+  else if (item.Type === "Episode") pills.push("单集");
+  if (item.ProductionYear) pills.push(String(item.ProductionYear));
+  if (item.CommunityRating != null) pills.push(`★ ${item.CommunityRating.toFixed(1)}`);
+  if (item.OfficialRating) pills.push(item.OfficialRating);
+  const rt = formatRuntime(item);
+  if (rt) pills.push(rt);
+  if (isResume.value) pills.push(`已看 ${resumePct.value}%`);
+  return pills;
+});
+
+async function primaryAction() {
+  const item = current.value;
+  if (!item) return;
+  if (!playable.value) {
+    openItem();
+    return;
+  }
+  const accountId = item._source?.accountId;
+  if (accountId && auth.activeId !== accountId) {
+    try {
+      await auth.switchTo(accountId);
+    } catch {
+      // Best-effort account switch; the player route guards context again.
+    }
+  }
+  const query: Record<string, string> = { start: String(resumeMs.value) };
+  if (item._source?.serverId) query.server = item._source.serverId;
+  if (item._source?.accountId) query.account = item._source.accountId;
+  router.push({ path: `/player/${encodeURIComponent(item.Id)}`, query }).catch(() => {});
 }
 
 function prev() {
@@ -216,8 +263,20 @@ onUnmounted(() => {
         {{ displayTitle(current) }}
       </h2>
       <p v-if="episodeSubtitle(current)" class="hero__episode">{{ episodeSubtitle(current) }}</p>
-      <p v-if="metaLine(current)" class="hero__meta">{{ metaLine(current) }}</p>
+      <div v-if="heroPills.length" class="hero__pills">
+        <span v-for="(pill, i) in heroPills" :key="i" class="hero__pill">{{ pill }}</span>
+      </div>
       <p v-if="current.Overview" class="hero__desc">{{ current.Overview }}</p>
+      <div class="hero__actions">
+        <button class="hero__play" type="button" @click.stop="primaryAction">
+          <Icon :icon="isResume ? 'lucide:rotate-ccw' : 'lucide:play'" width="18" />
+          <span>{{ primaryLabel }}</span>
+        </button>
+        <button class="hero__detail" type="button" @click.stop="openItem">
+          <Icon icon="lucide:info" width="17" />
+          <span>详情</span>
+        </button>
+      </div>
     </div>
     <div v-if="items.length > 1" class="hero__dots">
       <button
@@ -358,10 +417,65 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.hero__meta {
-  margin: 0 0 8px;
+.hero__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.hero__pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.75);
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--r-pill, 999px);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  white-space: nowrap;
+}
+.hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+.hero__play,
+.hero__detail {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 22px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: var(--r-pill, 999px);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: transform 160ms var(--easing-spring), background 160ms var(--easing-glide),
+    box-shadow 160ms var(--easing-glide);
+}
+.hero__play {
+  color: #0b0b0f;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.hero__play:hover {
+  transform: translateY(-1px) scale(1.02);
+  background: #fff;
+}
+.hero__detail {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.hero__detail:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.26);
 }
 .hero__desc {
   margin: 0;
@@ -482,8 +596,11 @@ onUnmounted(() => {
   .hero--cinema .hero__title {
     font-size: clamp(30px, 4.1vw, 42px);
   }
-  .hero__meta {
-    margin-bottom: 6px;
+  .hero__pills {
+    margin-bottom: 8px;
+  }
+  .hero__actions {
+    margin-top: 10px;
   }
   .hero--cinema .hero__desc {
     max-width: 58ch;
@@ -515,7 +632,7 @@ onUnmounted(() => {
   .hero--cinema .hero__title {
     font-size: clamp(24px, 3.8vw, 32px);
   }
-  .hero__meta,
+  .hero__pills,
   .hero--cinema .hero__desc {
     display: none;
   }
