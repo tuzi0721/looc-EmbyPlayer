@@ -13,6 +13,7 @@ import { useServerStore } from "@/stores/server";
 import { useSettingsStore } from "@/stores/settings";
 import type { MediaItem, MediaPerson, MediaSourceInfo, MediaStreamInfo, NameIdPair, UserData } from "@/types/models";
 import { writeTextToClipboard } from "@/utils/clipboard";
+import { extractDominantColor, rgbToCss } from "@/utils/dominantColor";
 import { filterJavItems } from "@/utils/javFilter";
 import { mediaImageUrl, mediaItemImageUrl, mediaItemImageUrls, type MediaImageType } from "@/utils/mediaImages";
 
@@ -278,6 +279,25 @@ function onHeroBackdropError() {
     heroBackdropIndex.value += 1;
   }
 }
+
+// Immersive ambient: tint the page with the backdrop's dominant color (falls
+// back to the theme accent when extraction is blocked, e.g. no CORS).
+const ambientColor = ref<string | null>(null);
+const ambientStyle = computed(() => ({
+  "--detail-ambient": ambientColor.value ?? "var(--ambient)",
+}));
+watch(
+  backdropUrl,
+  async (url) => {
+    ambientColor.value = null;
+    if (!url) return;
+    const rgb = await extractDominantColor(url);
+    if (rgb && backdropUrl.value === url) {
+      ambientColor.value = rgbToCss(rgb);
+    }
+  },
+  { immediate: true },
+);
 
 const runtimeText = computed(() => {
   const ticks = item.value?.RunTimeTicks ?? 0;
@@ -1452,7 +1472,7 @@ async function togglePlayed() {
 </script>
 
 <template>
-  <main class="detail">
+  <main class="detail" :style="ambientStyle">
     <div v-if="loading && !item" class="detail__loading">
       <Icon icon="lucide:loader" width="24" class="spin" />
       <span>{{ loadStage || "加载中…" }}</span>
@@ -1901,7 +1921,18 @@ async function togglePlayed() {
   width: 100%;
   height: 100%;
   overflow-y: auto;
-  background: var(--surface-1);
+  position: relative;
+  /* Immersive ambient: a soft glow tinted with the backdrop's dominant color
+     (falls back to the theme accent) layered over the base surface. The
+     gradient is painted on the scroll container so it stays as a top ambient
+     while content scrolls over it. */
+  background:
+    radial-gradient(
+      150% 680px at 50% 2%,
+      color-mix(in srgb, var(--detail-ambient, var(--ambient)) 26%, transparent),
+      transparent 66%
+    ),
+    var(--surface-1);
 }
 .detail__loading {
   height: 100%;
@@ -2011,6 +2042,25 @@ async function togglePlayed() {
   background:
     linear-gradient(90deg, rgba(10, 10, 12, 0.82) 0%, rgba(10, 10, 12, 0.3) 43%, rgba(10, 10, 12, 0.14) 100%),
     linear-gradient(0deg, var(--bg-base) 0%, rgba(10, 10, 12, 0.5) 26%, rgba(10, 10, 12, 0.06) 64%);
+}
+/* Subtle cinematic entrance for the hero content. */
+@keyframes detail-hero-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.hero__main {
+  animation: detail-hero-rise 460ms var(--easing-spring) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero__main {
+    animation: none;
+  }
 }
 .hero__back {
   position: absolute;
