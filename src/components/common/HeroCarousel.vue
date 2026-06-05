@@ -338,6 +338,14 @@ onUnmounted(() => {
     ),
     linear-gradient(0deg, rgba(0, 0, 0, 0.82) 0%, rgba(0, 0, 0, 0.12) 48%);
 }
+/* Light theme: show the backdrop's real colors; only a soft bottom-left
+   gradient keeps the title/actions legible instead of a full dark mask. */
+:root[data-theme="light"] .hero__shade,
+:root[data-theme="light"] .hero--cinema .hero__shade {
+  background:
+    linear-gradient(90deg, rgba(8, 10, 16, 0.52) 0%, rgba(8, 10, 16, 0.16) 40%, transparent 70%),
+    linear-gradient(0deg, rgba(8, 10, 16, 0.46) 0%, rgba(8, 10, 16, 0.08) 42%, transparent 60%);
+}
 .hero__nav {
   position: absolute;
   top: 50%;

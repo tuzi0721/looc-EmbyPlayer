@@ -2043,6 +2043,13 @@ async function togglePlayed() {
     linear-gradient(90deg, rgba(10, 10, 12, 0.82) 0%, rgba(10, 10, 12, 0.3) 43%, rgba(10, 10, 12, 0.14) 100%),
     linear-gradient(0deg, var(--bg-base) 0%, rgba(10, 10, 12, 0.5) 26%, rgba(10, 10, 12, 0.06) 64%);
 }
+/* Light theme: keep the backdrop's real colors vibrant — only a soft
+   bottom/left gradient for text legibility, and fade the bottom into the page. */
+:root[data-theme="light"] .hero__shade {
+  background:
+    linear-gradient(90deg, rgba(8, 10, 16, 0.5) 0%, rgba(8, 10, 16, 0.12) 34%, transparent 64%),
+    linear-gradient(0deg, var(--bg-base) 0%, rgba(8, 10, 16, 0.22) 22%, transparent 50%);
+}
 /* Subtle cinematic entrance for the hero content. */
 @keyframes detail-hero-rise {
   from {

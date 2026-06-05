@@ -4,11 +4,10 @@ import { useRoute, useRouter } from "vue-router";
 
 import TopBar from "./components/common/TopBar.vue";
 import AppSidebar from "./components/common/AppSidebar.vue";
-import WindowTitleBar from "./components/common/WindowTitleBar.vue";
 import NotificationCenter from "./components/common/NotificationCenter.vue";
 import ToastStack from "./components/common/ToastStack.vue";
 import { api } from "./api";
-import { hasNativeRuntime, listen, platformType } from "./platform";
+import { listen, platformType } from "./platform";
 import { useAuthStore } from "./stores/auth";
 import { useDownloadsStore } from "./stores/downloads";
 import { useNotificationsStore } from "./stores/notifications";
@@ -30,9 +29,6 @@ const mobileSidebarExpanded = ref(false);
 const viewportWidth = ref(1280);
 
 const isFullscreen = computed(() => Boolean(route.meta?.fullscreen));
-// Custom window chrome (undecorated window). Hidden on the immersive player
-// route so playback stays full-bleed.
-const showWindowChrome = computed(() => hasNativeRuntime() && !isFullscreen.value);
 const autoSidebarCollapsed = computed(() => viewportWidth.value < 900);
 const effectiveSidebarCollapsed = computed(() =>
   autoSidebarCollapsed.value ? !mobileSidebarExpanded.value : desktopSidebarCollapsed.value,
@@ -188,7 +184,6 @@ onBeforeUnmount(() => {
     :class="{ 'is-fullscreen': isFullscreen, 'sidebar-overlay-open': sidebarOverlayOpen }"
   >
     <div class="app-backdrop" />
-    <WindowTitleBar v-if="showWindowChrome" />
     <div class="app-body" :class="{ 'is-fullscreen': isFullscreen }">
       <AppSidebar
         v-if="!isFullscreen"
