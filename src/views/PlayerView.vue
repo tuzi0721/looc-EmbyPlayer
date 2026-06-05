@@ -1263,13 +1263,13 @@ function bumpControls() {
   showControls.value = true;
   scheduleEmbedRectLayoutSync();
   clearControlsHideTimer();
-  // Embedded native video: only auto-hide controls in fullscreen. In a normal
-  // window we keep them, because hiding them resizes the reserved video area.
-  // HTML video always auto-hides like a normal player.
-  const embedAutoHide = embedVideo && (nativeFullscreen.value || documentFullscreen.value);
-  if (embedVideo && !embedAutoHide) return;
+  // Auto-hide controls during playback (both windowed and fullscreen). For
+  // embedded native video this lets the native window grow to fill the stage
+  // when controls hide, so the video is large instead of squeezed between the
+  // reserved control bars. Keep controls while paused or a panel is open.
+  if (paused.value || hasOpenPlayerPanel()) return;
   hideTimer = window.setTimeout(() => {
-    if (!hasOpenPlayerPanel()) showControls.value = false;
+    if (!hasOpenPlayerPanel() && !paused.value) showControls.value = false;
   }, 3200);
 }
 
