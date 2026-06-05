@@ -4,10 +4,11 @@ import { useRoute, useRouter } from "vue-router";
 
 import TopBar from "./components/common/TopBar.vue";
 import AppSidebar from "./components/common/AppSidebar.vue";
+import WindowTitleBar from "./components/common/WindowTitleBar.vue";
 import NotificationCenter from "./components/common/NotificationCenter.vue";
 import ToastStack from "./components/common/ToastStack.vue";
 import { api } from "./api";
-import { listen, platformType } from "./platform";
+import { hasNativeRuntime, listen, platformType } from "./platform";
 import { useAuthStore } from "./stores/auth";
 import { useDownloadsStore } from "./stores/downloads";
 import { useNotificationsStore } from "./stores/notifications";
@@ -29,6 +30,9 @@ const mobileSidebarExpanded = ref(false);
 const viewportWidth = ref(1280);
 
 const isFullscreen = computed(() => Boolean(route.meta?.fullscreen));
+// Custom window chrome (undecorated window). Hidden on the immersive player
+// route so playback stays full-bleed.
+const showWindowChrome = computed(() => hasNativeRuntime() && !isFullscreen.value);
 const autoSidebarCollapsed = computed(() => viewportWidth.value < 900);
 const effectiveSidebarCollapsed = computed(() =>
   autoSidebarCollapsed.value ? !mobileSidebarExpanded.value : desktopSidebarCollapsed.value,
@@ -184,29 +188,32 @@ onBeforeUnmount(() => {
     :class="{ 'is-fullscreen': isFullscreen, 'sidebar-overlay-open': sidebarOverlayOpen }"
   >
     <div class="app-backdrop" />
-    <AppSidebar
-      v-if="!isFullscreen"
-      class="app-sidebar"
-      :collapsed="effectiveSidebarCollapsed"
-      :overlay="sidebarOverlayOpen"
-      @toggle-collapsed="toggleSidebarCollapsed"
-    />
-    <button
-      v-if="sidebarOverlayOpen"
-      class="sidebar-scrim"
-      type="button"
-      aria-label="关闭侧栏"
-      @click="closeSidebarOverlay"
-    />
-    <div class="app-right" :class="{ 'is-fullscreen': isFullscreen }">
-      <TopBar v-if="!isFullscreen" />
-      <main class="app-main">
-      <router-view v-slot="{ Component, route: r }">
-        <transition :name="(r.meta?.transition as string) || 'fade'" mode="out-in">
-          <component :is="Component" :key="r.fullPath" />
-        </transition>
-      </router-view>
-    </main>
+    <WindowTitleBar v-if="showWindowChrome" />
+    <div class="app-body" :class="{ 'is-fullscreen': isFullscreen }">
+      <AppSidebar
+        v-if="!isFullscreen"
+        class="app-sidebar"
+        :collapsed="effectiveSidebarCollapsed"
+        :overlay="sidebarOverlayOpen"
+        @toggle-collapsed="toggleSidebarCollapsed"
+      />
+      <button
+        v-if="sidebarOverlayOpen"
+        class="sidebar-scrim"
+        type="button"
+        aria-label="关闭侧栏"
+        @click="closeSidebarOverlay"
+      />
+      <div class="app-right" :class="{ 'is-fullscreen': isFullscreen }">
+        <TopBar v-if="!isFullscreen" />
+        <main class="app-main">
+          <router-view v-slot="{ Component, route: r }">
+            <transition :name="(r.meta?.transition as string) || 'fade'" mode="out-in">
+              <component :is="Component" :key="r.fullPath" />
+            </transition>
+          </router-view>
+        </main>
+      </div>
     </div>
     <NotificationCenter />
     <ToastStack />
@@ -219,14 +226,26 @@ onBeforeUnmount(() => {
   height: 100%;
   position: relative;
   display: flex;
+  flex-direction: column;
 }
 .app-shell.is-fullscreen {
   display: block;
 }
+.app-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  position: relative;
+}
+.app-body.is-fullscreen {
+  display: block;
+  height: 100%;
+}
 .app-sidebar {
   flex-shrink: 0;
 }
-.app-shell.sidebar-overlay-open .app-sidebar {
+.app-shell.sidebar-overlay-open .app-body .app-sidebar {
   position: absolute;
   left: 0;
   top: 0;
