@@ -136,6 +136,7 @@ pub fn run() {
             commands::player::embed_set_rect,
             commands::player::embed_set_visible,
             commands::player::embed_detach,
+            commands::player::embed_pointer_moved,
             commands::player::get_embed_state,
             commands::player::get_prefetch_state,
             commands::player::cancel_prefetch,

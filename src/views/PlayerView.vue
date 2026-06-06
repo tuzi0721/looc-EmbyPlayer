@@ -72,6 +72,7 @@ let errorCopyTimer: number | null = null;
 let embedResizeObserver: ResizeObserver | null = null;
 let embedResizeRaf = 0;
 let embedLayoutSyncTimer: number | null = null;
+let embedPointerPollTimer: number | null = null;
 let lastEmbedRectKey = "";
 let blackoutSyncSeq = 0;
 let playerUnmounted = false;
@@ -1821,6 +1822,7 @@ async function setupEmbeddedVideoHost() {
     await syncEmbedRect();
     await withTimeout(api.embedSetVisible(true), embedShowTimeoutMs, "embedded mpv host show timed out");
     scheduleEmbedRectLayoutSync();
+    startEmbedPointerPoll();
     return true;
   } catch (error) {
     resetEmbeddedVideoHostLayoutState();
@@ -1828,6 +1830,27 @@ async function setupEmbeddedVideoHost() {
     errorText.value = `内嵌播放窗口初始化失败：${message}`;
     showControls.value = true;
     return false;
+  }
+}
+
+// Poll the OS cursor so moving the mouse over the native video reveals the
+// controls (the native window swallows mouse events from the WebView).
+function startEmbedPointerPoll() {
+  if (!embedVideo || embedPointerPollTimer != null) return;
+  embedPointerPollTimer = window.setInterval(() => {
+    void api
+      .embedPointerMoved()
+      .then((moved) => {
+        if (moved && !playerUnmounted) bumpControls();
+      })
+      .catch(() => {});
+  }, 250);
+}
+
+function stopEmbedPointerPoll() {
+  if (embedPointerPollTimer != null) {
+    window.clearInterval(embedPointerPollTimer);
+    embedPointerPollTimer = null;
   }
 }
 
@@ -1843,6 +1866,7 @@ function resetEmbeddedVideoHostLayoutState() {
     window.clearTimeout(embedLayoutSyncTimer);
     embedLayoutSyncTimer = null;
   }
+  stopEmbedPointerPoll();
   lastEmbedRectKey = "";
 }
 

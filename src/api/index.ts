@@ -419,6 +419,7 @@ export const api = {
   embedDetach: () => invoke<void>("embed_detach"),
   getPrefetchState: () => invoke<PrefetchState>("get_prefetch_state"),
   cancelPrefetch: () => invoke<void>("cancel_prefetch"),
+  embedPointerMoved: () => invoke<boolean>("embed_pointer_moved"),
   getEmbedState: () => invoke<{
     mode: string;
     hostKind: string;

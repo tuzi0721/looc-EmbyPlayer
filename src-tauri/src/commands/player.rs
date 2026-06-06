@@ -2549,6 +2549,47 @@ pub async fn embed_set_rect(state: State<'_, Arc<AppState>>, rect: PlayerRect) -
     state.mpv.embed_rect(rect)
 }
 
+/// Reports whether the OS cursor moved inside this window since the last poll.
+/// The embedded mpv native child window sits above the WebView and swallows
+/// mouse events over the video area (WebView2 does not reliably receive them
+/// through `HTTRANSPARENT`), so the player polls this to reveal its controls
+/// when the user moves the mouse over the video.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+pub fn embed_pointer_moved(window: tauri::Window) -> bool {
+    use std::sync::atomic::{AtomicI64, Ordering};
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+    static LAST: AtomicI64 = AtomicI64::new(i64::MIN);
+
+    let mut point = POINT::default();
+    if unsafe { GetCursorPos(&mut point) }.is_err() {
+        return false;
+    }
+    let packed = ((point.x as i64) << 32) | (point.y as i64 & 0xffff_ffff);
+    let moved = LAST.swap(packed, Ordering::Relaxed) != packed;
+    if !moved {
+        return false;
+    }
+    // Only count movement that is inside this window.
+    let Ok(pos) = window.outer_position() else {
+        return false;
+    };
+    let Ok(size) = window.outer_size() else {
+        return false;
+    };
+    let within_x = point.x >= pos.x && point.x < pos.x + size.width as i32;
+    let within_y = point.y >= pos.y && point.y < pos.y + size.height as i32;
+    within_x && within_y
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+pub fn embed_pointer_moved(_window: tauri::Window) -> bool {
+    false
+}
+
 #[tauri::command]
 pub async fn embed_set_visible(state: State<'_, Arc<AppState>>, visible: bool) -> AppResult<()> {
     log_visual_player_stage(if visible {
