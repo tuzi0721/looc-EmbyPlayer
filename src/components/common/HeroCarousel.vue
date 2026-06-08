@@ -23,14 +23,17 @@ const logoFailed = ref(false);
 const backgroundIndex = ref(0);
 let timer: number | null = null;
 
+const HERO_LIMIT = 5;
+
 const items = computed(() => {
-  const pool = [...lib.heroItems, ...lib.resume].filter(Boolean);
   const seen = new Set<string>();
-  return pool.filter((x) => {
-    if (seen.has(x.Id)) return false;
-    seen.add(x.Id);
-    return true;
-  }).slice(0, 6);
+  return lib.heroItems
+    .filter((x) => {
+      if (!x || seen.has(x.Id)) return false;
+      seen.add(x.Id);
+      return true;
+    })
+    .slice(0, HERO_LIMIT);
 });
 
 const current = computed(() => items.value[index.value] ?? null);
@@ -91,6 +94,38 @@ const backgroundUrls = computed(() => {
     .map((candidate) => imageUrl(candidate, { width: heroImageWidth.value }))
     .filter((url): url is string => Boolean(url));
 });
+
+// First (preferred) backdrop URL for an item, matching what the carousel renders
+// when its background index is 0 — used to warm the browser cache for every slide.
+function firstBackgroundUrl(item: MediaItem): string | null {
+  for (const candidate of backgroundCandidates(item)) {
+    const url = imageUrl(candidate, { width: heroImageWidth.value });
+    if (url) return url;
+  }
+  return null;
+}
+
+// Hold references so the in-flight Image objects are not garbage collected before
+// they finish decoding into the HTTP cache.
+const preloadedImages = ref<HTMLImageElement[]>([]);
+function preloadHeroBackgrounds() {
+  const loaded: HTMLImageElement[] = [];
+  for (const item of items.value) {
+    const url = firstBackgroundUrl(item);
+    if (!url) continue;
+    const img = new Image();
+    img.decoding = "async";
+    img.src = url;
+    loaded.push(img);
+  }
+  preloadedImages.value = loaded;
+}
+
+watch(
+  () => `${heroImageWidth.value}|${items.value.map((x) => x.Id).join(",")}`,
+  () => preloadHeroBackgrounds(),
+  { immediate: true },
+);
 
 const activeBackgroundUrl = computed(() => {
   const urls = backgroundUrls.value;

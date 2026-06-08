@@ -10,7 +10,7 @@ import DanmakuOverlay from "@/components/player/DanmakuOverlay.vue";
 import SubtitlePanel from "@/components/player/SubtitlePanel.vue";
 import { api, type PlaybackLineOption, type PlaybackMediaSource } from "@/api";
 import { useKeyboard } from "@/composables/useKeyboard";
-import { hasNativeRuntime, openFileDialog } from "@/platform";
+import { hasNativeRuntime, hasTauriRuntime, openFileDialog } from "@/platform";
 import { useAuthStore } from "@/stores/auth";
 import { useLibraryStore } from "@/stores/library";
 import { useDownloadsStore } from "@/stores/downloads";
@@ -51,10 +51,18 @@ const embedVideo =
   typeof window !== "undefined" &&
   (hasNativeRuntime() || nativeMpvDebug);
 const useHtmlVideo = !embedVideo;
+// When the native mpv child window is used under Tauri, a dedicated transparent
+// always-on-top `overlay` window hosts the transport + title bar so they float
+// above mpv (which otherwise covers/eats the in-DOM controls). Electron/web keep
+// the in-DOM controls.
+const overlayActive = embedVideo && hasTauriRuntime();
 
 const errorText = ref<string | null>(null);
 const errorCopyStatus = ref<string | null>(null);
 const showControls = ref(true);
+// True while the embedded native mpv host is attached + visible (drives whether
+// the controls overlay window should be shown).
+const embeddedHostActive = ref(false);
 const retryingPlayback = ref(false);
 const cachingActive = ref(false);
 const cachingDownloaded = ref(0);
@@ -1273,16 +1281,22 @@ function onPlayerPointerMove(event: PointerEvent) {
 }
 
 function bumpControls() {
+  const wasHidden = !showControls.value;
   showControls.value = true;
-  scheduleEmbedRectLayoutSync();
+  // Only force a full layout re-sync on the hidden→shown transition; the poll
+  // calls this every frame while the cursor hovers the control strip, and
+  // re-running the layout sync each time would be wasteful (syncEmbedRect itself
+  // also dedupes by rect key).
+  if (wasHidden) scheduleEmbedRectLayoutSync();
   clearControlsHideTimer();
   // Auto-hide controls during playback (both windowed and fullscreen). For
   // embedded native video this lets the native window grow to fill the stage
   // when controls hide, so the video is large instead of squeezed between the
-  // reserved control bars. Keep controls while paused or a panel is open.
-  if (paused.value || hasOpenPlayerPanel()) return;
+  // reserved control bars. Keep controls while paused, scrubbing, or a panel is
+  // open so the progress bar never disappears mid-drag.
+  if (paused.value || hasOpenPlayerPanel() || isScrubbing.value) return;
   hideTimer = window.setTimeout(() => {
-    if (!hasOpenPlayerPanel() && !paused.value) showControls.value = false;
+    if (!hasOpenPlayerPanel() && !paused.value && !isScrubbing.value) showControls.value = false;
   }, 3200);
 }
 
@@ -1615,7 +1629,12 @@ async function toggleFullscreen() {
       nativeFullscreen.value = await api.setFullscreen(next);
       await syncSecondaryDisplayBlackout();
       scheduleEmbedRectSync();
-      bumpControls();
+      if (overlayActive) {
+        scheduleOverlayBoundsSync();
+        void emitOverlaySync();
+      } else {
+        bumpControls();
+      }
       return;
     } catch {
       nativeFullscreen.value = false;
@@ -1668,6 +1687,17 @@ function currentEmbedRect() {
   const rect = el.getBoundingClientRect();
   let top = rect.top;
   let bottom = rect.bottom;
+  // With the overlay window hosting the controls, mpv should fill the entire
+  // stage; we no longer reserve space for in-DOM control bars.
+  if (overlayActive) {
+    return {
+      x: Math.round(rect.left),
+      y: Math.round(top),
+      width: Math.max(1, Math.round(rect.width)),
+      height: Math.max(1, Math.round(bottom - top)),
+      scale: window.devicePixelRatio || 1,
+    };
+  }
   const topControls = document.querySelector<HTMLElement>(".player__top");
   const bottomControls = document.querySelector<HTMLElement>(".player__bottom");
   if (topControls) {
@@ -1822,7 +1852,14 @@ async function setupEmbeddedVideoHost() {
     await syncEmbedRect();
     await withTimeout(api.embedSetVisible(true), embedShowTimeoutMs, "embedded mpv host show timed out");
     scheduleEmbedRectLayoutSync();
-    startEmbedPointerPoll();
+    embeddedHostActive.value = true;
+    if (overlayActive) {
+      // The overlay window owns the controls; mpv fills the whole stage and the
+      // legacy in-DOM reveal/pointer-poll is unnecessary.
+      void showPlayerOverlay();
+    } else {
+      startEmbedPointerPoll();
+    }
     return true;
   } catch (error) {
     resetEmbeddedVideoHostLayoutState();
@@ -1834,23 +1871,148 @@ async function setupEmbeddedVideoHost() {
 }
 
 // Poll the OS cursor so moving the mouse over the native video reveals the
-// controls (the native window swallows mouse events from the WebView).
+// controls (the native window swallows mouse events from the WebView). Also keep
+// controls pinned while the cursor hovers the bottom control strip, so the user
+// can reach for and drag the progress bar without it auto-hiding mid-motion.
 function startEmbedPointerPoll() {
   if (!embedVideo || embedPointerPollTimer != null) return;
   embedPointerPollTimer = window.setInterval(() => {
     void api
-      .embedPointerMoved()
-      .then((moved) => {
-        if (moved && !playerUnmounted) bumpControls();
+      .embedPointerProbe()
+      .then((probe) => {
+        if (playerUnmounted) return;
+        if ((probe.moved && probe.inside) || probe.nearBottom) bumpControls();
       })
       .catch(() => {});
-  }, 250);
+  }, 120);
 }
 
 function stopEmbedPointerPoll() {
   if (embedPointerPollTimer != null) {
     window.clearInterval(embedPointerPollTimer);
     embedPointerPollTimer = null;
+  }
+}
+
+// ---- Player controls overlay window (Tauri only) ----
+let overlayBoundsTimer: number | null = null;
+let overlayShown = false;
+const overlayCleanups: Array<() => void> = [];
+
+async function overlayWindow() {
+  if (!overlayActive) return null;
+  try {
+    const { Window } = await import("@tauri-apps/api/window");
+    return await Window.getByLabel("overlay");
+  } catch {
+    return null;
+  }
+}
+
+// Position the overlay window exactly over the main window's client area so its
+// controls line up with the video. innerPosition/innerSize already return
+// `Physical*` instances accepted by set{Position,Size}.
+async function syncOverlayBounds() {
+  if (!overlayActive) return;
+  try {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const overlay = await overlayWindow();
+    if (!overlay) return;
+    const main = getCurrentWindow();
+    const pos = await main.innerPosition();
+    const size = await main.innerSize();
+    await overlay.setPosition(pos);
+    await overlay.setSize(size);
+  } catch (error) {
+    console.warn(error);
+  }
+}
+
+function scheduleOverlayBoundsSync() {
+  if (!overlayActive) return;
+  if (overlayBoundsTimer != null) window.clearTimeout(overlayBoundsTimer);
+  overlayBoundsTimer = window.setTimeout(() => {
+    overlayBoundsTimer = null;
+    void syncOverlayBounds();
+  }, 16);
+}
+
+async function emitOverlaySync() {
+  if (!overlayActive) return;
+  try {
+    const { emit } = await import("@tauri-apps/api/event");
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const maximized = await getCurrentWindow()
+      .isMaximized()
+      .catch(() => false);
+    await emit("overlay:sync", {
+      title: displayTitle.value,
+      subtitle: displaySubtitle.value,
+      isFullscreen: nativeFullscreen.value,
+      isMaximized: maximized,
+    });
+  } catch {
+    /* events are best-effort */
+  }
+}
+
+function handleOverlayCmd(action?: string) {
+  if (action === "back") void back();
+  else if (action === "toggle-fullscreen") void toggleFullscreen();
+}
+
+async function showPlayerOverlay() {
+  if (!overlayActive || playerUnmounted) return;
+  const overlay = await overlayWindow();
+  if (!overlay) return;
+  await syncOverlayBounds();
+  try {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await overlay.setAlwaysOnTop(true);
+    await overlay.show();
+    overlayShown = true;
+    // Keep keyboard focus on the main window so its player shortcuts still work
+    // while the overlay floats on top for mouse interaction.
+    await getCurrentWindow().setFocus().catch(() => {});
+  } catch (error) {
+    console.warn(error);
+  }
+  await emitOverlaySync();
+  if (overlayCleanups.length === 0) {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const { listen } = await import("@tauri-apps/api/event");
+      const main = getCurrentWindow();
+      overlayCleanups.push(await main.onMoved(() => scheduleOverlayBoundsSync()));
+      overlayCleanups.push(await main.onResized(() => scheduleOverlayBoundsSync()));
+      overlayCleanups.push(
+        await listen<{ action?: string }>("overlay:cmd", (e) => handleOverlayCmd(e.payload?.action)),
+      );
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+async function hidePlayerOverlay() {
+  for (const off of overlayCleanups.splice(0)) {
+    try {
+      off();
+    } catch {
+      /* ignore */
+    }
+  }
+  if (overlayBoundsTimer != null) {
+    window.clearTimeout(overlayBoundsTimer);
+    overlayBoundsTimer = null;
+  }
+  if (!overlayShown) return;
+  overlayShown = false;
+  const overlay = await overlayWindow();
+  try {
+    await overlay?.hide();
+  } catch {
+    /* ignore */
   }
 }
 
@@ -1872,6 +2034,8 @@ function resetEmbeddedVideoHostLayoutState() {
 
 async function teardownEmbeddedVideoHost(options: { hide?: boolean } = {}) {
   if (!embedVideo) return;
+  embeddedHostActive.value = false;
+  void hidePlayerOverlay();
   resetEmbeddedVideoHostLayoutState();
   if (options.hide !== false) {
     await withTimeout(api.embedSetVisible(false), 1200, "embedded mpv host hide timed out");
@@ -1880,7 +2044,7 @@ async function teardownEmbeddedVideoHost(options: { hide?: boolean } = {}) {
 }
 
 watch(showControls, async () => {
-  if (!embedVideo) return;
+  if (!embedVideo || overlayActive) return;
   // Resize the native window promptly when controls appear/disappear so the
   // freshly shown control bar is immediately clear of the native window (the
   // progress bar becomes draggable without a lag), and the video fills the
@@ -1888,6 +2052,22 @@ watch(showControls, async () => {
   await nextTick();
   await syncEmbedRect().catch((error) => console.warn(error));
 });
+
+// Keep the overlay window's title bar in sync with the current item / fullscreen.
+watch([displayTitle, displaySubtitle, nativeFullscreen], () => {
+  if (overlayActive && overlayShown) void emitOverlaySync();
+});
+
+// The overlay window covers the stage; when an error dialog needs to be shown in
+// the main window, hide the overlay so it isn't obscured, then restore it.
+watch(
+  () => Boolean(errorText.value),
+  (hasError) => {
+    if (!overlayActive) return;
+    if (hasError) void hidePlayerOverlay();
+    else if (embeddedHostActive.value) void showPlayerOverlay();
+  },
+);
 
 const playerShortcutHandlers: Record<PlayerShortcutAction, () => void | Promise<void>> = {
   "toggle-play": togglePlay,
@@ -2539,7 +2719,7 @@ onBeforeUnmount(async () => {
     </div>
 
     <transition name="fade">
-      <header v-if="showControls" class="player__top">
+      <header v-if="showControls && !overlayActive" class="player__top">
         <div class="player__top-inner">
           <button class="iconbtn" @click="back" aria-label="返回">
             <Icon icon="lucide:chevron-left" width="22" />
@@ -2574,7 +2754,7 @@ onBeforeUnmount(async () => {
     </transition>
 
     <transition name="fade">
-      <footer v-if="showControls" class="player__bottom">
+      <footer v-if="showControls && !overlayActive" class="player__bottom">
         <div class="bar">
           <span class="time">{{ fmt(positionMs) }}</span>
           <div class="bar__slider">

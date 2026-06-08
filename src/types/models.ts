@@ -133,6 +133,7 @@ export interface MediaStreamInfo {
 export interface MediaSourceInfo {
   Id?: string | null;
   Name?: string | null;
+  Path?: string | null;
   Container?: string | null;
   Size?: number | null;
   Bitrate?: number | null;
@@ -154,6 +155,7 @@ export interface MediaItem {
   Name: string;
   _source?: MediaItemSourceContext | null;
   Type?: string | null;
+  CollectionType?: string | null;
   Overview?: string | null;
   ProductionYear?: number | null;
   CommunityRating?: number | null;

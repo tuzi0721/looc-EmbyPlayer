@@ -24,6 +24,9 @@ pub struct AppState {
     pub config: ConfigStore,
     pub emby: EmbyClient,
     pub mpv: MpvManager,
+    /// Parallel standalone (independent-window) mpv playback mode. Kept beside
+    /// the embedded `mpv` manager so both modes can coexist (see T2 / docs).
+    pub standalone: crate::mpv::StandalonePlayer,
     pub downloads: DownloadManager,
     pub notifications: NotificationCenter,
     pub stream_proxy: StreamProxy,
@@ -64,6 +67,7 @@ impl AppState {
         let http = build_client(settings.request_timeout_ms)?;
         let emby = EmbyClient::new(http, config.clone());
         let mpv = MpvManager::new(&settings)?;
+        let standalone = crate::mpv::StandalonePlayer::new(emby.clone());
         let notifications = NotificationCenter::new(config.clone(), handle.clone());
         let stream_proxy = StreamProxy::new()?;
         let prefetch = PrefetchManager::new()?;
@@ -86,6 +90,7 @@ impl AppState {
             config,
             emby,
             mpv,
+            standalone,
             downloads,
             notifications,
             stream_proxy,
@@ -130,6 +135,7 @@ impl AppState {
         if let Err(e) = backend.shutdown().await {
             tracing::warn!(target = "mpv", error = %e, "mpv shutdown during app exit failed");
         }
+        let _ = self.standalone.stop().await;
         let _ = self.current_play_session.lock().await.take();
         self.stream_proxy.clear();
         self.prefetch.cancel();

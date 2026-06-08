@@ -384,10 +384,30 @@ function firstMediaStream(source: MediaSourceInfo | null, type: "video" | "audio
   return (source?.MediaStreams ?? []).find((stream) => streamType(stream) === type) ?? null;
 }
 
+// Strip directory and a trailing media extension from a path/filename, the way
+// Emby/Jellyfin derive a version label from the file (the server normally trims
+// the common folder prefix already and sends a clean `Name`).
+function fileLabelFromPath(value: string): string {
+  const base = value.split(/[\\/]/).pop()?.trim() ?? "";
+  return base.replace(/\.[A-Za-z0-9]{1,5}$/, "").trim();
+}
+
 function safeMediaSourceName(source: MediaSourceInfo, index: number) {
   const name = source.Name?.trim() || "";
+  // Clean, server-provided version name (e.g. "WEB-DL.Baha", "导演剪辑版"). Emby
+  // already trims the shared folder prefix for multi-version items, so use it.
   if (name && !/[\\/]/.test(name) && !/^https?:\/\//i.test(name)) return name;
-  return `版本 ${index + 1}`;
+  // Name is a full path/URL → fall back to the filename (no dir, no extension),
+  // matching how Emby/Jellyfin label versions from the file.
+  const fromName = name && !/^https?:\/\//i.test(name) ? fileLabelFromPath(name) : "";
+  if (fromName) return fromName;
+  const fromPath = source.Path?.trim() ? fileLabelFromPath(source.Path.trim()) : "";
+  if (fromPath) return fromPath;
+  // No usable name anywhere → describe the version by its specs so the entries
+  // are still distinguishable, then a generic number as the last resort.
+  const video = firstMediaStream(source, "video");
+  const descriptor = [streamResolution(video), streamCodec(video)].filter(Boolean).join(" ");
+  return descriptor || `版本 ${index + 1}`;
 }
 
 function mediaSourceKey(source: MediaSourceInfo, index: number) {

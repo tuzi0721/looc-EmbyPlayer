@@ -28,6 +28,7 @@ fn ensure_mpv_windows() -> io::Result<()> {
     println!("cargo:rerun-if-changed=resources/mpv/mpv.lib");
     println!("cargo:rerun-if-changed=resources/mpv/d3dcompiler_43.dll");
     println!("cargo:rerun-if-changed=resources/mpv/mpv/fonts.conf");
+    println!("cargo:rerun-if-changed=resources/mpv/hills_external_reporter.lua");
     println!("cargo:rustc-link-search=native={}", bundled.display());
 
     if !mpv_exe.is_file() {

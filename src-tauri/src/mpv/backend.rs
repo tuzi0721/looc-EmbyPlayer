@@ -240,3 +240,196 @@ pub trait MpvBackend: Send + Sync {
     async fn snapshot(&self) -> AppResult<MpvSnapshot>;
     async fn shutdown(&self) -> AppResult<()>;
 }
+
+/// Line prefix written by the bundled `hills_external_reporter.lua` mpv script
+/// (see `resources/mpv/hills_external_reporter.lua`). Each reporter event is a
+/// single stdout line of the form `HILLS_MPV_EVENT:{json}` so the host can tell
+/// reporter events apart from mpv's own stdout chatter.
+pub const HILLS_MPV_EVENT_PREFIX: &str = "HILLS_MPV_EVENT:";
+
+/// A progress event emitted by the external mpv reporter script. These map onto
+/// Emby session reporting (progress / pause / stop); see
+/// `crate::emby::session_controller`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MpvReporterEvent {
+    /// mpv began loading a new playlist entry.
+    StartFile,
+    /// The current file finished loading and playback is starting.
+    FileLoaded {
+        time_pos: f64,
+        media_title: Option<String>,
+        path: Option<String>,
+    },
+    /// The user (or a command) seeked to a new position.
+    Seek { time_pos: f64 },
+    /// Periodic playback position tick. Emitted frequently; throttle before
+    /// forwarding to the server.
+    TimePos { time_pos: f64 },
+    /// Pause state toggled.
+    Pause { paused: bool, time_pos: Option<f64> },
+    /// Playback speed changed.
+    Speed { speed: f64 },
+    /// The current file stopped (eof, user stop, error, quit, ...).
+    EndFile {
+        time_pos: f64,
+        reason: Option<String>,
+    },
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct RawReporterEvent {
+    event: String,
+    // mpv numbers arrive as JSON ints or floats depending on the property, so
+    // every numeric field is decoded as `f64` (serde accepts both shapes).
+    #[serde(default)]
+    time_pos: Option<f64>,
+    #[serde(default)]
+    paused: Option<bool>,
+    #[serde(default)]
+    speed: Option<f64>,
+    #[serde(default)]
+    reason: Option<String>,
+    #[serde(default)]
+    media_title: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
+}
+
+fn non_empty(value: Option<String>) -> Option<String> {
+    value.filter(|s| !s.trim().is_empty())
+}
+
+/// Parse a single stdout line into an [`MpvReporterEvent`].
+///
+/// Returns `None` when the line does not carry a reporter event or cannot be
+/// understood (unknown event name, malformed JSON, missing required fields).
+/// The prefix may appear anywhere in the line so incidental mpv stdout noise in
+/// front of it is tolerated.
+pub fn parse_reporter_event(line: &str) -> Option<MpvReporterEvent> {
+    let start = line.find(HILLS_MPV_EVENT_PREFIX)?;
+    let json = line[start + HILLS_MPV_EVENT_PREFIX.len()..].trim();
+    if json.is_empty() {
+        return None;
+    }
+    let raw: RawReporterEvent = serde_json::from_str(json).ok()?;
+    let event = match raw.event.as_str() {
+        "start-file" => MpvReporterEvent::StartFile,
+        "file-loaded" => MpvReporterEvent::FileLoaded {
+            time_pos: raw.time_pos.unwrap_or(0.0),
+            media_title: non_empty(raw.media_title),
+            path: non_empty(raw.path),
+        },
+        "seek" => MpvReporterEvent::Seek {
+            time_pos: raw.time_pos.unwrap_or(0.0),
+        },
+        "time-pos" => MpvReporterEvent::TimePos {
+            time_pos: raw.time_pos?,
+        },
+        "pause" => MpvReporterEvent::Pause {
+            paused: raw.paused.unwrap_or(false),
+            time_pos: raw.time_pos,
+        },
+        "speed" => MpvReporterEvent::Speed {
+            speed: raw.speed.unwrap_or(1.0),
+        },
+        "end-file" => MpvReporterEvent::EndFile {
+            time_pos: raw.time_pos.unwrap_or(0.0),
+            reason: non_empty(raw.reason),
+        },
+        _ => return None,
+    };
+    Some(event)
+}
+
+#[cfg(test)]
+mod reporter_tests {
+    use super::*;
+
+    #[test]
+    fn parses_file_loaded_with_metadata() {
+        let line = "HILLS_MPV_EVENT:{\"event\":\"file-loaded\",\"playlist_pos\":0,\"time_pos\":12.5,\"media_title\":\"Ep 1\",\"path\":\"http://x/a.mkv\"}";
+        assert_eq!(
+            parse_reporter_event(line),
+            Some(MpvReporterEvent::FileLoaded {
+                time_pos: 12.5,
+                media_title: Some("Ep 1".into()),
+                path: Some("http://x/a.mkv".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_integer_time_pos_as_float() {
+        let line = "HILLS_MPV_EVENT:{\"event\":\"time-pos\",\"playlist_pos\":0,\"time_pos\":30}";
+        assert_eq!(
+            parse_reporter_event(line),
+            Some(MpvReporterEvent::TimePos { time_pos: 30.0 })
+        );
+    }
+
+    #[test]
+    fn parses_pause_and_speed() {
+        assert_eq!(
+            parse_reporter_event("HILLS_MPV_EVENT:{\"event\":\"pause\",\"paused\":true}"),
+            Some(MpvReporterEvent::Pause {
+                paused: true,
+                time_pos: None
+            })
+        );
+        assert_eq!(
+            parse_reporter_event("HILLS_MPV_EVENT:{\"event\":\"speed\",\"speed\":1.25}"),
+            Some(MpvReporterEvent::Speed { speed: 1.25 })
+        );
+    }
+
+    #[test]
+    fn parses_end_file_with_reason() {
+        assert_eq!(
+            parse_reporter_event(
+                "HILLS_MPV_EVENT:{\"event\":\"end-file\",\"reason\":\"eof\",\"time_pos\":99.0}"
+            ),
+            Some(MpvReporterEvent::EndFile {
+                time_pos: 99.0,
+                reason: Some("eof".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn tolerates_leading_noise_before_prefix() {
+        let line = "[ffmpeg] junk HILLS_MPV_EVENT:{\"event\":\"start-file\"}";
+        assert_eq!(
+            parse_reporter_event(line),
+            Some(MpvReporterEvent::StartFile)
+        );
+    }
+
+    #[test]
+    fn empty_strings_become_none() {
+        let line = "HILLS_MPV_EVENT:{\"event\":\"file-loaded\",\"time_pos\":0,\"media_title\":\"\",\"path\":\"\"}";
+        assert_eq!(
+            parse_reporter_event(line),
+            Some(MpvReporterEvent::FileLoaded {
+                time_pos: 0.0,
+                media_title: None,
+                path: None,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_non_event_and_malformed_lines() {
+        assert_eq!(parse_reporter_event("just a normal mpv log line"), None);
+        assert_eq!(parse_reporter_event("HILLS_MPV_EVENT:not-json"), None);
+        assert_eq!(parse_reporter_event("HILLS_MPV_EVENT:"), None);
+        assert_eq!(
+            parse_reporter_event("HILLS_MPV_EVENT:{\"event\":\"unknown-thing\"}"),
+            None
+        );
+        // time-pos without a time_pos field is unusable.
+        assert_eq!(
+            parse_reporter_event("HILLS_MPV_EVENT:{\"event\":\"time-pos\"}"),
+            None
+        );
+    }
+}

@@ -87,6 +87,16 @@ export function resolveMpv() {
   return { found: false, path: pathCandidates()[0] ?? "resources/mpv/mpv.exe", bundled: true };
 }
 
+// The bundled mpv progress reporter lives beside mpv.exe in resources/mpv/.
+export function resolveReporterScript(mpvExePath) {
+  try {
+    const candidate = path.join(path.dirname(mpvExePath), "hills_external_reporter.lua");
+    return fileExists(candidate) ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
 function parseTrackKind(value) {
   if (value === "video") return "video";
   if (value === "audio") return "audio";
@@ -298,6 +308,16 @@ export class MpvController {
     if ((settings.mpvCacheMb ?? 0) > 0) {
       args.push("--cache=yes");
       args.push(`--demuxer-max-bytes=${settings.mpvCacheMb}MiB`);
+    }
+
+    // Parity with the Rust embedded backend: load the bundled progress reporter
+    // on every mpv launch path. This controller drives Emby reporting from
+    // snapshot polling and runs mpv with stdio "ignore", so the script's stdout
+    // events are discarded here; the injection just keeps the launch path
+    // consistent with external mpv.
+    const reporterScript = resolveReporterScript(detected.path);
+    if (reporterScript) {
+      args.push(`--script=${reporterScript}`);
     }
 
     this.child = spawn(detected.path, args, {

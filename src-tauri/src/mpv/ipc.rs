@@ -16,7 +16,7 @@ use crate::error::{AppError, AppResult};
 use crate::mpv::backend::{
     MpvBackend, MpvChapterInfo, MpvCommand, MpvSnapshot, MpvTrackInfo, PictureMode, TrackKind,
 };
-use crate::mpv::paths::resolve_mpv_exe;
+use crate::mpv::paths::{resolve_mpv_exe, resolve_reporter_script};
 
 use crate::mpv::window_host::{HostWindow, ParentHandle, PlayerRect};
 
@@ -484,6 +484,15 @@ async fn spawn_mpv_ipc(
     if settings.mpv_cache_mb > 0 {
         args.push(format!("--cache=yes"));
         args.push(format!("--demuxer-max-bytes={}MiB", settings.mpv_cache_mb));
+    }
+
+    // Inject the progress reporter for parity with the external-mpv path. This
+    // embedded/IPC backend leaves stdout on `Stdio::null()` and already drives
+    // Emby reporting from the frontend snapshot loop, so the script's events are
+    // harmlessly discarded here; the injection keeps every mpv launch path
+    // loading the same bundled reporter.
+    if let Some(script) = resolve_reporter_script() {
+        args.push(format!("--script={}", script.display()));
     }
 
     #[cfg(windows)]

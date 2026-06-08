@@ -51,24 +51,69 @@ export const useLibraryStore = defineStore("library", () => {
     return visual.length > 0 ? visual : items;
   }
 
+  const HERO_COUNT = 5;
+  const VIDEO_COLLECTION_TYPES = new Set(["movies", "tvshows", "mixed", "boxsets"]);
+
+  function pickRandomVideoLibrary(libraryViews: MediaItem[]): MediaItem | null {
+    const candidates = libraryViews.filter((v) => {
+      const ct = (v.CollectionType ?? "").toLowerCase();
+      return VIDEO_COLLECTION_TYPES.has(ct);
+    });
+    if (candidates.length === 0) return null;
+    return candidates[Math.floor(Math.random() * candidates.length)] ?? null;
+  }
+
+  // Pull a fresh random batch from one random video library. Over-fetch a few so
+  // that after dropping image-less items we still have a full HERO_COUNT to show.
+  async function loadRandomLibraryHero(library: MediaItem): Promise<MediaItem[]> {
+    const r = await api.listItems({
+      parentId: library.Id,
+      params: [
+        ["Recursive", "true"],
+        ["IncludeItemTypes", "Movie,Series"],
+        ["Fields", heroFields],
+        ["SortBy", "Random"],
+        ["Limit", String(HERO_COUNT + 3)],
+        ...heroImageParams,
+      ],
+    });
+    return r.Items;
+  }
+
   async function refreshHome() {
     loading.value = true;
     try {
-      const [viewsResp, resumeResp, heroResp] = await Promise.all([
+      const [viewsResp, resumeResp] = await Promise.all([
         api.listViews(),
         api.resumeItems(),
-        loadHeroCandidates("Movie,Series"),
       ]);
-      const heroFallbackResp =
-        heroResp.Items.length > 0
-          ? heroResp
-          : await loadHeroCandidates("Movie,Series,Episode", "18");
       views.value = viewsResp.Items;
       resume.value = filterJavItems(resumeResp.Items, settings.settings.hideJavCodes);
+
+      let heroRaw: MediaItem[] = [];
+      const randomLibrary = pickRandomVideoLibrary(viewsResp.Items);
+      if (randomLibrary) {
+        try {
+          heroRaw = await loadRandomLibraryHero(randomLibrary);
+        } catch {
+          heroRaw = [];
+        }
+      }
+      if (heroRaw.length === 0) {
+        // Fallback: newest Movie/Series globally (older behavior) when no video
+        // library is available or the random query failed.
+        const heroResp = await loadHeroCandidates("Movie,Series");
+        heroRaw =
+          heroResp.Items.length > 0
+            ? heroResp.Items
+            : (await loadHeroCandidates("Movie,Series,Episode", "18")).Items;
+      }
+
       const filteredHeroItems = preferVisualHeroItems(
-        filterJavItems(heroFallbackResp.Items, settings.settings.hideJavCodes),
+        filterJavItems(heroRaw, settings.settings.hideJavCodes),
       );
-      heroItems.value = filteredHeroItems.length > 0 ? filteredHeroItems : resume.value;
+      const finalItems = filteredHeroItems.length > 0 ? filteredHeroItems : resume.value;
+      heroItems.value = finalItems.slice(0, HERO_COUNT);
     } finally {
       loading.value = false;
     }

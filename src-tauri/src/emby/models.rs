@@ -241,6 +241,8 @@ pub struct MediaItem {
     #[serde(default, deserialize_with = "optional_string", rename = "Type")]
     pub item_type: Option<String>,
     #[serde(default, deserialize_with = "optional_string")]
+    pub collection_type: Option<String>,
+    #[serde(default, deserialize_with = "optional_string")]
     pub overview: Option<String>,
     #[serde(default, deserialize_with = "optional_i32")]
     pub production_year: Option<i32>,
@@ -457,6 +459,8 @@ pub struct PlaybackInfo {
 pub struct MediaSource {
     #[serde(default, deserialize_with = "string_or_default")]
     pub id: String,
+    #[serde(default, deserialize_with = "optional_string")]
+    pub name: Option<String>,
     #[serde(default, deserialize_with = "optional_string")]
     pub container: Option<String>,
     #[serde(default, deserialize_with = "optional_i64")]

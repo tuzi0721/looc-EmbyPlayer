@@ -6,8 +6,16 @@ import TopBar from "./components/common/TopBar.vue";
 import AppSidebar from "./components/common/AppSidebar.vue";
 import NotificationCenter from "./components/common/NotificationCenter.vue";
 import ToastStack from "./components/common/ToastStack.vue";
+import PlayerOverlay from "./views/PlayerOverlay.vue";
 import { api } from "./api";
 import { listen, platformType } from "./platform";
+
+// The dedicated transparent always-on-top `overlay` window loads the same bundle
+// but is flagged via `?overlay=1`; it renders ONLY the player controls overlay
+// and skips all of the main app shell + bootstrapping.
+const isOverlayWindow =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("overlay") === "1";
 import { useAuthStore } from "./stores/auth";
 import { useDownloadsStore } from "./stores/downloads";
 import { useNotificationsStore } from "./stores/notifications";
@@ -120,6 +128,7 @@ watch(
 );
 
 onMounted(async () => {
+  if (isOverlayWindow) return;
   updateViewportWidth();
   window.addEventListener("resize", updateViewportWidth);
   desktopSidebarCollapsed.value = readSidebarCollapsed();
@@ -179,7 +188,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <PlayerOverlay v-if="isOverlayWindow" />
   <div
+    v-else
     class="app-shell"
     :class="{ 'is-fullscreen': isFullscreen, 'sidebar-overlay-open': sidebarOverlayOpen }"
   >

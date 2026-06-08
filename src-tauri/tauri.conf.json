@@ -13,6 +13,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Hills Lite",
         "width": 1280,
         "height": 800,
@@ -25,6 +26,21 @@
         "fullscreen": false,
         "center": true,
         "theme": "Dark"
+      },
+      {
+        "label": "overlay",
+        "title": "Hills Lite Player",
+        "url": "/?overlay=1",
+        "width": 1280,
+        "height": 720,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": false,
+        "visible": false
       }
     ],
     "security": {

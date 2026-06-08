@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     sync::Arc,
     time::Duration,
 };
@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use crate::config::models::{Account, Line, LineStatus, Server};
 use crate::emby::models::{MediaItem, MediaSource, MediaStream, PlaybackInfo};
+use crate::emby::{run_external_reporter, ExternalPlaybackReporter};
 use crate::error::{AppError, AppResult};
 use crate::mpv::backend::MpvBackend;
 use crate::mpv::backend::{MpvTrackInfo, TrackKind};
@@ -663,6 +664,11 @@ async fn select_playback_line(
         });
         if let Some(selection) = range_broken.into_iter().next() {
             log_visual_player_stage(&format!("play:cache-then-local id={}", selection.line.id));
+            tracing::info!(
+                target = "player",
+                line_id = %selection.line.id,
+                "range-broken non-faststart MP4: caching to local file then playing"
+            );
             return Ok(PlaybackPlan::CacheThenLocal(selection));
         }
         log_visual_player_stage("play:blocked-range-broken-mp4");
@@ -1147,6 +1153,13 @@ async fn load_ready_playback_line(
             line_id,
             attempt_index + 1
         ));
+        tracing::info!(
+            target = "player",
+            line_id = %line_id,
+            attempt = attempt_index + 1,
+            range_supported,
+            "trying playback line"
+        );
 
         let mpv_url = match state
             .stream_proxy
@@ -1304,6 +1317,12 @@ async fn load_ready_playback_line(
         }
 
         log_visual_player_stage(&format!("play:mpv-line-attempt-failed id={line_id}"));
+        tracing::warn!(
+            target = "player",
+            line_id = %line_id,
+            attempt = attempt_index + 1,
+            "playback line failed; failing over to next candidate line"
+        );
     }
 
     Err(playback_ready_error(last_error.unwrap_or_else(|| {
@@ -2165,6 +2184,14 @@ pub async fn play_external(
         )));
     }
 
+    // Only mpv understands `--script`, so the reporter is injected (and stdout
+    // captured) exclusively for mpv players. Anything else keeps the original
+    // detached-launch behaviour.
+    let reporter_script = if looks_like_mpv(player_path) {
+        crate::mpv::paths::resolve_reporter_script()
+    } else {
+        None
+    };
     let args = build_external_player_args(
         &settings.external_player_args,
         player_path,
@@ -2173,11 +2200,43 @@ pub async fn play_external(
         user_agent.as_deref(),
         &headers,
         payload.start_ms.unwrap_or_default(),
+        reporter_script.as_deref().and_then(Path::to_str),
     );
-    Command::new(player_path)
-        .args(args)
-        .spawn()
-        .map_err(|e| AppError::Other(format!("launch external player: {e}")))?;
+
+    if reporter_script.is_some() {
+        // External mpv with the bundled reporter: capture stdout and bridge its
+        // `HILLS_MPV_EVENT:` lines onto Emby session reporting. The reader task
+        // is detached and never panics, so a crashing external mpv can't take
+        // the app down; stdout EOF triggers a final Stopped report.
+        let play_method = source.local_decode_play_method().to_string();
+        let mut child = tokio::process::Command::new(player_path)
+            .args(&args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| AppError::Other(format!("launch external player: {e}")))?;
+        let stdout = child.stdout.take();
+        let reporter = ExternalPlaybackReporter::new(
+            state.emby.clone(),
+            server.clone(),
+            account.clone(),
+            item.id.clone(),
+            pb.play_session_id.clone(),
+            play_method,
+        );
+        tokio::spawn(async move {
+            if let Some(stdout) = stdout {
+                run_external_reporter(tokio::io::BufReader::new(stdout), reporter).await;
+            }
+            let _ = child.wait().await;
+        });
+    } else {
+        Command::new(player_path)
+            .args(args)
+            .spawn()
+            .map_err(|e| AppError::Other(format!("launch external player: {e}")))?;
+    }
     Ok(())
 }
 
@@ -2197,6 +2256,184 @@ pub async fn stop(state: State<'_, Arc<AppState>>) -> AppResult<()> {
     if backend.execute(MpvCommand::Stop).await.is_err() {
         backend.shutdown().await?;
     }
+    let session = state.current_play_session.lock().await.take();
+    if let Some(s) = session {
+        if let Some(task_id) = s.record_task_id {
+            finalize_recording(&state, &task_id).await;
+        }
+    }
+    Ok(())
+}
+
+/// Start playback in a standalone (independent-window) bundled-mpv process.
+///
+/// This is the T2 parallel mode: instead of embedding mpv into the WebView via
+/// `--wid`, it launches the bundled mpv as its own top-level window with native
+/// OSC controls, sidestepping the WebView z-order issues. Progress is reported
+/// to Emby from the Rust side by parsing the mpv reporter on stdout (see
+/// `crate::mpv::standalone`). It reuses the exact Direct Play / Direct Stream
+/// source selection and local stream proxy as `play`, so no server-side
+/// transcoding is ever involved.
+#[tauri::command]
+pub async fn play_standalone(
+    state: State<'_, Arc<AppState>>,
+    payload: PlayPayload,
+) -> AppResult<PlaybackSourceResult> {
+    let account = state
+        .config
+        .active_account()
+        .ok_or_else(|| AppError::InvalidState("no active account".into()))?;
+    let server = state
+        .config
+        .server(&account.server_id)
+        .ok_or_else(|| AppError::NotFound(account.server_id.clone()))?;
+
+    let item = state
+        .emby
+        .get_item(&server, &account, &payload.item_id)
+        .await?;
+
+    let start_ticks = payload.start_ms.map(|ms| ms * 10_000);
+    let line_id = payload.line_id.as_deref();
+    let pb = state
+        .emby
+        .playback_info_for_line(&server, &account, &payload.item_id, start_ticks, line_id)
+        .await?;
+    // Reuse the local-decode-only source picker; this both enforces
+    // `supports_local_decode()` and blocks any transcoded source.
+    let source = pick_local_media_source(&pb, payload.media_source_id.as_deref())?;
+
+    let choice = match select_playback_line(
+        &state,
+        &server,
+        &account,
+        &item,
+        &source,
+        &pb.play_session_id,
+        payload.prefer_direct,
+        line_id,
+    )
+    .await?
+    {
+        PlaybackPlan::Stream(choice) => choice,
+        PlaybackPlan::CacheThenLocal(_) => {
+            return Err(AppError::InvalidState(
+                "此片源需要先缓存到本地再播放，独立窗口模式暂不支持，请改用常规播放。".into(),
+            ));
+        }
+    };
+
+    let selection = choice.selected;
+    let range_supported = selection.range_supported;
+    let mpv_url = state
+        .stream_proxy
+        .register_with_range_support(
+            selection.url.clone(),
+            selection.headers.clone(),
+            selection.user_agent.clone(),
+            range_supported,
+        )
+        .await?;
+
+    // The independent window owns playback; stop the embedded backend so the
+    // same item is not decoded twice.
+    let _ = state.mpv.backend().execute(MpvCommand::Stop).await;
+
+    let settings = state.config.settings();
+    let play_method = source.local_decode_play_method().to_string();
+    let start_ms = if range_supported {
+        payload.start_ms
+    } else {
+        None
+    };
+
+    state
+        .standalone
+        .start(crate::mpv::StandaloneStartRequest {
+            url: mpv_url.clone(),
+            title: item.name.clone(),
+            start_ms,
+            server: server.clone(),
+            account: account.clone(),
+            item_id: item.id.clone(),
+            play_session_id: pb.play_session_id.clone(),
+            play_method: play_method.clone(),
+            volume: 100,
+            hardware_decoding: settings.hardware_decoding,
+            cache_mb: settings.mpv_cache_mb,
+        })
+        .await?;
+
+    *state.current_play_session.lock().await = Some(CurrentPlaySession {
+        server_id: server.id.clone(),
+        account_id: account.id.clone(),
+        item_id: item.id.clone(),
+        play_session_id: pb.play_session_id.clone(),
+        media_source_id: source.id.clone(),
+        play_method: play_method.clone(),
+        line_id: selection.line.id.clone(),
+        record_task_id: None,
+    });
+
+    let tracks = source.media_streams.iter().map(stream_to_track).collect();
+    let media_sources = pb
+        .media_sources
+        .iter()
+        .enumerate()
+        .map(|(index, candidate)| media_source_result(candidate, index, &source.id))
+        .collect();
+    let lines = server
+        .lines
+        .iter()
+        .map(|candidate| PlaybackLineOptionResult {
+            id: candidate.id.clone(),
+            name: candidate.name.clone(),
+            base_url: candidate.base_url.clone(),
+            enabled: candidate.enabled,
+            status: candidate.last_status,
+            latency_ms: candidate.last_latency_ms,
+            selected: candidate.id == selection.line.id,
+        })
+        .collect();
+    let duration_ms = item.run_time_ticks.map(|ticks| (ticks / 10_000).max(0));
+    let diagnostics = json!({
+        "sourceKind": if source.supports_direct_play == Some(true) { "direct-play" } else { "direct-stream" },
+        "streamKind": "standalone-window",
+        "serverTranscodingAllowed": false,
+        "rangeSupported": range_supported,
+        "line": {
+            "id": selection.line.id.clone(),
+            "name": selection.line.name.clone(),
+            "baseUrl": selection.line.base_url.clone(),
+        },
+    });
+
+    Ok(PlaybackSourceResult {
+        item_id: item.id.clone(),
+        play_session_id: pb.play_session_id.clone(),
+        media_source_id: source.id.clone(),
+        play_method,
+        line_id: selection.line.id.clone(),
+        line_name: selection.line.name.clone(),
+        range_supported: Some(range_supported),
+        start_suppressed_non_seekable: !range_supported && payload.start_ms.unwrap_or_default() > 0,
+        stream_url: mpv_url,
+        duration_ms,
+        tracks,
+        media_sources,
+        lines,
+        headers: Vec::new(),
+        user_agent: None,
+        diagnostics,
+        prefetching: false,
+    })
+}
+
+/// Stop the standalone (independent-window) playback session, finalizing any
+/// watch-while-download recording the same way `stop` does.
+#[tauri::command]
+pub async fn stop_standalone(state: State<'_, Arc<AppState>>) -> AppResult<()> {
+    state.standalone.stop().await?;
     let session = state.current_play_session.lock().await.take();
     if let Some(s) = session {
         if let Some(task_id) = s.record_task_id {
@@ -2549,14 +2786,28 @@ pub async fn embed_set_rect(state: State<'_, Arc<AppState>>, rect: PlayerRect) -
     state.mpv.embed_rect(rect)
 }
 
-/// Reports whether the OS cursor moved inside this window since the last poll.
-/// The embedded mpv native child window sits above the WebView and swallows
-/// mouse events over the video area (WebView2 does not reliably receive them
-/// through `HTTRANSPARENT`), so the player polls this to reveal its controls
-/// when the user moves the mouse over the video.
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PointerProbe {
+    /// The OS cursor moved since the previous poll (anywhere on screen).
+    pub moved: bool,
+    /// The cursor currently sits inside this window's outer bounds.
+    pub inside: bool,
+    /// The cursor sits inside the bottom strip of the window where the control
+    /// bar lives. Used to keep controls pinned while the user reaches for / drags
+    /// the progress bar, even when the cursor is momentarily still.
+    pub near_bottom: bool,
+}
+
+/// Probes the OS cursor relative to this window. The embedded mpv native child
+/// window sits above the WebView and swallows mouse events over the video area
+/// (WebView2 does not reliably receive them through `HTTRANSPARENT`), so the
+/// player polls this to (a) reveal its controls when the user moves the mouse
+/// over the video and (b) keep them shown while the cursor hovers the bottom
+/// control strip.
 #[cfg(target_os = "windows")]
 #[tauri::command]
-pub fn embed_pointer_moved(window: tauri::Window) -> bool {
+pub fn embed_pointer_probe(window: tauri::Window) -> PointerProbe {
     use std::sync::atomic::{AtomicI64, Ordering};
     use windows::Win32::Foundation::POINT;
     use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
@@ -2565,29 +2816,41 @@ pub fn embed_pointer_moved(window: tauri::Window) -> bool {
 
     let mut point = POINT::default();
     if unsafe { GetCursorPos(&mut point) }.is_err() {
-        return false;
+        return PointerProbe::default();
     }
     let packed = ((point.x as i64) << 32) | (point.y as i64 & 0xffff_ffff);
     let moved = LAST.swap(packed, Ordering::Relaxed) != packed;
-    if !moved {
-        return false;
+
+    let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) else {
+        return PointerProbe {
+            moved,
+            ..PointerProbe::default()
+        };
+    };
+    let left = pos.x;
+    let right = pos.x + size.width as i32;
+    let top = pos.y;
+    let bottom = pos.y + size.height as i32;
+    let within_x = point.x >= left && point.x < right;
+    let within_y = point.y >= top && point.y < bottom;
+    let inside = within_x && within_y;
+
+    // Bottom strip ~22% of the window height (min 120px) catches the control bar
+    // area regardless of DPI scaling.
+    let zone = ((size.height as f32 * 0.22) as i32).max(120);
+    let near_bottom = inside && point.y >= bottom - zone;
+
+    PointerProbe {
+        moved,
+        inside,
+        near_bottom,
     }
-    // Only count movement that is inside this window.
-    let Ok(pos) = window.outer_position() else {
-        return false;
-    };
-    let Ok(size) = window.outer_size() else {
-        return false;
-    };
-    let within_x = point.x >= pos.x && point.x < pos.x + size.width as i32;
-    let within_y = point.y >= pos.y && point.y < pos.y + size.height as i32;
-    within_x && within_y
 }
 
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
-pub fn embed_pointer_moved(_window: tauri::Window) -> bool {
-    false
+pub fn embed_pointer_probe(_window: tauri::Window) -> PointerProbe {
+    PointerProbe::default()
 }
 
 #[tauri::command]
@@ -2761,8 +3024,10 @@ fn build_external_player_args(
     user_agent: Option<&str>,
     headers: &[(String, String)],
     start_ms: i64,
+    reporter_script: Option<&str>,
 ) -> Vec<String> {
     let header_args = mpv_header_args(headers);
+    let script_arg = reporter_script.map(|path| format!("--script={path}"));
     let start_ms = start_ms.max(0);
     let start_seconds = start_ms as f64 / 1000.0;
     let template = template.trim();
@@ -2776,13 +3041,16 @@ fn build_external_player_args(
                 args.push(format!("--user-agent={ua}"));
             }
             args.extend(header_args);
+            if let Some(script) = script_arg {
+                args.push(script);
+            }
             args.push(url.to_string());
             return args;
         }
         return vec![url.to_string()];
     }
 
-    parse_argument_template(template)
+    let mut args: Vec<String> = parse_argument_template(template)
         .into_iter()
         .flat_map(|arg| {
             if arg == "{headers}" {
@@ -2795,7 +3063,13 @@ fn build_external_player_args(
                 .replace("{startMs}", &start_ms.to_string())
                 .replace("{startSeconds}", &format!("{start_seconds:.3}"))]
         })
-        .collect()
+        .collect();
+    // Inject the reporter script for mpv-based custom templates so progress
+    // reporting still works; the caller only supplies it for mpv players.
+    if let Some(script) = script_arg {
+        args.push(script);
+    }
+    args
 }
 
 #[tauri::command]

@@ -152,6 +152,16 @@ impl StreamProxy {
             content_type,
             supported
         ));
+        // Always-on evidence (not just during visual-smoke runs) so line
+        // selection / Range failover can be diagnosed from normal logs.
+        tracing::info!(
+            target = "stream-proxy",
+            status = status.as_u16(),
+            has_content_range,
+            content_type = %content_type,
+            supported,
+            "range preflight"
+        );
         Ok((status.as_u16(), supported))
     }
 
@@ -368,6 +378,15 @@ async fn handle_connection(inner: Arc<StreamProxyInner>, mut stream: TcpStream) 
                 route.range_supported,
                 sanitize_proxy_log_value(&error.to_string())
             ));
+            tracing::warn!(
+                target = "stream-proxy",
+                id = %short_route_id(id),
+                method = %request.method,
+                range = %range_value,
+                range_supported = route.range_supported,
+                error = %sanitize_proxy_log_value(&error.to_string()),
+                "upstream stream request failed"
+            );
             write_simple_response(
                 &mut stream,
                 StatusCode::BAD_GATEWAY,
@@ -401,6 +420,16 @@ async fn handle_connection(inner: Arc<StreamProxyInner>, mut stream: TcpStream) 
         content_type,
         content_length
     ));
+    if status.as_u16() >= 400 {
+        tracing::warn!(
+            target = "stream-proxy",
+            id = %short_route_id(id),
+            range = %range_value,
+            range_supported = route.range_supported,
+            status = status.as_u16(),
+            "upstream returned error status for stream request"
+        );
+    }
 
     let bytes = write_upstream_response(
         &mut stream,
