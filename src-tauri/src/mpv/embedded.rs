@@ -22,6 +22,8 @@ use parking_lot::{Mutex, RwLock};
 use serde_json::{json, Map, Value};
 
 use crate::error::{AppError, AppResult};
+use crate::config::models::Anime4kMode;
+use crate::mpv::anime4k::{glsl_change_list_value, resolve_mode_shader_paths};
 use crate::mpv::backend::{
     MpvBackend, MpvChapterInfo, MpvCommand, MpvSnapshot, MpvTrackInfo, PictureMode, TrackKind,
 };
@@ -48,6 +50,18 @@ struct MpvEventDiagnostics {
     last_property: Option<String>,
     last_log: Option<String>,
     file_loaded_after_last_load: bool,
+}
+
+fn apply_anime4k_mode(mpv: &Mpv, mode: Anime4kMode) -> AppResult<()> {
+    let paths = resolve_mode_shader_paths(mode)?;
+    if paths.is_empty() {
+        mpv.command("change-list", &["glsl-shaders", "clr", ""])
+            .map_err(|e| AppError::Mpv(e.to_string()))
+    } else {
+        let value = glsl_change_list_value(&paths);
+        mpv.command("change-list", &["glsl-shaders", "set", value.as_str()])
+            .map_err(|e| AppError::Mpv(e.to_string()))
+    }
 }
 
 fn drop_buffers_if_requested(mpv: &Mpv, preserve_cache: bool) -> AppResult<()> {
@@ -749,6 +763,7 @@ impl MpvBackend for MpvEmbeddedBackend {
                 }
                 Ok(())
             }
+            MpvCommand::SetAnime4kMode(mode) => apply_anime4k_mode(&m, mode),
         }
     }
 

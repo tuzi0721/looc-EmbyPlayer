@@ -1,3 +1,4 @@
+pub mod anime4k;
 pub mod backend;
 #[cfg(feature = "mpv-embedded")]
 pub mod embedded;
@@ -11,5 +12,5 @@ pub use backend::{
     parse_reporter_event, MpvCommand, MpvReporterEvent, MpvSnapshot, PictureMode, SubtitleStyle,
 };
 pub use manager::MpvManager;
-pub use standalone::{StandalonePlayer, StandaloneStartRequest};
+pub use standalone::{StandaloneControl, StandalonePlayer, StandaloneStartRequest};
 pub use window_host::{ParentHandle, PlayerRect};

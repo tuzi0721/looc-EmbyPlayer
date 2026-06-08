@@ -30,6 +30,31 @@ pub const REPORTER_SCRIPT_NAME: &str = "hills_external_reporter.lua";
 /// emit `HILLS_MPV_EVENT:` progress events on stdout. Returns `None` when the
 /// script cannot be located so callers can degrade gracefully (mpv simply runs
 /// without the reporter).
+/// Resolve the bundled Anime4K GLSL shader directory (`resources/mpv/shaders`).
+pub fn resolve_shader_dir() -> Option<PathBuf> {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            for rel in ["resources/mpv/shaders", "mpv/shaders"] {
+                let candidate = dir.join(rel);
+                if candidate.is_dir() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        let candidate = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/mpv/shaders");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+    }
+
+    let fallback = PathBuf::from("resources/mpv/shaders");
+    fallback.is_dir().then_some(fallback)
+}
+
 pub fn resolve_reporter_script() -> Option<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {

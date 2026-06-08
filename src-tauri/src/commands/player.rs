@@ -13,7 +13,7 @@ use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 use url::Url;
 use uuid::Uuid;
 
-use crate::config::models::{Account, Line, LineStatus, Server};
+use crate::config::models::{Account, Anime4kMode, Line, LineStatus, Server};
 use crate::emby::models::{MediaItem, MediaSource, MediaStream, PlaybackInfo};
 use crate::emby::{run_external_reporter, ExternalPlaybackReporter};
 use crate::error::{AppError, AppResult};
@@ -1238,6 +1238,9 @@ async fn load_ready_playback_line(
             continue;
         }
         log_visual_player_stage(&format!("play:mpv-load-complete id={line_id}"));
+        if let Err(error) = apply_saved_anime4k_mode(state).await {
+            tracing::warn!(target = "player", error = %error, "apply Anime4K preset after load failed");
+        }
         log_visual_player_stage(&format!("play:mpv-ready-wait-start id={line_id}"));
         match wait_for_loaded_mpv_state(backend, Duration::from_secs(18)).await {
             Ok(_) => {
@@ -1926,6 +1929,9 @@ pub async fn play_file(state: State<'_, Arc<AppState>>, payload: PlayFilePayload
             autoload_subtitles: false,
         })
         .await?;
+    if let Err(error) = apply_saved_anime4k_mode(&state).await {
+        tracing::warn!(target = "player", error = %error, "apply Anime4K preset after local load failed");
+    }
 
     let settings = state.config.settings();
     let subtitle_style = SubtitleStyle {
@@ -2353,6 +2359,10 @@ pub async fn play_standalone(
             url: mpv_url.clone(),
             title: item.name.clone(),
             start_ms,
+            audio_track: None,
+            subtitle_track: None,
+            sub_file: None,
+            fullscreen: false,
             server: server.clone(),
             account: account.clone(),
             item_id: item.id.clone(),
@@ -2441,6 +2451,56 @@ pub async fn stop_standalone(state: State<'_, Arc<AppState>>) -> AppResult<()> {
         }
     }
     Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StandaloneControlPayload {
+    /// One of: pause, resume, stop, seek, setVolume, setAudioTrack,
+    /// setSubtitleTrack.
+    pub action: String,
+    #[serde(default)]
+    pub position_ms: Option<i64>,
+    #[serde(default)]
+    pub volume: Option<i32>,
+    #[serde(default)]
+    pub track_id: Option<i64>,
+}
+
+/// Drive the standalone (independent-window) player over its control IPC so the
+/// HTML overlay / Emby remote control can play/pause/seek/etc. without relying
+/// only on the player's native OSC.
+#[tauri::command]
+pub async fn standalone_control(
+    state: State<'_, Arc<AppState>>,
+    payload: StandaloneControlPayload,
+) -> AppResult<()> {
+    use crate::mpv::StandaloneControl;
+    let command = match payload.action.as_str() {
+        "pause" => StandaloneControl::Pause,
+        "resume" => StandaloneControl::Resume,
+        "stop" => StandaloneControl::Stop,
+        "seek" => StandaloneControl::Seek {
+            position_ms: payload.position_ms.unwrap_or(0),
+        },
+        "setVolume" => StandaloneControl::SetVolume {
+            volume: payload.volume.unwrap_or(100),
+        },
+        "setAudioTrack" => StandaloneControl::SetAudioTrack {
+            id: payload
+                .track_id
+                .ok_or_else(|| AppError::InvalidState("setAudioTrack requires trackId".into()))?,
+        },
+        "setSubtitleTrack" => StandaloneControl::SetSubtitleTrack {
+            id: payload.track_id,
+        },
+        other => {
+            return Err(AppError::InvalidState(format!(
+                "unknown standalone control action: {other}"
+            )))
+        }
+    };
+    state.standalone.control(command).await
 }
 
 /// Inspect the on-disk file that mpv wrote via `--stream-record` and update
@@ -2625,6 +2685,39 @@ pub async fn set_picture_mode(
         .mpv
         .backend()
         .execute(MpvCommand::SetPictureMode(payload.mode))
+        .await
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Anime4kModePayload {
+    pub mode: Anime4kMode,
+}
+
+#[tauri::command]
+pub async fn set_anime4k_mode(
+    state: State<'_, Arc<AppState>>,
+    payload: Anime4kModePayload,
+) -> AppResult<()> {
+    state.config.update_settings(|s| {
+        s.anime4k_mode = payload.mode;
+    })?;
+    state
+        .mpv
+        .backend()
+        .execute(MpvCommand::SetAnime4kMode(payload.mode))
+        .await
+}
+
+async fn apply_saved_anime4k_mode(state: &AppState) -> AppResult<()> {
+    let mode = state.config.settings().anime4k_mode;
+    if mode == Anime4kMode::Off {
+        return Ok(());
+    }
+    state
+        .mpv
+        .backend()
+        .execute(MpvCommand::SetAnime4kMode(mode))
         .await
 }
 

@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::config::models::Anime4kMode;
 use crate::error::AppResult;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -220,6 +221,8 @@ pub enum MpvCommand {
     ShowStatsOsd {
         page: u8,
     },
+    /// Apply an Anime4K GLSL shader preset (or clear when Off).
+    SetAnime4kMode(Anime4kMode),
 }
 
 #[allow(dead_code)]

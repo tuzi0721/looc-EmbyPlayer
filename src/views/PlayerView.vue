@@ -18,6 +18,7 @@ import { usePlayerStore, type DirectQueueEntry } from "@/stores/player";
 import { useServerStore } from "@/stores/server";
 import { useSettingsStore } from "@/stores/settings";
 import type {
+  Anime4kMode,
   DanmakuComment,
   DanmakuResult,
   MediaItem,
@@ -140,6 +141,14 @@ const pictureModeOptions: Array<{ value: PictureMode; label: string; icon: strin
   { value: "fill", label: "填充裁切", icon: "lucide:maximize-2" },
   { value: "stretch", label: "拉伸铺满", icon: "lucide:move-horizontal" },
   { value: "autocrop", label: "自动去黑边", icon: "lucide:scan-line" },
+];
+const anime4kModeOptions: Array<{ value: Anime4kMode; label: string }> = [
+  { value: "off", label: "关闭" },
+  { value: "modeAFast", label: "Mode A 快" },
+  { value: "modeA", label: "Mode A (1080p)" },
+  { value: "modeB", label: "Mode B (720p)" },
+  { value: "modeC", label: "Mode C (480p)" },
+  { value: "high", label: "高质 (A+A)" },
 ];
 type PlayerPanel = "subtitle" | "settings" | "episode" | "chapter" | "danmaku" | "source" | "stats";
 type StatsPage = "summary" | "video" | "audio" | "tracks";
@@ -2207,6 +2216,18 @@ async function setPictureMode(mode: PictureMode) {
   bumpControls();
 }
 
+async function setAnime4kMode(mode: Anime4kMode) {
+  if (useHtmlVideo) return;
+  try {
+    await api.setAnime4kMode(mode);
+    settings.settings.anime4kMode = mode;
+  } catch (error) {
+    errorText.value = error instanceof Error ? error.message : String(error);
+    showControls.value = true;
+  }
+  bumpControls();
+}
+
 async function openStatsInfo() {
   settingsMenuOpen.value = false;
   if (settings.settings.statsOverlayMode === "mpv-osd") {
@@ -3073,6 +3094,26 @@ onBeforeUnmount(async () => {
                     <span>{{ option.label }}</span>
                     <Icon
                       v-if="pictureMode === option.value"
+                      icon="lucide:check"
+                      width="14"
+                      class="popup-option__check"
+                    />
+                  </button>
+                </div>
+                <div v-if="embedVideo" class="popup-section">
+                  <div class="popup-section__title">Anime4K 画质</div>
+                  <button
+                    v-for="option in anime4kModeOptions"
+                    :key="option.value"
+                    class="popup-option"
+                    :class="{ active: settings.settings.anime4kMode === option.value }"
+                    type="button"
+                    @click="setAnime4kMode(option.value)"
+                  >
+                    <Icon icon="lucide:sparkles" width="15" />
+                    <span>{{ option.label }}</span>
+                    <Icon
+                      v-if="settings.settings.anime4kMode === option.value"
                       icon="lucide:check"
                       width="14"
                       class="popup-option__check"

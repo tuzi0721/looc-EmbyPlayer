@@ -29,6 +29,10 @@ fn ensure_mpv_windows() -> io::Result<()> {
     println!("cargo:rerun-if-changed=resources/mpv/d3dcompiler_43.dll");
     println!("cargo:rerun-if-changed=resources/mpv/mpv/fonts.conf");
     println!("cargo:rerun-if-changed=resources/mpv/hills_external_reporter.lua");
+    let shaders_dir = bundled.join("shaders");
+    if shaders_dir.is_dir() {
+        println!("cargo:rerun-if-changed={}", shaders_dir.display());
+    }
     println!("cargo:rustc-link-search=native={}", bundled.display());
 
     if !mpv_exe.is_file() {
@@ -52,6 +56,10 @@ fn ensure_mpv_windows() -> io::Result<()> {
                 fs::remove_dir_all(&dest)?;
             }
             copy_tree(&bundled, &dest)?;
+            let shader_src = bundled.join("shaders");
+            if shader_src.is_dir() {
+                copy_tree(&shader_src, &dest.join("shaders"))?;
+            }
             copy_runtime_dll(&bundled, target_dir, "libmpv-2.dll")?;
             copy_runtime_dll(&bundled, target_dir, "d3dcompiler_43.dll")?;
         }

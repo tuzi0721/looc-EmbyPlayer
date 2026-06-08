@@ -38,6 +38,8 @@ export interface Account {
   lastUsedAt: string;
 }
 
+export type Anime4kMode = "off" | "modeAFast" | "modeA" | "modeB" | "modeC" | "high";
+
 export interface AppSettings {
   heartbeatIntervalSecs: number;
   healthCheckIntervalSecs: number;
@@ -82,6 +84,7 @@ export interface AppSettings {
   subtitleShadowOffset: number;
   subtitlePositionPct: number;
   subtitleForceStyle: boolean;
+  anime4kMode: Anime4kMode;
 }
 
 export interface LineHealthReport {

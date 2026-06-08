@@ -13,7 +13,8 @@ use crate::commands::shortcuts::{
     self, merge_shortcut_bindings, normalize_shortcut_bindings, ShortcutBinding,
 };
 use crate::config::models::{
-    Account, AppSettings, HomeHeroStyle, MpvBackendKind, Server, StatsOverlayMode, Theme,
+    Account, Anime4kMode, AppSettings, HomeHeroStyle, MpvBackendKind, Server, StatsOverlayMode,
+    Theme,
 };
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -67,6 +68,7 @@ pub struct SettingsPatch {
     pub subtitle_shadow_offset: Option<f64>,
     pub subtitle_position_pct: Option<u32>,
     pub subtitle_force_style: Option<bool>,
+    pub anime4k_mode: Option<Anime4kMode>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -289,12 +291,22 @@ pub async fn update_settings(
         if let Some(v) = patch.subtitle_force_style {
             s.subtitle_force_style = v;
         }
+        if let Some(v) = patch.anime4k_mode {
+            s.anime4k_mode = v;
+        }
     })?;
 
     let settings = state.config.settings();
     let need_mpv_rebuild = previous_settings.mpv_backend != settings.mpv_backend;
     if need_mpv_rebuild {
         state.mpv.rebuild(&settings).await?;
+    }
+    if previous_settings.anime4k_mode != settings.anime4k_mode {
+        let _ = state
+            .mpv
+            .backend()
+            .execute(crate::mpv::MpvCommand::SetAnime4kMode(settings.anime4k_mode))
+            .await;
     }
     Ok(settings)
 }

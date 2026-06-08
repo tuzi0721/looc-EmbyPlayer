@@ -23,6 +23,10 @@ release-electron
 /src-tauri/target
 **/*.rs.bk
 
+# Self-developed player: build artifacts + bundled runtime (large binaries, not committed)
+/player/build/
+/src-tauri/resources/player/
+
 # Logs
 *.log
 logs/

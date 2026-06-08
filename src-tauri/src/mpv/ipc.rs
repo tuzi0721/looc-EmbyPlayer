@@ -11,8 +11,9 @@ use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
 use tokio::time::timeout;
 
-use crate::config::models::AppSettings;
+use crate::config::models::{Anime4kMode, AppSettings};
 use crate::error::{AppError, AppResult};
+use crate::mpv::anime4k::{glsl_change_list_value, resolve_mode_shader_paths};
 use crate::mpv::backend::{
     MpvBackend, MpvChapterInfo, MpvCommand, MpvSnapshot, MpvTrackInfo, PictureMode, TrackKind,
 };
@@ -453,6 +454,24 @@ impl MpvIpcBackend {
         }
         Ok(())
     }
+
+    async fn apply_anime4k_mode(&self, mode: Anime4kMode) -> AppResult<()> {
+        let paths = resolve_mode_shader_paths(mode)?;
+        if paths.is_empty() {
+            self.send_command(vec![json!("change-list"), json!("glsl-shaders"), json!("clr"), json!("")])
+                .await?;
+        } else {
+            let value = glsl_change_list_value(&paths);
+            self.send_command(vec![
+                json!("change-list"),
+                json!("glsl-shaders"),
+                json!("set"),
+                json!(value),
+            ])
+            .await?;
+        }
+        Ok(())
+    }
 }
 
 async fn spawn_mpv_ipc(
@@ -878,6 +897,7 @@ impl MpvBackend for MpvIpcBackend {
                 }
                 Ok(())
             }
+            MpvCommand::SetAnime4kMode(mode) => self.apply_anime4k_mode(mode).await,
         }
     }
 

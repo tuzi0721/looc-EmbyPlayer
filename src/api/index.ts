@@ -14,6 +14,7 @@ import type {
   MpvSnapshot,
   OnlineSubtitleResolveResult,
   OnlineSubtitleSearchResponse,
+  Anime4kMode,
   PictureMode,
   RemoteSession,
   Server,
@@ -394,6 +395,8 @@ export const api = {
   setMuted: (muted: boolean) => invoke<void>("set_muted", { payload: { muted } }),
   setPictureMode: (mode: PictureMode) =>
     invoke<void>("set_picture_mode", { payload: { mode } }),
+  setAnime4kMode: (mode: Anime4kMode) =>
+    invoke<void>("set_anime4k_mode", { payload: { mode } }),
   showMpvStatsOsd: (page = 1) =>
     invoke<void>("show_mpv_stats_osd", { page }),
   setAlwaysOnTop: (enabled: boolean) =>

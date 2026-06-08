@@ -622,13 +622,25 @@ const capabilityStatusLabel: Record<CapabilityStatus, string> = {
   disabled: "禁用",
 };
 
-const enhancementSummary = computed(() =>
-  isWindowsPlatform.value ? "HDR 系统入口" : "等待硬件路径",
-);
+const enhancementSummary = computed(() => {
+  const parts: string[] = [];
+  if (settings.settings.anime4kMode && settings.settings.anime4kMode !== "off") {
+    parts.push("Anime4K");
+  }
+  if (isWindowsPlatform.value) parts.push("HDR");
+  return parts.length > 0 ? parts.join(" / ") : "播放器内切换";
+});
 const fileServicesSummary = computed(() => "本地 / WebDAV / Alist 可用");
 
 const enhancementCapabilities = computed<EnhancementCapability[]>(() => {
   return [
+    {
+      key: "anime4k",
+      label: "Anime4K GLSL",
+      detail: "播放器设置菜单可切换关闭 / Mode A 快 / A / B / C / 高质",
+      icon: "lucide:sparkles",
+      status: "available",
+    },
     {
       key: "windows-hdr",
       label: "Windows HDR",

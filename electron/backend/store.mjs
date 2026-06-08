@@ -46,6 +46,7 @@ export const DEFAULT_SETTINGS = {
   subtitleShadowOffset: 0,
   subtitlePositionPct: 100,
   subtitleForceStyle: false,
+  anime4kMode: "off",
 };
 
 export const DEFAULT_GLOBAL_SHORTCUTS = [

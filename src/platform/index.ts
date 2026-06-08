@@ -129,6 +129,7 @@ const WEB_DEFAULT_SETTINGS: AppSettings = {
   subtitleShadowOffset: 0,
   subtitlePositionPct: 100,
   subtitleForceStyle: false,
+  anime4kMode: "off",
 };
 
 const WEB_STATE_KEY = "hills-lite:web-preview-state:v1";

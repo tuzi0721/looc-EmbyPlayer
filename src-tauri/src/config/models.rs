@@ -211,6 +211,8 @@ pub struct AppSettings {
     pub subtitle_position_pct: u32,
     #[serde(default)]
     pub subtitle_force_style: bool,
+    #[serde(default)]
+    pub anime4k_mode: Anime4kMode,
 }
 
 impl Default for AppSettings {
@@ -259,6 +261,7 @@ impl Default for AppSettings {
             subtitle_shadow_offset: 0.0,
             subtitle_position_pct: default_subtitle_position_pct(),
             subtitle_force_style: false,
+            anime4k_mode: Anime4kMode::default(),
         }
     }
 }
@@ -287,6 +290,23 @@ pub enum HomeHeroStyle {
 impl Default for HomeHeroStyle {
     fn default() -> Self {
         Self::Cinema
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Anime4kMode {
+    Off,
+    ModeAFast,
+    ModeA,
+    ModeB,
+    ModeC,
+    High,
+}
+
+impl Default for Anime4kMode {
+    fn default() -> Self {
+        Self::Off
     }
 }
 
