@@ -5,6 +5,7 @@
 #include <QtOpenGL/QOpenGLFramebufferObjectFormat>
 #include <QtQuick/QQuickWindow>
 #include <QtCore/QByteArray>
+#include <QtCore/QCoreApplication>
 #include <QtCore/QDateTime>
 #include <QtCore/QVector>
 
@@ -121,6 +122,12 @@ void wakeup(void *ctx) {
 
 MpvObject::MpvObject(QQuickItem *parent)
     : QQuickFramebufferObject(parent), m_anime4k(new Anime4K(this)) {
+    // Anime4K glsl-shaders ship next to the exe (install → bin/shaders/anime4k/).
+    // Resolve against applicationDirPath so presets work regardless of CWD;
+    // without this the bare filenames resolve against the launch directory and
+    // every preset silently no-ops ("shader missing, skipping").
+    m_anime4k->setShaderDir(QCoreApplication::applicationDirPath() +
+                            QStringLiteral("/shaders/anime4k"));
     initMpv();
     connect(this, &MpvObject::onUpdate, this, &MpvObject::doUpdate,
             Qt::QueuedConnection);
