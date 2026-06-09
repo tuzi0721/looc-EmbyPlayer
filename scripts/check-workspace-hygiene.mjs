@@ -7,6 +7,9 @@ const allowedIgnored = new Set([
   "node_modules/",
   "release-electron/",
   "src-tauri/target/",
+  // Self-developed player: build artifacts + packaged runtime (large binaries, not committed).
+  "player/build/",
+  "src-tauri/resources/player/",
 ]);
 
 const output = execFileSync("git", ["status", "--short", "--ignored"], {

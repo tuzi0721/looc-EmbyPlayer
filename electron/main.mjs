@@ -26,7 +26,16 @@ const imageCacheInflight = new Map();
 const remoteFileImageRegistry = new Map();
 const maxRemoteFileImages = 2048;
 const imageQueryKeys = new Set(["maxWidth", "maxHeight", "width", "height", "quality", "format", "tag"]);
-const noOpCommands = new Set([]);
+const noOpCommands = new Set([
+  // Tauri-runtime-only commands. The Electron host has no equivalent yet, so
+  // return null instead of throwing "not migrated". These are provided by the
+  // Tauri self-developed-player path: embedded native-window pointer probe,
+  // mp4 prefetch state, and Anime4K mode.
+  "embed_pointer_probe",
+  "get_prefetch_state",
+  "set_anime4k_mode",
+  "cancel_prefetch",
+]);
 const localVideoExtensions = new Set([
   "mp4",
   "mkv",
