@@ -64,7 +64,7 @@ impl AppState {
             s.mpv_backend = MpvBackendKind::Embedded;
         })?;
         let settings = config.settings();
-        let http = build_client(settings.request_timeout_ms)?;
+        let http = build_client(&settings)?;
         let emby = EmbyClient::new(http, config.clone());
         let mpv = MpvManager::new(&settings)?;
         let standalone = crate::mpv::StandalonePlayer::new(emby.clone());

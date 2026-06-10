@@ -13,8 +13,8 @@ use crate::commands::shortcuts::{
     self, merge_shortcut_bindings, normalize_shortcut_bindings, ShortcutBinding,
 };
 use crate::config::models::{
-    Account, Anime4kMode, AppSettings, HomeHeroStyle, MpvBackendKind, Server, StatsOverlayMode,
-    Theme,
+    Account, Anime4kMode, AppSettings, HomeHeroStyle, MpvBackendKind, NetworkProxyMode, Server,
+    StatsOverlayMode, Theme,
 };
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -31,6 +31,9 @@ pub struct SettingsPatch {
     pub blur_strength: Option<u32>,
     pub enable_window_vibrancy: Option<bool>,
     pub close_to_tray: Option<bool>,
+    pub ignore_ssl_errors: Option<bool>,
+    pub network_proxy_mode: Option<NetworkProxyMode>,
+    pub http_proxy_url: Option<String>,
     pub mpv_backend: Option<MpvBackendKind>,
     #[serde(default, deserialize_with = "deserialize_nullable_field")]
     pub external_player_path: Option<Option<String>>,
@@ -165,6 +168,15 @@ pub async fn update_settings(
         }
         if let Some(v) = patch.close_to_tray {
             s.close_to_tray = v;
+        }
+        if let Some(v) = patch.ignore_ssl_errors {
+            s.ignore_ssl_errors = v;
+        }
+        if let Some(v) = patch.network_proxy_mode {
+            s.network_proxy_mode = v;
+        }
+        if let Some(v) = patch.http_proxy_url {
+            s.http_proxy_url = v.trim().to_string();
         }
         if let Some(v) = patch.mpv_backend {
             s.mpv_backend = v;

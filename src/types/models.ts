@@ -50,6 +50,9 @@ export interface AppSettings {
   blurStrength: number;
   enableWindowVibrancy: boolean;
   closeToTray: boolean;
+  ignoreSslErrors: boolean;
+  networkProxyMode: "none" | "system" | "custom";
+  httpProxyUrl: string;
   mpvBackend: "ipc" | "embedded";
   externalPlayerPath?: string | null;
   externalPlayerArgs: string;

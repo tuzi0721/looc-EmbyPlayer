@@ -1155,6 +1155,49 @@ const danmakuSummary = computed(() => {
         <Icon icon="lucide:chevron-right" width="16" class="chev" />
       </button>
       <div v-if="openPanel === 'network'" class="panel glass">
+        <label class="field field--inline">
+          <span>忽略 SSL 证书校验（重启后生效）</span>
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.ignoreSslErrors"
+            @change="(e: any) => save('ignoreSslErrors', e.target.checked)"
+          />
+        </label>
+        <label class="field">
+          <span>网络代理（重启后生效）</span>
+          <div class="seg">
+            <button
+              type="button"
+              :class="{ active: settings.settings.networkProxyMode === 'none' }"
+              @click="save('networkProxyMode', 'none')"
+            >
+              不使用
+            </button>
+            <button
+              type="button"
+              :class="{ active: settings.settings.networkProxyMode === 'system' }"
+              @click="save('networkProxyMode', 'system')"
+            >
+              跟随系统
+            </button>
+            <button
+              type="button"
+              :class="{ active: settings.settings.networkProxyMode === 'custom' }"
+              @click="save('networkProxyMode', 'custom')"
+            >
+              自定义
+            </button>
+          </div>
+        </label>
+        <label v-if="settings.settings.networkProxyMode === 'custom'" class="field">
+          <span>HTTP 代理地址</span>
+          <GlassInput
+            placeholder="http://127.0.0.1:7897"
+            :model-value="settings.settings.httpProxyUrl"
+            @update:modelValue="(v) => save('httpProxyUrl', String(v).trim())"
+          />
+        </label>
         <label class="field">
           <span>心跳保号周期（秒）</span>
           <GlassInput

@@ -143,6 +143,14 @@ pub struct AppSettings {
     /// the system tray instead of exiting. Default off.
     #[serde(default)]
     pub close_to_tray: bool,
+    // Reference parity (HillsLite 设置·通用·网络). Applied when the HTTP client
+    // is built (app start); changes take effect after restart.
+    #[serde(default)]
+    pub ignore_ssl_errors: bool,
+    #[serde(default)]
+    pub network_proxy_mode: NetworkProxyMode,
+    #[serde(default)]
+    pub http_proxy_url: String,
     #[serde(default)]
     pub mpv_backend: MpvBackendKind,
     #[serde(default)]
@@ -239,6 +247,9 @@ impl Default for AppSettings {
             blur_strength: default_blur_strength(),
             enable_window_vibrancy: true,
             close_to_tray: false,
+            ignore_ssl_errors: false,
+            network_proxy_mode: NetworkProxyMode::default(),
+            http_proxy_url: String::new(),
             mpv_backend: MpvBackendKind::default(),
             external_player_path: None,
             external_player_args: String::new(),
@@ -293,6 +304,23 @@ pub enum Theme {
 impl Default for Theme {
     fn default() -> Self {
         Self::Dark
+    }
+}
+
+/// Reference parity (HillsLite 设置·通用·网络): outbound proxy policy for the
+/// app's HTTP client. `System` follows the environment/system proxy (reqwest
+/// default), `None` forces direct, `Custom` uses `http_proxy_url`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NetworkProxyMode {
+    None,
+    System,
+    Custom,
+}
+
+impl Default for NetworkProxyMode {
+    fn default() -> Self {
+        Self::System
     }
 }
 
