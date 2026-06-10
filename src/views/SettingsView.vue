@@ -669,6 +669,25 @@ const preferredLanguageOptions = [
   { value: "en,eng", label: "英语" },
   { value: "ko,kor", label: "韩语" },
 ];
+
+// Reference parity (HillsLite「首选版本」): multi-version auto-pick strategy.
+const preferredVersionOptions = [
+  { value: "default", label: "默认" },
+  { value: "hdr-first", label: "HDR优先" },
+  { value: "sdr-first", label: "SDR优先" },
+  { value: "high-bitrate", label: "高码率" },
+  { value: "low-bitrate", label: "低码率" },
+  { value: "high-framerate", label: "高帧率" },
+] as const;
+
+async function editMpvConf() {
+  try {
+    const confPath = await api.ensureMpvConf();
+    await api.openPath(confPath);
+  } catch {
+    /* opener failure is non-fatal */
+  }
+}
 const isWindowsPlatform = computed(() => platformLabel.value.toLowerCase().includes("windows"));
 
 type CapabilityStatus = "available" | "disabled";
@@ -1452,6 +1471,27 @@ const danmakuSummary = computed(() => {
             />
             <strong>{{ settings.settings.markWatchedThresholdPct }}%</strong>
           </div>
+        </label>
+        <label class="field">
+          <span>首选版本（多版本自动选源）</span>
+          <div class="seg">
+            <button
+              v-for="opt in preferredVersionOptions"
+              :key="opt.value"
+              type="button"
+              :class="{ active: settings.settings.preferredVersionStrategy === opt.value }"
+              @click="save('preferredVersionStrategy', opt.value)"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
+        </label>
+        <label class="field field--inline">
+          <span>编辑 mpv.conf（下次播放生效）</span>
+          <button type="button" class="action-btn" @click="editMpvConf">
+            <Icon icon="lucide:file-cog" width="15" />
+            <span>打开</span>
+          </button>
         </label>
         <label class="field field--inline">
           <span>右上角网速</span>

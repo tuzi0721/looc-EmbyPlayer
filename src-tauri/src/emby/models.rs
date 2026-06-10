@@ -495,6 +495,77 @@ impl MediaSource {
             "DirectStream"
         }
     }
+
+    fn video_streams(&self) -> impl Iterator<Item = &MediaStream> {
+        self.media_streams
+            .iter()
+            .filter(|s| s.stream_type.as_deref() == Some("Video"))
+    }
+
+    pub fn is_hdr(&self) -> bool {
+        self.video_streams().any(|s| {
+            s.video_range
+                .as_deref()
+                .map(|range| {
+                    let range = range.to_ascii_lowercase();
+                    range.contains("hdr") || range.contains("dovi") || range.contains("hlg")
+                })
+                .unwrap_or(false)
+        })
+    }
+
+    pub fn effective_bitrate(&self) -> i64 {
+        self.bitrate.unwrap_or_else(|| {
+            self.media_streams
+                .iter()
+                .filter_map(|s| s.bit_rate)
+                .sum::<i64>()
+        })
+    }
+
+    pub fn max_video_framerate(&self) -> f32 {
+        self.video_streams()
+            .filter_map(|s| s.real_frame_rate)
+            .fold(0.0_f32, f32::max)
+    }
+}
+
+/// Reference parity (HillsLite「首选版本」): pick the preferred local-decode
+/// media source according to the configured strategy. `Default` keeps the
+/// server-provided order.
+pub fn pick_preferred_local_source<'a>(
+    sources: &'a [MediaSource],
+    strategy: crate::config::models::PreferredVersionStrategy,
+) -> Option<&'a MediaSource> {
+    use crate::config::models::PreferredVersionStrategy as S;
+    let mut candidates: Vec<&MediaSource> =
+        sources.iter().filter(|s| s.supports_local_decode()).collect();
+    if candidates.is_empty() {
+        return None;
+    }
+    if matches!(strategy, S::Default) {
+        return candidates.first().copied();
+    }
+    // Stable sort keeps server order as the tie-breaker.
+    candidates.sort_by(|a, b| match strategy {
+        S::Default => std::cmp::Ordering::Equal,
+        S::HdrFirst => b
+            .is_hdr()
+            .cmp(&a.is_hdr())
+            .then_with(|| b.effective_bitrate().cmp(&a.effective_bitrate())),
+        S::SdrFirst => a
+            .is_hdr()
+            .cmp(&b.is_hdr())
+            .then_with(|| b.effective_bitrate().cmp(&a.effective_bitrate())),
+        S::HighBitrate => b.effective_bitrate().cmp(&a.effective_bitrate()),
+        S::LowBitrate => a.effective_bitrate().cmp(&b.effective_bitrate()),
+        S::HighFramerate => b
+            .max_video_framerate()
+            .partial_cmp(&a.max_video_framerate())
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.effective_bitrate().cmp(&a.effective_bitrate())),
+    });
+    candidates.first().copied()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -532,6 +603,10 @@ pub struct MediaStream {
     pub bit_rate: Option<i64>,
     #[serde(default, deserialize_with = "optional_i32")]
     pub channels: Option<i32>,
+    #[serde(default, deserialize_with = "optional_string")]
+    pub video_range: Option<String>,
+    #[serde(default, deserialize_with = "optional_f32")]
+    pub real_frame_rate: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

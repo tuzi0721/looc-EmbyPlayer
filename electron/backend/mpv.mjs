@@ -97,6 +97,19 @@ export function resolveReporterScript(mpvExePath) {
   }
 }
 
+// User-editable mpv.conf shared with the Tauri runtime
+// (%APPDATA%/app.embyplayer/mpv.conf); injected via --include when present.
+export function resolveUserMpvConf() {
+  try {
+    const base = process.env.APPDATA;
+    if (!base) return null;
+    const candidate = path.join(base, "app.embyplayer", "mpv.conf");
+    return fileExists(candidate) ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
 function parseTrackKind(value) {
   if (value === "video") return "video";
   if (value === "audio") return "audio";
@@ -309,6 +322,20 @@ export class MpvController {
       args.push("--cache=yes");
       args.push(`--demuxer-max-bytes=${settings.mpvCacheMb}MiB`);
     }
+
+    // Parity with the Rust IPC backend: preferred track languages, forced
+    // stereo, custom proxy passthrough and the user mpv.conf include.
+    const alang = (settings.preferredAudioLanguage ?? "").trim();
+    if (alang) args.push(`--alang=${alang}`);
+    const slang = (settings.preferredSubtitleLanguage ?? "").trim();
+    if (slang) args.push(`--slang=${slang}`);
+    if (settings.forceStereoAudio) args.push("--audio-channels=stereo");
+    if (settings.networkProxyMode === "custom") {
+      const proxy = (settings.httpProxyUrl ?? "").trim();
+      if (proxy) args.push(`--http-proxy=${proxy}`);
+    }
+    const userConf = resolveUserMpvConf();
+    if (userConf) args.push(`--include=${userConf}`);
 
     // Parity with the Rust embedded backend: load the bundled progress reporter
     // on every mpv launch path. This controller drives Emby reporting from

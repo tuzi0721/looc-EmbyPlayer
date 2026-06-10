@@ -447,6 +447,7 @@ export const api = {
     invoke<ConfigTransferSummary | null>("import_config", { payload: { mode } }),
   getCacheUsage: () => invoke<CacheUsage>("get_cache_usage"),
   clearAppCache: () => invoke<CacheUsage>("clear_app_cache"),
+  ensureMpvConf: () => invoke<string>("ensure_mpv_conf"),
 
   // Danmaku
   listDanmakuProviders: () =>

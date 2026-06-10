@@ -2715,6 +2715,21 @@ async function handleInvoke(command, args = {}) {
     return null;
   }
 
+  if (command === "ensure_mpv_conf") {
+    const base = process.env.APPDATA;
+    if (!base) throw new Error("cannot resolve mpv.conf location");
+    const confDir = path.join(base, "app.embyplayer");
+    const confPath = path.join(confDir, "mpv.conf");
+    if (!fs.existsSync(confPath)) {
+      fs.mkdirSync(confDir, { recursive: true });
+      fs.writeFileSync(
+        confPath,
+        "# Hills Lite 用户 mpv.conf\n# 此文件会以 --include 方式注入每次 mpv 启动，覆盖应用默认值。\n# 示例：\n# demuxer-max-bytes=512MiB\n# sub-font-size=42\n",
+      );
+    }
+    return confPath;
+  }
+
   if (command === "get_cache_usage") {
     const ses = mainWindow?.webContents?.session ?? session.defaultSession;
     const bytes = ses ? await ses.getCacheSize().catch(() => 0) : 0;

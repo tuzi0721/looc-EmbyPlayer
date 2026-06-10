@@ -191,6 +191,10 @@ pub struct AppSettings {
     // after which the item is explicitly marked played on stop.
     #[serde(default = "default_mark_watched_threshold_pct")]
     pub mark_watched_threshold_pct: u32,
+    // Reference parity (HillsLite「首选版本」): auto-pick strategy when an item
+    // has multiple local-decode-capable media sources.
+    #[serde(default)]
+    pub preferred_version_strategy: PreferredVersionStrategy,
     #[serde(default)]
     pub mpv_backend: MpvBackendKind,
     #[serde(default)]
@@ -305,6 +309,7 @@ impl Default for AppSettings {
             external_potplayer_enabled: false,
             external_potplayer_path: None,
             mark_watched_threshold_pct: default_mark_watched_threshold_pct(),
+            preferred_version_strategy: PreferredVersionStrategy::default(),
             mpv_backend: MpvBackendKind::default(),
             external_player_path: None,
             external_player_args: String::new(),
@@ -376,6 +381,25 @@ pub enum NetworkProxyMode {
 impl Default for NetworkProxyMode {
     fn default() -> Self {
         Self::System
+    }
+}
+
+/// Reference parity (HillsLite 设置·播放器「首选版本」): how to auto-pick a
+/// media source when an item exposes multiple local-decode-capable versions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PreferredVersionStrategy {
+    Default,
+    HdrFirst,
+    SdrFirst,
+    HighBitrate,
+    LowBitrate,
+    HighFramerate,
+}
+
+impl Default for PreferredVersionStrategy {
+    fn default() -> Self {
+        Self::Default
     }
 }
 

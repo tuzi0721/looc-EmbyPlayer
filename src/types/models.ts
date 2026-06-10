@@ -68,6 +68,13 @@ export interface AppSettings {
   externalPotplayerEnabled: boolean;
   externalPotplayerPath: string | null;
   markWatchedThresholdPct: number;
+  preferredVersionStrategy:
+    | "default"
+    | "hdr-first"
+    | "sdr-first"
+    | "high-bitrate"
+    | "low-bitrate"
+    | "high-framerate";
   mpvBackend: "ipc" | "embedded";
   externalPlayerPath?: string | null;
   externalPlayerArgs: string;

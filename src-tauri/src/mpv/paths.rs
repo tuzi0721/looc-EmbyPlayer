@@ -55,6 +55,15 @@ pub fn resolve_shader_dir() -> Option<PathBuf> {
     fallback.is_dir().then_some(fallback)
 }
 
+/// Location of the user-editable mpv.conf (reference parity: HillsLite
+/// 设置·调试「编辑 mpv.conf」). Lives next to the app config store
+/// (`%APPDATA%/app.embyplayer/mpv.conf`) and is injected into every mpv spawn
+/// via `--include` when present.
+pub fn resolve_user_mpv_conf() -> Option<PathBuf> {
+    let base = std::env::var_os("APPDATA").map(PathBuf::from)?;
+    Some(base.join("app.embyplayer").join("mpv.conf"))
+}
+
 pub fn resolve_reporter_script() -> Option<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {

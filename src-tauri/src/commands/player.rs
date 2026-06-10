@@ -705,7 +705,11 @@ pub async fn get_playback_source(
         .emby
         .playback_info_for_line(&server, &account, &payload.item_id, start_ticks, line_id)
         .await?;
-    let source = pick_local_media_source(&pb, payload.media_source_id.as_deref())?;
+    let source = pick_local_media_source(
+        &pb,
+        payload.media_source_id.as_deref(),
+        state.config.settings().preferred_version_strategy,
+    )?;
     let play_method = source.local_decode_play_method().to_string();
     let line = state.emby.pick_line(&server, line_id)?;
     let url = state.emby.build_stream_url_for_line(
@@ -848,16 +852,16 @@ pub async fn play(
             }
             source.clone()
         }
-        None => pb
-            .media_sources
-            .iter()
-            .find(|source| source.supports_local_decode())
-            .ok_or_else(|| {
-                AppError::InvalidState(
-                    "已阻止播放：服务端没有返回可本机直连或本机直流的媒体源。Hills Lite 不允许服务端解码/转码，以避免压垮 NAS、路由器或 VPS。".into(),
-                )
-            })?
-            .clone(),
+        None => crate::emby::models::pick_preferred_local_source(
+            &pb.media_sources,
+            state.config.settings().preferred_version_strategy,
+        )
+        .ok_or_else(|| {
+            AppError::InvalidState(
+                "已阻止播放：服务端没有返回可本机直连或本机直流的媒体源。Hills Lite 不允许服务端解码/转码，以避免压垮 NAS、路由器或 VPS。".into(),
+            )
+        })?
+        .clone(),
     };
     log_visual_player_stage("play:source-selected");
 
@@ -1440,6 +1444,7 @@ fn strip_error_prefix(message: &str) -> String {
 fn pick_local_media_source(
     pb: &PlaybackInfo,
     media_source_id: Option<&str>,
+    strategy: crate::config::models::PreferredVersionStrategy,
 ) -> AppResult<MediaSource> {
     match media_source_id.filter(|id| !id.trim().is_empty()) {
         Some(id) => {
@@ -1455,10 +1460,7 @@ fn pick_local_media_source(
             }
             Ok(source.clone())
         }
-        None => pb
-            .media_sources
-            .iter()
-            .find(|source| source.supports_local_decode())
+        None => crate::emby::models::pick_preferred_local_source(&pb.media_sources, strategy)
             .cloned()
             .ok_or_else(|| {
                 AppError::InvalidState(
@@ -2140,16 +2142,16 @@ pub async fn play_external(
             }
             source.clone()
         }
-        None => pb
-            .media_sources
-            .iter()
-            .find(|source| source.supports_local_decode())
-            .ok_or_else(|| {
-                AppError::InvalidState(
-                    "已阻止播放：服务端没有返回可本机直连或本机直流的媒体源。Hills Lite 不允许服务端解码/转码，以避免压垮 NAS、路由器或 VPS。".into(),
-                )
-            })?
-            .clone(),
+        None => crate::emby::models::pick_preferred_local_source(
+            &pb.media_sources,
+            state.config.settings().preferred_version_strategy,
+        )
+        .ok_or_else(|| {
+            AppError::InvalidState(
+                "已阻止播放：服务端没有返回可本机直连或本机直流的媒体源。Hills Lite 不允许服务端解码/转码，以避免压垮 NAS、路由器或 VPS。".into(),
+            )
+        })?
+        .clone(),
     };
     let url = state.emby.build_stream_url_for_line(
         &server,
@@ -2374,7 +2376,11 @@ pub async fn play_standalone(
         .await?;
     // Reuse the local-decode-only source picker; this both enforces
     // `supports_local_decode()` and blocks any transcoded source.
-    let source = pick_local_media_source(&pb, payload.media_source_id.as_deref())?;
+    let source = pick_local_media_source(
+        &pb,
+        payload.media_source_id.as_deref(),
+        state.config.settings().preferred_version_strategy,
+    )?;
 
     let choice = match select_playback_line(
         &state,
@@ -3242,6 +3248,31 @@ pub async fn open_external(url: String) -> AppResult<()> {
 pub async fn open_path(path: String) -> AppResult<()> {
     open::that(&path).map_err(|e| AppError::Other(format!("open path: {e}")))?;
     Ok(())
+}
+
+/// Reference parity (HillsLite 设置·调试「编辑 mpv.conf」): make sure the
+/// user-editable mpv.conf exists and return its path so the frontend can open
+/// it in the system editor. The file is applied on the next mpv spawn.
+#[tauri::command]
+pub async fn ensure_mpv_conf() -> AppResult<String> {
+    let path = crate::mpv::paths::resolve_user_mpv_conf()
+        .ok_or_else(|| AppError::Other("cannot resolve mpv.conf location".into()))?;
+    if !path.is_file() {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| AppError::Other(format!("create config dir: {e}")))?;
+        }
+        std::fs::write(
+            &path,
+            "# Hills Lite 用户 mpv.conf\n\
+             # 此文件会以 --include 方式注入每次 mpv 启动，覆盖应用默认值。\n\
+             # 示例：\n\
+             # demuxer-max-bytes=512MiB\n\
+             # sub-font-size=42\n",
+        )
+        .map_err(|e| AppError::Other(format!("create mpv.conf: {e}")))?;
+    }
+    Ok(path.display().to_string())
 }
 
 #[tauri::command]

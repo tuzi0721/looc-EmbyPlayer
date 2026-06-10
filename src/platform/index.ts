@@ -113,6 +113,7 @@ const WEB_DEFAULT_SETTINGS: AppSettings = {
   externalPotplayerEnabled: false,
   externalPotplayerPath: null,
   markWatchedThresholdPct: 90,
+  preferredVersionStrategy: "default",
   mpvBackend: "ipc",
   externalPlayerPath: null,
   externalPlayerArgs: "",

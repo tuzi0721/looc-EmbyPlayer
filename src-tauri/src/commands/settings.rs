@@ -13,8 +13,8 @@ use crate::commands::shortcuts::{
     self, merge_shortcut_bindings, normalize_shortcut_bindings, ShortcutBinding,
 };
 use crate::config::models::{
-    Account, Anime4kMode, AppSettings, HomeHeroStyle, MpvBackendKind, NetworkProxyMode, Server,
-    StatsOverlayMode, Theme,
+    Account, Anime4kMode, AppSettings, HomeHeroStyle, MpvBackendKind, NetworkProxyMode,
+    PreferredVersionStrategy, Server, StatsOverlayMode, Theme,
 };
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -45,6 +45,7 @@ pub struct SettingsPatch {
     #[serde(default, deserialize_with = "deserialize_nullable_field")]
     pub external_potplayer_path: Option<Option<String>>,
     pub mark_watched_threshold_pct: Option<u32>,
+    pub preferred_version_strategy: Option<PreferredVersionStrategy>,
     pub mpv_backend: Option<MpvBackendKind>,
     #[serde(default, deserialize_with = "deserialize_nullable_field")]
     pub external_player_path: Option<Option<String>>,
@@ -225,6 +226,9 @@ pub async fn update_settings(
         }
         if let Some(v) = patch.mark_watched_threshold_pct {
             s.mark_watched_threshold_pct = v.clamp(50, 100);
+        }
+        if let Some(v) = patch.preferred_version_strategy {
+            s.preferred_version_strategy = v;
         }
         if let Some(v) = patch.mpv_backend {
             s.mpv_backend = v;
