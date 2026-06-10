@@ -187,6 +187,10 @@ pub struct AppSettings {
     pub external_potplayer_enabled: bool,
     #[serde(default)]
     pub external_potplayer_path: Option<String>,
+    // Reference parity (HillsLite「标记已看的进度阈值」): percent of duration
+    // after which the item is explicitly marked played on stop.
+    #[serde(default = "default_mark_watched_threshold_pct")]
+    pub mark_watched_threshold_pct: u32,
     #[serde(default)]
     pub mpv_backend: MpvBackendKind,
     #[serde(default)]
@@ -300,6 +304,7 @@ impl Default for AppSettings {
             external_mpv_use_proxy: false,
             external_potplayer_enabled: false,
             external_potplayer_path: None,
+            mark_watched_threshold_pct: default_mark_watched_threshold_pct(),
             mpv_backend: MpvBackendKind::default(),
             external_player_path: None,
             external_player_args: String::new(),
@@ -502,4 +507,7 @@ fn default_danmaku_scroll_rows() -> u32 {
 }
 fn default_danmaku_fixed_rows() -> u32 {
     3
+}
+fn default_mark_watched_threshold_pct() -> u32 {
+    90
 }

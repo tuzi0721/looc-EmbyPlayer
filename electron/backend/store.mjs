@@ -29,6 +29,7 @@ export const DEFAULT_SETTINGS = {
   externalMpvUseProxy: false,
   externalPotplayerEnabled: false,
   externalPotplayerPath: null,
+  markWatchedThresholdPct: 90,
   mpvBackend: "ipc",
   externalPlayerPath: null,
   externalPlayerArgs: "",

@@ -5,6 +5,7 @@ import { api } from "@/api";
 import { useAuthStore } from "@/stores/auth";
 import { useLibraryStore } from "@/stores/library";
 import { useServerStore } from "@/stores/server";
+import { useSettingsStore } from "@/stores/settings";
 import type { PlaybackSource, WebDavSidecarDanmaku, WebDavSidecarSubtitle } from "@/api";
 import type { MpvSnapshot, PictureMode, SubtitleStyleSettings } from "@/types/models";
 
@@ -429,6 +430,7 @@ export const usePlayerStore = defineStore("player", () => {
             positionTicks: snapshot.value.positionMs * 10_000,
         }
         : null;
+    const stoppedDurationMs = snapshot.value?.durationMs ?? 0;
     try {
       if (options.stopBackend !== false) {
         await api.stop();
@@ -446,6 +448,17 @@ export const usePlayerStore = defineStore("player", () => {
     }
     if (stoppedReport) {
       void api.reportPlaybackStopped(stoppedReport).catch(() => {});
+      // Reference parity (HillsLite「标记已看的进度阈值」): past the threshold
+      // the item is explicitly marked played, independent of server heuristics.
+      const thresholdPct = useSettingsStore().settings.markWatchedThresholdPct;
+      if (stoppedDurationMs > 0 && thresholdPct > 0) {
+        const playedPct = (stoppedReport.positionTicks / 10_000 / stoppedDurationMs) * 100;
+        if (playedPct >= thresholdPct) {
+          void api
+            .setItemPlayed({ itemId: stoppedReport.itemId, value: true })
+            .catch(() => {});
+        }
+      }
     }
     try {
       await api.clearNowPlaying();

@@ -67,6 +67,7 @@ export interface AppSettings {
   externalMpvUseProxy: boolean;
   externalPotplayerEnabled: boolean;
   externalPotplayerPath: string | null;
+  markWatchedThresholdPct: number;
   mpvBackend: "ipc" | "embedded";
   externalPlayerPath?: string | null;
   externalPlayerArgs: string;

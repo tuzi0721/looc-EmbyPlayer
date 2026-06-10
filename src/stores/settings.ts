@@ -31,6 +31,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   externalMpvUseProxy: false,
   externalPotplayerEnabled: false,
   externalPotplayerPath: null,
+  markWatchedThresholdPct: 90,
   mpvBackend: "embedded",
   externalPlayerPath: null,
   externalPlayerArgs: "",

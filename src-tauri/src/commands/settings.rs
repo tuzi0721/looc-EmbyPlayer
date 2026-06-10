@@ -44,6 +44,7 @@ pub struct SettingsPatch {
     pub external_potplayer_enabled: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_nullable_field")]
     pub external_potplayer_path: Option<Option<String>>,
+    pub mark_watched_threshold_pct: Option<u32>,
     pub mpv_backend: Option<MpvBackendKind>,
     #[serde(default, deserialize_with = "deserialize_nullable_field")]
     pub external_player_path: Option<Option<String>>,
@@ -221,6 +222,9 @@ pub async fn update_settings(
             s.external_potplayer_path = v
                 .map(|p| p.trim().to_string())
                 .filter(|p| !p.is_empty());
+        }
+        if let Some(v) = patch.mark_watched_threshold_pct {
+            s.mark_watched_threshold_pct = v.clamp(50, 100);
         }
         if let Some(v) = patch.mpv_backend {
             s.mpv_backend = v;

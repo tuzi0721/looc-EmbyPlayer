@@ -1367,6 +1367,20 @@ const danmakuSummary = computed(() => {
             @change="(e: any) => save('forceStereoAudio', e.target.checked)"
           />
         </label>
+        <label class="field">
+          <span>标记已看的进度阈值</span>
+          <div class="range-row">
+            <input
+              type="range"
+              min="50"
+              max="100"
+              step="1"
+              :value="settings.settings.markWatchedThresholdPct"
+              @input="(e: any) => save('markWatchedThresholdPct', Number(e.target.value))"
+            />
+            <strong>{{ settings.settings.markWatchedThresholdPct }}%</strong>
+          </div>
+        </label>
         <label class="field field--inline">
           <span>右上角网速</span>
           <input
