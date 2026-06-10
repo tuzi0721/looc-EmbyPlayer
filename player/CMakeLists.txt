@@ -70,6 +70,10 @@ endif()
 include(FetchContent)
 find_package(QWindowKit QUIET COMPONENTS Quick)
 if(NOT QWindowKit_FOUND)
+    # We drive the frameless window from QML (QWK::QuickWindowAgent), so the Quick
+    # module must be built; upstream defaults QWINDOWKIT_BUILD_QUICK to OFF, which
+    # left QWindowKit::Quick absent and silently disabled the frameless feature.
+    set(QWINDOWKIT_BUILD_QUICK ON CACHE BOOL "" FORCE)
     set(QWINDOWKIT_BUILD_WIDGETS OFF CACHE BOOL "" FORCE)
     set(QWINDOWKIT_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(QWINDOWKIT_BUILD_TRANSLATIONS OFF CACHE BOOL "" FORCE)

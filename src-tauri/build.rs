@@ -62,6 +62,20 @@ fn ensure_mpv_windows() -> io::Result<()> {
             }
             copy_runtime_dll(&bundled, target_dir, "libmpv-2.dll")?;
             copy_runtime_dll(&bundled, target_dir, "d3dcompiler_43.dll")?;
+
+            // Self-developed player runtime (resources/player) is gitignored and
+            // staged locally by the packaging step; copy it beside the binary when
+            // present so resolve_player_exe() finds resources/player/hills_player.exe
+            // in dev and release runs alike. Optional: absent on fresh clones.
+            let player_src = manifest_dir.join("resources").join("player");
+            println!("cargo:rerun-if-changed=resources/player/hills_player.exe");
+            if player_src.is_dir() {
+                let player_dest = target_dir.join("resources").join("player");
+                if player_dest.exists() {
+                    fs::remove_dir_all(&player_dest)?;
+                }
+                copy_tree(&player_src, &player_dest)?;
+            }
         }
     }
 

@@ -16,7 +16,7 @@
 #include "control_channel.h"
 
 #ifdef HILLS_HAVE_QWINDOWKIT
-#include <QWKQuick/qwkquickwindowagent.h>
+#include <QWKQuick/quickwindowagent.h>
 #endif
 
 namespace {
