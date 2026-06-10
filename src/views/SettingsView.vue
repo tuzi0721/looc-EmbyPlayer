@@ -8,6 +8,7 @@ import LineStatusDot from "@/components/common/LineStatusDot.vue";
 import ShortcutsPanel from "@/components/settings/ShortcutsPanel.vue";
 import AddServerDialog from "@/components/login/AddServerDialog.vue";
 import { api } from "@/api";
+import type { CacheUsage } from "@/api";
 import { hasNativeRuntime, hasTauriRuntime, openFileDialog, platformType } from "@/platform";
 import { useAuthStore } from "@/stores/auth";
 import { useLibraryStore } from "@/stores/library";
@@ -35,7 +36,8 @@ type PanelId =
   | "externalPlayer"
   | "danmaku"
   | "shortcuts"
-  | "servers";
+  | "servers"
+  | "cache";
 
 const auth = useAuthStore();
 const lib = useLibraryStore();
@@ -547,6 +549,51 @@ async function saveServerDraft(server: Server) {
 
 function togglePanel(id: PanelId) {
   openPanel.value = openPanel.value === id ? null : id;
+}
+
+// Reference parity (HillsLite 设置·通用·缓存管理).
+const cacheUsage = ref<CacheUsage | null>(null);
+const cacheBusy = ref(false);
+const cacheStatus = ref("");
+const cacheSummary = computed(() =>
+  cacheUsage.value ? formatCacheBytes(cacheUsage.value.totalBytes) : "查看",
+);
+
+function formatCacheBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 MB";
+  const mb = bytes / (1024 * 1024);
+  if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`;
+  return `${mb.toFixed(1)} MB`;
+}
+
+function toggleCachePanel() {
+  togglePanel("cache");
+  if (openPanel.value === "cache") void refreshCacheUsage();
+}
+
+async function refreshCacheUsage() {
+  cacheBusy.value = true;
+  try {
+    cacheUsage.value = await api.getCacheUsage();
+    cacheStatus.value = "";
+  } catch {
+    cacheStatus.value = "无法读取缓存大小";
+  } finally {
+    cacheBusy.value = false;
+  }
+}
+
+async function clearCache() {
+  cacheBusy.value = true;
+  cacheStatus.value = "";
+  try {
+    cacheUsage.value = await api.clearAppCache();
+    cacheStatus.value = "已清理（正在使用的缓存将在重启后释放）";
+  } catch {
+    cacheStatus.value = "清理失败";
+  } finally {
+    cacheBusy.value = false;
+  }
 }
 
 async function exportConfig() {
@@ -1178,6 +1225,31 @@ const danmakuSummary = computed(() => {
           @change="(e: any) => save('closeToTray', e.target.checked)"
         />
       </label>
+      <button class="row" @click="toggleCachePanel()">
+        <span>缓存管理</span>
+        <span class="value">{{ cacheSummary }}</span>
+      </button>
+      <div v-if="openPanel === 'cache'" class="panel glass">
+        <ul v-if="cacheUsage" class="cap-list">
+          <li v-for="entry in cacheUsage.entries" :key="entry.label" class="cap-row">
+            <div class="cap-row__main">
+              <strong>{{ entry.label }}</strong>
+              <span>{{ formatCacheBytes(entry.bytes) }}</span>
+            </div>
+          </li>
+        </ul>
+        <div class="panel__actions">
+          <button class="action-btn" :disabled="cacheBusy" @click="refreshCacheUsage">
+            <Icon icon="lucide:refresh-cw" width="15" />
+            <span>刷新</span>
+          </button>
+          <button class="action-btn" :disabled="cacheBusy" @click="clearCache">
+            <Icon icon="lucide:trash-2" width="15" />
+            <span>{{ cacheBusy ? "清理中" : "清理缓存" }}</span>
+          </button>
+        </div>
+        <div v-if="cacheStatus" class="status-line">{{ cacheStatus }}</div>
+      </div>
       <button class="row" @click="togglePanel('network')">
         <span>网络</span>
         <Icon icon="lucide:chevron-right" width="16" class="chev" />

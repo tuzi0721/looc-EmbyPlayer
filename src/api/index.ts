@@ -109,6 +109,11 @@ export interface ConfigTransferSummary {
   shortcuts: number;
 }
 
+export interface CacheUsage {
+  totalBytes: number;
+  entries: { label: string; path: string; bytes: number }[];
+}
+
 export interface DetectServerLineReport {
   lineId: string;
   lineName: string;
@@ -440,6 +445,8 @@ export const api = {
   exportConfig: () => invoke<ConfigTransferSummary | null>("export_config"),
   importConfig: (mode: "merge" | "replace" = "merge") =>
     invoke<ConfigTransferSummary | null>("import_config", { payload: { mode } }),
+  getCacheUsage: () => invoke<CacheUsage>("get_cache_usage"),
+  clearAppCache: () => invoke<CacheUsage>("clear_app_cache"),
 
   // Danmaku
   listDanmakuProviders: () =>

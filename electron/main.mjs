@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, globalShortcut, ipcMain, protocol, screen, shell } from "electron";
+import { app, BrowserWindow, Menu, dialog, globalShortcut, ipcMain, protocol, screen, session, shell } from "electron";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -2713,6 +2713,30 @@ async function handleInvoke(command, args = {}) {
       currentPlaySession = null;
     }
     return null;
+  }
+
+  if (command === "get_cache_usage") {
+    const ses = mainWindow?.webContents?.session ?? session.defaultSession;
+    const bytes = ses ? await ses.getCacheSize().catch(() => 0) : 0;
+    return {
+      totalBytes: bytes,
+      entries: [{ label: "页面/图片缓存", path: "", bytes }],
+    };
+  }
+
+  if (command === "clear_app_cache") {
+    const ses = mainWindow?.webContents?.session ?? session.defaultSession;
+    if (ses) {
+      await ses.clearCache().catch(() => {});
+      await ses
+        .clearStorageData({ storages: ["cachestorage", "shadercache"] })
+        .catch(() => {});
+    }
+    const bytes = ses ? await ses.getCacheSize().catch(() => 0) : 0;
+    return {
+      totalBytes: bytes,
+      entries: [{ label: "页面/图片缓存", path: "", bytes }],
+    };
   }
 
   if (command === "get_state") {

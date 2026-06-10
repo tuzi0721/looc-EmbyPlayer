@@ -613,3 +613,108 @@ fn merge_accounts(mut existing: Vec<Account>, incoming: Vec<Account>) -> Vec<Acc
     }
     existing
 }
+
+// ── Cache management (reference parity: HillsLite 设置·通用·缓存管理) ──────
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheEntryUsage {
+    pub label: String,
+    pub path: String,
+    pub bytes: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheUsage {
+    pub total_bytes: u64,
+    pub entries: Vec<CacheEntryUsage>,
+}
+
+fn dir_size_bytes(path: &std::path::Path) -> u64 {
+    let Ok(entries) = fs::read_dir(path) else {
+        return 0;
+    };
+    let mut total = 0u64;
+    for entry in entries.flatten() {
+        let Ok(meta) = entry.metadata() else { continue };
+        if meta.is_dir() {
+            total += dir_size_bytes(&entry.path());
+        } else {
+            total += meta.len();
+        }
+    }
+    total
+}
+
+fn remove_dir_contents(path: &std::path::Path) {
+    let Ok(entries) = fs::read_dir(path) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        // Locked files (WebView2 keeps some open) are skipped silently; they
+        // get cleaned up on the next launch.
+        let _ = if p.is_dir() {
+            fs::remove_dir_all(&p)
+        } else {
+            fs::remove_file(&p)
+        };
+    }
+}
+
+fn cache_targets(app: &AppHandle) -> Vec<(String, std::path::PathBuf)> {
+    use tauri::Manager;
+    let mut targets = Vec::new();
+    if let Ok(data_dir) = app.path().app_data_dir() {
+        let profile = data_dir.join("EBWebView").join("Default");
+        for (label, sub) in [
+            ("图片/页面缓存", "Cache"),
+            ("代码缓存", "Code Cache"),
+            ("GPU 缓存", "GPUCache"),
+        ] {
+            targets.push((label.to_string(), profile.join(sub)));
+        }
+    }
+    targets.push((
+        "流媒体预取缓存".to_string(),
+        std::env::temp_dir().join("hills-lite-stream-cache"),
+    ));
+    targets
+}
+
+fn collect_cache_usage(targets: &[(String, std::path::PathBuf)]) -> CacheUsage {
+    let entries: Vec<CacheEntryUsage> = targets
+        .iter()
+        .map(|(label, path)| CacheEntryUsage {
+            label: label.clone(),
+            path: path.display().to_string(),
+            bytes: dir_size_bytes(path),
+        })
+        .collect();
+    CacheUsage {
+        total_bytes: entries.iter().map(|e| e.bytes).sum(),
+        entries,
+    }
+}
+
+#[tauri::command]
+pub async fn get_cache_usage(app: AppHandle) -> AppResult<CacheUsage> {
+    let targets = cache_targets(&app);
+    tauri::async_runtime::spawn_blocking(move || collect_cache_usage(&targets))
+        .await
+        .map_err(|e| AppError::Other(format!("cache usage task: {e}")))
+}
+
+#[tauri::command]
+pub async fn clear_app_cache(app: AppHandle) -> AppResult<CacheUsage> {
+    let targets = cache_targets(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        for (_, path) in &targets {
+            remove_dir_contents(path);
+        }
+        collect_cache_usage(&targets)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("clear cache task: {e}")))
+}

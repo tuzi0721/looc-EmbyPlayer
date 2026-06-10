@@ -147,6 +147,8 @@ pub fn run() {
             commands::settings::update_settings,
             commands::settings::export_config,
             commands::settings::import_config,
+            commands::settings::get_cache_usage,
+            commands::settings::clear_app_cache,
             commands::danmaku::list_danmaku_providers,
             commands::danmaku::fetch_danmaku,
             commands::danmaku::import_danmaku_xml,
