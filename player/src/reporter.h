@@ -23,6 +23,9 @@ public:
     void timePos(double timePos, qint64 playlistPos = -1);
     void pause(bool paused, qint64 playlistPos = -1);
     void speed(double speed, qint64 playlistPos = -1);
+    // UI intents the player window delegates to the host (versions, episodes,
+    // danmaku settings, ...). Hosts that don't understand the event ignore it.
+    void uiAction(const QString &action);
 
 private:
     void emitEvent(const char *event, QJsonObject body);

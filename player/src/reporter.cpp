@@ -66,3 +66,9 @@ void Reporter::speed(double speed, qint64 playlistPos) {
     body.insert(QStringLiteral("speed"), speed);
     emitEvent("speed", body);
 }
+
+void Reporter::uiAction(const QString &action) {
+    QJsonObject body;
+    body.insert(QStringLiteral("action"), action);
+    emitEvent("ui-action", body);
+}

@@ -4,13 +4,14 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import HillsPlayer
 
-// Root player window. The video is a normal Qt Quick item (MpvObject, a
-// QQuickFramebufferObject driven by the libmpv render API), so these QML
-// controls overlay it directly with no native child window, no reserved dead
-// zone, and no pointer swallowing.
+// HillsLite player-page replication (docs/UI_REFERENCE_HILLS_LITE.md 图2/3).
+// The video is a normal Qt Quick item (MpvObject, libmpv render API), so all
+// controls overlay it directly — no native child window, no dead zones.
 //
-// T9b first cut authored by CH-1 (build hub) to keep momentum; CH-6 to refine
-// into FluentUI (zhuzichu520) look + audio/subtitle/picture-mode/danmaku panels.
+// Glyphs are placeholders until CH-2 delivers the icon set; every control is
+// functional: transport/seek/volume/speed/tracks/zoom/Anime4K/subtitle
+// settings/stats work against mpv directly, and shell-domain intents
+// (versions/episodes/danmaku) are forwarded to the host via ui-action events.
 Window {
     id: win
     width: 1280
@@ -19,7 +20,17 @@ Window {
     color: "black"
     title: qsTr("Hills Player")
 
+    // ── theme (spec: dark #121212/#1e1e1e, purple accent) ───────────────────
+    readonly property color accent: "#7c4dff"
+    readonly property color accentHover: "#9e7cff"
+    readonly property color menuBg: "#f01e1e1e"
+    readonly property color menuHover: "#33ffffff"
+
     property bool controlsVisible: true
+    property bool pinned: false
+    property bool netSpeedVisible: false
+    property string mediaTitle: win.title
+    property int volumeValue: 100
 
     function fmt(t) {
         if (!t || t < 0 || isNaN(t)) t = 0;
@@ -39,16 +50,64 @@ Window {
         win.visibility = (win.visibility === Window.Maximized)
             ? Window.Windowed : Window.Maximized;
     }
+    function togglePinned() {
+        pinned = !pinned;
+        win.flags = pinned ? (win.flags | Qt.WindowStaysOnTopHint)
+                           : (win.flags & ~Qt.WindowStaysOnTopHint);
+    }
+    function hostAction(action, label) {
+        mpv.uiAction(action);
+        toast.show(label + qsTr(" 已交由宿主处理"));
+    }
+    function applyZoomMode(mode) {
+        // 适应 / 填充 / 拉伸 / 原始 (mpv keepaspect / panscan / video-unscaled)
+        if (mode === "fill") {
+            mpv.setProperty("video-unscaled", "no");
+            mpv.setProperty("keepaspect", "yes");
+            mpv.setProperty("panscan", "1.0");
+        } else if (mode === "stretch") {
+            mpv.setProperty("video-unscaled", "no");
+            mpv.setProperty("panscan", "0");
+            mpv.setProperty("keepaspect", "no");
+        } else if (mode === "original") {
+            mpv.setProperty("keepaspect", "yes");
+            mpv.setProperty("panscan", "0");
+            mpv.setProperty("video-unscaled", "yes");
+        } else { // fit
+            mpv.setProperty("video-unscaled", "no");
+            mpv.setProperty("keepaspect", "yes");
+            mpv.setProperty("panscan", "0");
+        }
+        settingsMenu.zoomMode = mode;
+    }
+    // track-list -> [{id,title,lang,selected}] for the audio/sub menus.
+    function tracksOf(kind) {
+        var out = [];
+        var list = mpv.getProperty("track-list");
+        if (!list) return out;
+        for (var i = 0; i < list.length; ++i) {
+            var t = list[i];
+            if (t.type !== kind) continue;
+            var label = (t.title ? t.title : (qsTr("轨道 ") + t.id))
+                      + (t.lang ? " · " + t.lang : "");
+            out.push({ tid: t.id, label: label, selected: t.selected === true });
+        }
+        return out;
+    }
 
     MpvObject {
         id: mpv
         objectName: "mpvObject"
         anchors.fill: parent
+        onFileLoaded: {
+            var mt = mpv.getProperty("media-title");
+            if (mt && String(mt).length > 0) win.mediaTitle = mt;
+            var vol = mpv.getProperty("volume");
+            if (vol !== undefined && vol !== null && !isNaN(vol))
+                win.volumeValue = Math.round(vol);
+        }
     }
 
-    // Click toggles play/pause; double-click toggles fullscreen; movement reveals
-    // the controls. Buttons declared later sit above this and consume their own
-    // clicks, so only clicks on the bare video reach here.
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton
@@ -61,45 +120,202 @@ Window {
     Timer {
         id: hideTimer
         interval: 2800
-        onTriggered: if (!mpv.paused) win.controlsVisible = false
+        onTriggered: if (!mpv.paused && !settingsMenu.visible && !speedMenu.visible
+                         && !audioMenu.visible && !subMenu.visible)
+                         win.controlsVisible = false;
     }
 
-    // Buffering / loading spinner (visible until first frame timing is known).
     BusyIndicator {
         anchors.centerIn: parent
         running: mpv.duration <= 0
         visible: running
     }
 
-    // ── Control overlay (T9b first cut) ─────────────────────────────────────
+    // ── toast ────────────────────────────────────────────────────────────────
+    Rectangle {
+        id: toast
+        property alias text: toastText.text
+        function show(t) { toastText.text = t; opacity = 1; toastTimer.restart(); }
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 150
+        width: toastText.implicitWidth + 28
+        height: 36
+        radius: 18
+        color: "#d9000000"
+        opacity: 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 200 } }
+        Text { id: toastText; anchors.centerIn: parent; color: "white"; font.pixelSize: 13 }
+        Timer { id: toastTimer; interval: 2200; onTriggered: toast.opacity = 0 }
+    }
+
+    // ── reusable dark popup menu ─────────────────────────────────────────────
+    component PlayerMenu: Popup {
+        id: pm
+        property var entries: []   // [{label, checked(bool|undefined), trigger()}]
+        property int entryWidth: 220
+        padding: 6
+        background: Rectangle { color: win.menuBg; radius: 10; border.color: "#22ffffff" }
+        contentItem: Column {
+            spacing: 2
+            Repeater {
+                model: pm.entries
+                delegate: Rectangle {
+                    required property var modelData
+                    width: pm.entryWidth
+                    height: 36
+                    radius: 6
+                    color: rowMa.containsMouse ? win.menuHover : "transparent"
+                    Row {
+                        anchors.fill: parent
+                        anchors.leftMargin: 12
+                        anchors.rightMargin: 12
+                        spacing: 8
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: modelData.checked === true ? "\u2713" : " "
+                            color: win.accent
+                            font.pixelSize: 13
+                            width: 14
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: modelData.label
+                            color: "white"
+                            font.pixelSize: 13
+                        }
+                    }
+                    MouseArea {
+                        id: rowMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: { modelData.trigger(); pm.close(); }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── bottom-bar control button (glyph placeholder until CH-2 icons) ──────
+    component CtrlButton: Rectangle {
+        id: cb
+        property string glyph: ""
+        property string label: ""
+        property bool active: false
+        signal clicked()
+        width: Math.max(40, cbText.implicitWidth + 18)
+        height: 34
+        radius: 6
+        color: cbMa.containsMouse ? "#33ffffff" : "transparent"
+        Text {
+            id: cbText
+            anchors.centerIn: parent
+            text: cb.glyph
+            color: cb.active ? win.accent : "white"
+            font.pixelSize: 15
+        }
+        ToolTip.visible: cbMa.containsMouse && cb.label.length > 0
+        ToolTip.delay: 600
+        ToolTip.text: cb.label
+        MouseArea { id: cbMa; anchors.fill: parent; hoverEnabled: true; onClicked: cb.clicked() }
+    }
+
+    // ── overlay ──────────────────────────────────────────────────────────────
     Item {
         id: controlsLayer
         objectName: "controlsLayer"
         anchors.fill: parent
 
+        // top bar: back + title | net-speed + pin + window controls
         Rectangle {
             id: topBar
             objectName: "titleBar"
             anchors { left: parent.left; right: parent.right; top: parent.top }
-            height: 52
+            height: 56
             opacity: win.controlsVisible ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 180 } }
             gradient: Gradient {
                 GradientStop { position: 0.0; color: "#cc000000" }
                 GradientStop { position: 1.0; color: "#00000000" }
             }
-            Text {
-                anchors { left: parent.left; leftMargin: 18; verticalCenter: parent.verticalCenter }
-                text: win.title
-                color: "white"
-                font.pixelSize: 16
-                font.bold: true
+
+            Row {
+                anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
+                spacing: 8
+                CtrlButton {
+                    objectName: "btnBack"
+                    glyph: "\u2039"   // ‹  back → host shows detail page; window closes
+                    label: qsTr("返回")
+                    onClicked: { mpv.uiAction("back"); win.close(); }
+                }
+                Column {
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 2
+                    Text {
+                        text: win.mediaTitle
+                        color: "white"
+                        font.pixelSize: 16
+                        font.bold: true
+                        elide: Text.ElideRight
+                        width: Math.min(implicitWidth, win.width * 0.5)
+                    }
+                }
             }
 
-            // Frameless window controls (QWindowKit). objectNames are registered
-            // hit-test-visible in main.cpp so clicks hit the buttons, not drag.
             Row {
                 anchors { right: parent.right; top: parent.top; bottom: parent.bottom }
+                spacing: 0
+
+                // net speed (toggle in settings; spec: off by default)
+                Item {
+                    visible: win.netSpeedVisible
+                    width: 120
+                    height: topBar.height
+                    Column {
+                        anchors.centerIn: parent
+                        spacing: 2
+                        Text {
+                            id: netSpeedText
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            color: "white"
+                            font.pixelSize: 11
+                            text: "0.0 MB/s"
+                        }
+                        Canvas {
+                            id: spark
+                            width: 96; height: 16
+                            property var samples: []
+                            onPaint: {
+                                var ctx = getContext("2d");
+                                ctx.clearRect(0, 0, width, height);
+                                if (samples.length < 2) return;
+                                var max = 1;
+                                for (var i = 0; i < samples.length; ++i)
+                                    if (samples[i] > max) max = samples[i];
+                                ctx.strokeStyle = win.accent;
+                                ctx.lineWidth = 1.5;
+                                ctx.beginPath();
+                                for (var j = 0; j < samples.length; ++j) {
+                                    var x = j / (samples.length - 1) * width;
+                                    var y = height - (samples[j] / max) * (height - 2) - 1;
+                                    if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                                }
+                                ctx.stroke();
+                            }
+                        }
+                    }
+                }
+
+                CtrlButton {
+                    objectName: "btnPin"
+                    glyph: "\u2299"   // pin placeholder
+                    label: qsTr("置顶")
+                    active: win.pinned
+                    height: topBar.height
+                    onClicked: win.togglePinned()
+                }
+
                 Repeater {
                     model: [
                         { name: "btnMin", glyph: "\u2014", hover: "#33ffffff" },
@@ -111,7 +327,7 @@ Window {
                         objectName: modelData.name
                         width: 46
                         height: topBar.height
-                        color: btnHover.containsMouse ? modelData.hover : "transparent"
+                        color: wcMa.containsMouse ? modelData.hover : "transparent"
                         Text {
                             anchors.centerIn: parent
                             text: modelData.glyph
@@ -119,7 +335,7 @@ Window {
                             font.pixelSize: 14
                         }
                         MouseArea {
-                            id: btnHover
+                            id: wcMa
                             anchors.fill: parent
                             hoverEnabled: true
                             onClicked: {
@@ -133,10 +349,11 @@ Window {
             }
         }
 
+        // bottom bar: purple seekbar + transport | right control cluster
         Rectangle {
             id: bottomBar
             anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-            height: 104
+            height: 110
             opacity: win.controlsVisible ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 180 } }
             gradient: Gradient {
@@ -146,8 +363,9 @@ Window {
 
             ColumnLayout {
                 anchors { left: parent.left; right: parent.right; bottom: parent.bottom; margins: 14 }
-                spacing: 8
+                spacing: 6
 
+                // progress: left time · purple bar w/ round thumb · total
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 10
@@ -164,49 +382,128 @@ Window {
                             }
                         }
                         onPressedChanged: if (!pressed) mpv.seekAbsolute(value)
+                        background: Rectangle {
+                            x: seekbar.leftPadding
+                            y: seekbar.topPadding + seekbar.availableHeight / 2 - height / 2
+                            width: seekbar.availableWidth
+                            height: 4
+                            radius: 2
+                            color: "#59ffffff"
+                            Rectangle {
+                                width: seekbar.visualPosition * parent.width
+                                height: parent.height
+                                radius: 2
+                                color: win.accent
+                            }
+                        }
+                        handle: Rectangle {
+                            x: seekbar.leftPadding + seekbar.visualPosition
+                               * (seekbar.availableWidth - width)
+                            y: seekbar.topPadding + seekbar.availableHeight / 2 - height / 2
+                            width: 14; height: 14; radius: 7
+                            color: seekbar.pressed ? win.accentHover : "white"
+                            border.color: win.accent
+                            border.width: 2
+                        }
                     }
                     Label { text: win.fmt(mpv.duration); color: "white"; font.pixelSize: 12 }
                 }
 
+                // transport (left) | spacer | right cluster (spec order)
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: 8
-                    Button {
-                        implicitWidth: 64
-                        text: mpv.paused ? qsTr("播放") : qsTr("暂停")
+                    spacing: 4
+
+                    CtrlButton {
+                        glyph: "\u23EE"; label: qsTr("上一集")
+                        onClicked: { mpv.command(["playlist-prev"]); mpv.uiAction("prev-episode"); }
+                    }
+                    CtrlButton {
+                        glyph: mpv.paused ? "\u23F5" : "\u23F8"
+                        label: mpv.paused ? qsTr("播放") : qsTr("暂停")
+                        width: 46
                         onClicked: mpv.togglePause()
                     }
-                    Button { text: qsTr("-10s"); onClicked: mpv.seekRelative(-10) }
-                    Button { text: qsTr("+10s"); onClicked: mpv.seekRelative(10) }
-
-                    Label { text: qsTr("音量"); color: "white"; font.pixelSize: 12 }
+                    CtrlButton {
+                        glyph: "\u23ED"; label: qsTr("下一集")
+                        onClicked: { mpv.command(["playlist-next"]); mpv.uiAction("next-episode"); }
+                    }
+                    CtrlButton {
+                        glyph: "\u266A"
+                        label: qsTr("音量/静音")
+                        onClicked: {
+                            var muted = mpv.getProperty("mute") === true;
+                            mpv.setProperty("mute", muted ? "no" : "yes");
+                        }
+                    }
                     Slider {
-                        from: 0; to: 100; value: 100
-                        implicitWidth: 120
-                        onMoved: mpv.setVolume(value)
+                        id: volSlider
+                        from: 0; to: 100
+                        value: win.volumeValue
+                        implicitWidth: 110
+                        onMoved: { win.volumeValue = Math.round(value); mpv.setVolume(win.volumeValue); }
+                        background: Rectangle {
+                            x: volSlider.leftPadding
+                            y: volSlider.topPadding + volSlider.availableHeight / 2 - height / 2
+                            width: volSlider.availableWidth
+                            height: 3
+                            radius: 1.5
+                            color: "#59ffffff"
+                            Rectangle {
+                                width: volSlider.visualPosition * parent.width
+                                height: parent.height
+                                radius: 1.5
+                                color: "white"
+                            }
+                        }
+                        handle: Rectangle {
+                            x: volSlider.leftPadding + volSlider.visualPosition
+                               * (volSlider.availableWidth - width)
+                            y: volSlider.topPadding + volSlider.availableHeight / 2 - height / 2
+                            width: 10; height: 10; radius: 5
+                            color: "white"
+                        }
                     }
 
                     Item { Layout.fillWidth: true }
 
-                    Label { text: qsTr("倍速"); color: "white"; font.pixelSize: 12 }
-                    ComboBox {
-                        implicitWidth: 92
-                        model: ["0.5", "0.75", "1.0", "1.25", "1.5", "2.0"]
-                        currentIndex: 2
-                        onActivated: mpv.setSpeed(parseFloat(currentText))
+                    // right cluster, spec order:
+                    // 倍速 · 版本 · 音轨 · 字幕 · 弹幕 · 设置 · 选集 · 全屏
+                    CtrlButton {
+                        id: speedBtn
+                        glyph: mpv.speed.toFixed(mpv.speed === Math.floor(mpv.speed) ? 1 : 2) + "x"
+                        label: qsTr("倍速")
+                        onClicked: speedMenu.popup(speedBtn)
                     }
-
-                    Label { text: "Anime4K"; color: "white"; font.pixelSize: 12 }
-                    ComboBox {
-                        implicitWidth: 104
-                        model: ["Off", "Fast", "A", "B", "C", "A+A", "B+B", "C+A"]
-                        currentIndex: 0
-                        onActivated: mpv.setAnime4kPreset(currentText)
+                    CtrlButton {
+                        glyph: "\u{1F3AC}"; label: qsTr("版本")
+                        onClicked: win.hostAction("versions", qsTr("版本切换"))
                     }
-
-                    Button {
-                        implicitWidth: 64
-                        text: qsTr("全屏")
+                    CtrlButton {
+                        id: audioBtn
+                        glyph: "\u266B"; label: qsTr("音轨")
+                        onClicked: { audioMenu.reload(); audioMenu.popup(audioBtn); }
+                    }
+                    CtrlButton {
+                        id: subBtn
+                        glyph: "CC"; label: qsTr("字幕")
+                        onClicked: { subMenu.reload(); subMenu.popup(subBtn); }
+                    }
+                    CtrlButton {
+                        glyph: "\u5F39"; label: qsTr("弹幕")
+                        onClicked: win.hostAction("danmaku", qsTr("弹幕"))
+                    }
+                    CtrlButton {
+                        id: gearBtn
+                        glyph: "\u2699"; label: qsTr("设置")
+                        onClicked: settingsMenu.popup(gearBtn)
+                    }
+                    CtrlButton {
+                        glyph: "\u2630"; label: qsTr("选集")
+                        onClicked: win.hostAction("episodes", qsTr("选集"))
+                    }
+                    CtrlButton {
+                        glyph: "\u26F6"; label: qsTr("全屏")
                         onClicked: win.toggleFullScreen()
                     }
                 }
@@ -214,6 +511,186 @@ Window {
         }
     }
 
+    // ── popup menus ──────────────────────────────────────────────────────────
+    function popupAbove(menu, anchorItem) {
+        var p = anchorItem.mapToItem(controlsLayer, 0, 0);
+        menu.x = Math.min(p.x, win.width - menu.width - 8);
+        menu.y = p.y - menu.implicitHeight - 8;
+        menu.open();
+    }
+
+    PlayerMenu {
+        id: speedMenu
+        parent: controlsLayer
+        function popup(item) {
+            entries = ["0.5", "0.75", "1.0", "1.25", "1.5", "2.0"].map(function (s) {
+                return {
+                    label: s + "x",
+                    checked: Math.abs(mpv.speed - parseFloat(s)) < 0.001,
+                    trigger: function () { mpv.setSpeed(parseFloat(s)); }
+                };
+            });
+            win.popupAbove(speedMenu, item);
+        }
+        entryWidth: 120
+    }
+
+    PlayerMenu {
+        id: audioMenu
+        parent: controlsLayer
+        function reload() {
+            entries = win.tracksOf("audio").map(function (t) {
+                return {
+                    label: t.label,
+                    checked: t.selected,
+                    trigger: function () { mpv.setAudioId(t.tid); }
+                };
+            });
+            if (entries.length === 0)
+                entries = [{ label: qsTr("无音轨"), checked: false, trigger: function () {} }];
+        }
+        function popup(item) { win.popupAbove(audioMenu, item); }
+        entryWidth: 260
+    }
+
+    PlayerMenu {
+        id: subMenu
+        parent: controlsLayer
+        function reload() {
+            var list = win.tracksOf("sub").map(function (t) {
+                return {
+                    label: t.label,
+                    checked: t.selected,
+                    trigger: function () { mpv.setSubId(t.tid); }
+                };
+            });
+            list.push({
+                label: qsTr("关闭字幕"),
+                checked: false,
+                trigger: function () { mpv.setProperty("sid", "no"); }
+            });
+            entries = list;
+        }
+        function popup(item) { win.popupAbove(subMenu, item); }
+        entryWidth: 260
+    }
+
+    PlayerMenu {
+        id: settingsMenu
+        parent: controlsLayer
+        property string zoomMode: "fit"
+        function popup(item) {
+            entries = [
+                { label: qsTr("缩放模式  ▸"), checked: false,
+                  trigger: function () { zoomMenu.popup(gearBtn); } },
+                { label: qsTr("Anime4K  ▸"), checked: mpv.anime4k.preset !== "Off"
+                                                       && mpv.anime4k.preset !== "",
+                  trigger: function () { anime4kMenu.popup(gearBtn); } },
+                { label: qsTr("跳过片头/片尾"), checked: false,
+                  trigger: function () { win.hostAction("skip-intro-settings", qsTr("跳过片头/片尾")); } },
+                { label: qsTr("字幕设置  ▸"), checked: false,
+                  trigger: function () { subSettingsMenu.popup(gearBtn); } },
+                { label: qsTr("弹幕设置"), checked: false,
+                  trigger: function () { win.hostAction("danmaku-settings", qsTr("弹幕设置")); } },
+                { label: qsTr("统计信息"), checked: false,
+                  trigger: function () { mpv.command(["script-binding", "stats/display-stats-toggle"]); } },
+                { label: qsTr("显示网速"), checked: win.netSpeedVisible,
+                  trigger: function () { win.netSpeedVisible = !win.netSpeedVisible; } }
+            ];
+            win.popupAbove(settingsMenu, item);
+        }
+        entryWidth: 220
+    }
+
+    PlayerMenu {
+        id: zoomMenu
+        parent: controlsLayer
+        function popup(item) {
+            var modes = [
+                { key: "fit", label: qsTr("适应") },
+                { key: "fill", label: qsTr("填充") },
+                { key: "stretch", label: qsTr("拉伸") },
+                { key: "original", label: qsTr("原始") }
+            ];
+            entries = modes.map(function (m) {
+                return {
+                    label: m.label,
+                    checked: settingsMenu.zoomMode === m.key,
+                    trigger: function () { win.applyZoomMode(m.key); }
+                };
+            });
+            win.popupAbove(zoomMenu, item);
+        }
+        entryWidth: 140
+    }
+
+    PlayerMenu {
+        id: anime4kMenu
+        parent: controlsLayer
+        function popup(item) {
+            entries = mpv.anime4k.presets.map(function (p) {
+                return {
+                    label: p,
+                    checked: mpv.anime4k.preset === p,
+                    trigger: function () { mpv.setAnime4kPreset(p); }
+                };
+            });
+            win.popupAbove(anime4kMenu, item);
+        }
+        entryWidth: 140
+    }
+
+    PlayerMenu {
+        id: subSettingsMenu
+        parent: controlsLayer
+        function popup(item) {
+            function subDelay() {
+                var d = mpv.getProperty("sub-delay");
+                return (d === undefined || d === null) ? 0 : Number(d);
+            }
+            function subScale() {
+                var s = mpv.getProperty("sub-scale");
+                return (s === undefined || s === null) ? 1 : Number(s);
+            }
+            entries = [
+                { label: qsTr("字幕延迟 -0.5s（当前 ") + subDelay().toFixed(1) + "s）",
+                  checked: false,
+                  trigger: function () { mpv.setProperty("sub-delay", String(subDelay() - 0.5)); } },
+                { label: qsTr("字幕延迟 +0.5s"), checked: false,
+                  trigger: function () { mpv.setProperty("sub-delay", String(subDelay() + 0.5)); } },
+                { label: qsTr("字号变小"), checked: false,
+                  trigger: function () { mpv.setProperty("sub-scale", String(Math.max(0.4, subScale() - 0.1))); } },
+                { label: qsTr("字号变大"), checked: false,
+                  trigger: function () { mpv.setProperty("sub-scale", String(Math.min(3.0, subScale() + 0.1))); } },
+                { label: qsTr("重置字幕样式"), checked: false,
+                  trigger: function () {
+                      mpv.setProperty("sub-delay", "0");
+                      mpv.setProperty("sub-scale", "1.0");
+                  } }
+            ];
+            win.popupAbove(subSettingsMenu, item);
+        }
+        entryWidth: 230
+    }
+
+    // ── net-speed poller (mpv cache-speed, bytes/s) ──────────────────────────
+    Timer {
+        interval: 1000
+        repeat: true
+        running: win.netSpeedVisible
+        onTriggered: {
+            var bps = mpv.getProperty("cache-speed");
+            var mbs = (bps && !isNaN(bps)) ? bps / (1024 * 1024) : 0;
+            netSpeedText.text = mbs.toFixed(mbs >= 10 ? 0 : 1) + " MB/s";
+            var s = spark.samples.slice();
+            s.push(mbs);
+            if (s.length > 30) s.shift();
+            spark.samples = s;
+            spark.requestPaint();
+        }
+    }
+
+    // ── shortcuts ────────────────────────────────────────────────────────────
     Shortcut { sequences: ["Space"]; onActivated: mpv.togglePause() }
     Shortcut { sequences: ["F"]; onActivated: win.toggleFullScreen() }
     Shortcut {
@@ -222,4 +699,18 @@ Window {
     }
     Shortcut { sequences: ["Right"]; onActivated: mpv.seekRelative(5) }
     Shortcut { sequences: ["Left"]; onActivated: mpv.seekRelative(-5) }
+    Shortcut {
+        sequences: ["Up"]
+        onActivated: {
+            win.volumeValue = Math.min(100, win.volumeValue + 5);
+            mpv.setVolume(win.volumeValue);
+        }
+    }
+    Shortcut {
+        sequences: ["Down"]
+        onActivated: {
+            win.volumeValue = Math.max(0, win.volumeValue - 5);
+            mpv.setVolume(win.volumeValue);
+        }
+    }
 }

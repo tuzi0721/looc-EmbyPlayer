@@ -50,6 +50,15 @@ public:
     Q_INVOKABLE void command(const QStringList &args);
     Q_INVOKABLE void setOption(const QString &name, const QString &value);
     Q_INVOKABLE void setProperty(const QString &name, const QVariant &value);
+    // Generic property read for the QML UI (track-list, media-title,
+    // cache-speed, ...). mpv node -> QVariant, the canonical mpv-examples/qml
+    // pattern; returns an invalid QVariant when unavailable.
+    Q_INVOKABLE QVariant getProperty(const QString &name) const;
+    // Forward a UI intent the standalone window cannot satisfy itself
+    // (versions / episodes / danmaku settings ...) to the host via the stdout
+    // reporter as {"event":"ui-action","action":...}. Unknown events are
+    // ignored by the host parser, so this is forward-compatible.
+    Q_INVOKABLE void uiAction(const QString &action);
     Q_INVOKABLE void play();
     Q_INVOKABLE void pause();
     Q_INVOKABLE void togglePause();

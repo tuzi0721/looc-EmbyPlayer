@@ -51,6 +51,36 @@ QString getString(mpv_handle *mpv, const char *name) {
     return out;
 }
 
+// mpv node -> QVariant (canonical mpv-examples/qml conversion).
+QVariant nodeToVariant(const mpv_node *node) {
+    switch (node->format) {
+    case MPV_FORMAT_STRING:
+        return QVariant(QString::fromUtf8(node->u.string));
+    case MPV_FORMAT_FLAG:
+        return QVariant(node->u.flag != 0);
+    case MPV_FORMAT_INT64:
+        return QVariant(static_cast<qlonglong>(node->u.int64));
+    case MPV_FORMAT_DOUBLE:
+        return QVariant(node->u.double_);
+    case MPV_FORMAT_NODE_ARRAY: {
+        QVariantList list;
+        list.reserve(node->u.list->num);
+        for (int i = 0; i < node->u.list->num; ++i)
+            list.append(nodeToVariant(&node->u.list->values[i]));
+        return list;
+    }
+    case MPV_FORMAT_NODE_MAP: {
+        QVariantMap map;
+        for (int i = 0; i < node->u.list->num; ++i)
+            map.insert(QString::fromUtf8(node->u.list->keys[i]),
+                       nodeToVariant(&node->u.list->values[i]));
+        return map;
+    }
+    default:
+        return QVariant();
+    }
+}
+
 } // namespace
 
 // ── Render thread side ──────────────────────────────────────────────────────
@@ -281,6 +311,24 @@ void MpvObject::setProperty(const QString &name, const QVariant &value) {
         mpv_set_property_string(m_mpv, name.toUtf8().constData(),
                                 value.toString().toUtf8().constData());
     }
+}
+
+QVariant MpvObject::getProperty(const QString &name) const {
+    if (!m_mpv) {
+        return {};
+    }
+    mpv_node node;
+    if (mpv_get_property(m_mpv, name.toUtf8().constData(), MPV_FORMAT_NODE,
+                         &node) < 0) {
+        return {};
+    }
+    const QVariant out = nodeToVariant(&node);
+    mpv_free_node_contents(&node);
+    return out;
+}
+
+void MpvObject::uiAction(const QString &action) {
+    m_reporter.uiAction(action);
 }
 
 void MpvObject::loadFile(const QString &url) {
