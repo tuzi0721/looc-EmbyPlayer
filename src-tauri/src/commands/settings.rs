@@ -34,6 +34,9 @@ pub struct SettingsPatch {
     pub ignore_ssl_errors: Option<bool>,
     pub network_proxy_mode: Option<NetworkProxyMode>,
     pub http_proxy_url: Option<String>,
+    pub preferred_audio_language: Option<String>,
+    pub preferred_subtitle_language: Option<String>,
+    pub force_stereo_audio: Option<bool>,
     pub mpv_backend: Option<MpvBackendKind>,
     #[serde(default, deserialize_with = "deserialize_nullable_field")]
     pub external_player_path: Option<Option<String>>,
@@ -177,6 +180,15 @@ pub async fn update_settings(
         }
         if let Some(v) = patch.http_proxy_url {
             s.http_proxy_url = v.trim().to_string();
+        }
+        if let Some(v) = patch.preferred_audio_language {
+            s.preferred_audio_language = v.trim().to_string();
+        }
+        if let Some(v) = patch.preferred_subtitle_language {
+            s.preferred_subtitle_language = v.trim().to_string();
+        }
+        if let Some(v) = patch.force_stereo_audio {
+            s.force_stereo_audio = v;
         }
         if let Some(v) = patch.mpv_backend {
             s.mpv_backend = v;

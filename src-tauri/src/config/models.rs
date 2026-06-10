@@ -151,6 +151,15 @@ pub struct AppSettings {
     pub network_proxy_mode: NetworkProxyMode,
     #[serde(default)]
     pub http_proxy_url: String,
+    // Reference parity (HillsLite 设置·播放器): preferred track languages
+    // (ISO 639 codes for mpv --alang/--slang; empty = server default) and
+    // forced stereo downmix (--audio-channels=stereo).
+    #[serde(default)]
+    pub preferred_audio_language: String,
+    #[serde(default)]
+    pub preferred_subtitle_language: String,
+    #[serde(default)]
+    pub force_stereo_audio: bool,
     #[serde(default)]
     pub mpv_backend: MpvBackendKind,
     #[serde(default)]
@@ -250,6 +259,9 @@ impl Default for AppSettings {
             ignore_ssl_errors: false,
             network_proxy_mode: NetworkProxyMode::default(),
             http_proxy_url: String::new(),
+            preferred_audio_language: String::new(),
+            preferred_subtitle_language: String::new(),
+            force_stereo_audio: false,
             mpv_backend: MpvBackendKind::default(),
             external_player_path: None,
             external_player_args: String::new(),

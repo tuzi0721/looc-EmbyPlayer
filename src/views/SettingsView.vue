@@ -596,6 +596,16 @@ const activeAccountLabel = computed(() => auth.activeAccount?.username ?? "未�
 const mpvBackendLabel = computed(() =>
   settings.settings.mpvBackend === "embedded" ? "Embedded mpv" : "IPC mpv",
 );
+
+// Reference parity (HillsLite 设置·播放器): preferred track language presets.
+// Values are mpv --alang/--slang ISO 639 lists; empty = server default.
+const preferredLanguageOptions = [
+  { value: "", label: "默认" },
+  { value: "zh,zho,chi", label: "中文" },
+  { value: "ja,jpn", label: "日语" },
+  { value: "en,eng", label: "英语" },
+  { value: "ko,kor", label: "韩语" },
+];
 const isWindowsPlatform = computed(() => platformLabel.value.toLowerCase().includes("windows"));
 
 type CapabilityStatus = "available" | "disabled";
@@ -1300,6 +1310,43 @@ const danmakuSummary = computed(() => {
           <GlassInput
             :model-value="String(settings.settings.mpvCacheMb)"
             @update:modelValue="(v) => save('mpvCacheMb', Number(v) || 256)"
+          />
+        </label>
+        <label class="field">
+          <span>首选音频语言（下次播放生效）</span>
+          <div class="seg">
+            <button
+              v-for="opt in preferredLanguageOptions"
+              :key="`alang-${opt.value}`"
+              type="button"
+              :class="{ active: settings.settings.preferredAudioLanguage === opt.value }"
+              @click="save('preferredAudioLanguage', opt.value)"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
+        </label>
+        <label class="field">
+          <span>首选字幕语言（下次播放生效）</span>
+          <div class="seg">
+            <button
+              v-for="opt in preferredLanguageOptions"
+              :key="`slang-${opt.value}`"
+              type="button"
+              :class="{ active: settings.settings.preferredSubtitleLanguage === opt.value }"
+              @click="save('preferredSubtitleLanguage', opt.value)"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
+        </label>
+        <label class="field field--inline">
+          <span>强制输出立体声（下次播放生效）</span>
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.forceStereoAudio"
+            @change="(e: any) => save('forceStereoAudio', e.target.checked)"
           />
         </label>
         <label class="field field--inline">

@@ -53,6 +53,9 @@ export interface AppSettings {
   ignoreSslErrors: boolean;
   networkProxyMode: "none" | "system" | "custom";
   httpProxyUrl: string;
+  preferredAudioLanguage: string;
+  preferredSubtitleLanguage: string;
+  forceStereoAudio: boolean;
   mpvBackend: "ipc" | "embedded";
   externalPlayerPath?: string | null;
   externalPlayerArgs: string;

@@ -505,6 +505,27 @@ async fn spawn_mpv_ipc(
         args.push(format!("--demuxer-max-bytes={}MiB", settings.mpv_cache_mb));
     }
 
+    // Reference parity (HillsLite 设置·播放器): preferred track languages and
+    // forced stereo downmix.
+    let alang = settings.preferred_audio_language.trim();
+    if !alang.is_empty() {
+        args.push(format!("--alang={alang}"));
+    }
+    let slang = settings.preferred_subtitle_language.trim();
+    if !slang.is_empty() {
+        args.push(format!("--slang={slang}"));
+    }
+    if settings.force_stereo_audio {
+        args.push("--audio-channels=stereo".into());
+    }
+    // Custom proxy passthrough so direct (non-local-proxy) URLs also honor it.
+    if settings.network_proxy_mode == crate::config::models::NetworkProxyMode::Custom {
+        let proxy = settings.http_proxy_url.trim();
+        if !proxy.is_empty() {
+            args.push(format!("--http-proxy={proxy}"));
+        }
+    }
+
     // Inject the progress reporter for parity with the external-mpv path. This
     // embedded/IPC backend leaves stdout on `Stdio::null()` and already drives
     // Emby reporting from the frontend snapshot loop, so the script's events are
