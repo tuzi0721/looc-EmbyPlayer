@@ -1573,6 +1573,57 @@ const danmakuSummary = computed(() => {
         <span class="value">{{ danmakuSummary }}</span>
       </button>
       <div v-if="openPanel === 'danmaku'" class="panel glass">
+        <label class="field field--inline">
+          <span>开启弹幕（数据来源于 DanDanPlay API）</span>
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.danmakuEnabledDefault"
+            @change="(e: any) => save('danmakuEnabledDefault', e.target.checked)"
+          />
+        </label>
+        <label class="field">
+          <span>滚动弹幕最大行数</span>
+          <div class="range-row">
+            <input
+              type="range"
+              min="1"
+              max="20"
+              step="1"
+              :value="settings.settings.danmakuScrollMaxRows"
+              @input="(e: any) => save('danmakuScrollMaxRows', Number(e.target.value))"
+            />
+            <strong>{{ settings.settings.danmakuScrollMaxRows }}</strong>
+          </div>
+        </label>
+        <label class="field">
+          <span>顶部弹幕最大行数</span>
+          <div class="range-row">
+            <input
+              type="range"
+              min="1"
+              max="20"
+              step="1"
+              :value="settings.settings.danmakuTopMaxRows"
+              @input="(e: any) => save('danmakuTopMaxRows', Number(e.target.value))"
+            />
+            <strong>{{ settings.settings.danmakuTopMaxRows }}</strong>
+          </div>
+        </label>
+        <label class="field">
+          <span>底部弹幕最大行数</span>
+          <div class="range-row">
+            <input
+              type="range"
+              min="1"
+              max="20"
+              step="1"
+              :value="settings.settings.danmakuBottomMaxRows"
+              @input="(e: any) => save('danmakuBottomMaxRows', Number(e.target.value))"
+            />
+            <strong>{{ settings.settings.danmakuBottomMaxRows }}</strong>
+          </div>
+        </label>
         <label class="field">
           <span>透明度</span>
           <div class="range-row">
@@ -1614,6 +1665,24 @@ const danmakuSummary = computed(() => {
             />
             <strong>{{ settings.settings.danmakuFontSize }}px</strong>
           </div>
+        </label>
+        <label class="field field--inline">
+          <span>粗体</span>
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.danmakuBold"
+            @change="(e: any) => save('danmakuBold', e.target.checked)"
+          />
+        </label>
+        <label class="field field--inline">
+          <span>记忆手动选择的弹幕</span>
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.danmakuRememberSelection"
+            @change="(e: any) => save('danmakuRememberSelection', e.target.checked)"
+          />
         </label>
         <label class="field field--inline">
           <span>避让字幕</span>

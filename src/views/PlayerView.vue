@@ -244,6 +244,34 @@ function resetDanmakuState() {
   danmakuProvider.value = null;
 }
 
+// Reference parity (HillsLite 弹幕设置「开启弹幕」「记忆手动选择的弹幕」):
+// auto-start danmaku per item, preferring a remembered manually-imported XML.
+const danmakuAutoTriedIds = new Set<string>();
+function rememberedDanmakuKey(id: string): string {
+  return `hills.danmaku.xml.${id}`;
+}
+async function autoStartDanmaku(id: string) {
+  if (!id || id === "local-file" || danmakuAutoTriedIds.has(id)) return;
+  danmakuAutoTriedIds.add(id);
+  if (!settings.settings.danmakuEnabledDefault) return;
+  if (danmakuEnabled.value || danmakuLoading.value) return;
+  if (settings.settings.danmakuRememberSelection) {
+    const remembered = localStorage.getItem(rememberedDanmakuKey(id));
+    if (remembered) {
+      danmakuLoading.value = true;
+      try {
+        applyDanmakuResult(await api.importDanmakuXml({ filePath: remembered }));
+        return;
+      } catch {
+        // Stale path: fall through to the regular auto fetch.
+      } finally {
+        danmakuLoading.value = false;
+      }
+    }
+  }
+  await toggleDanmaku().catch(() => {});
+}
+
 function applyDanmakuResult(result: DanmakuResult) {
   const comments = result.comments ?? [];
   danmakuRawCount.value = comments.reduce((total, item) => total + (item.count ?? 1), 0);
@@ -268,6 +296,9 @@ async function importDanmakuXml() {
   try {
     const result = await api.importDanmakuXml({ filePath: selected });
     applyDanmakuResult(result);
+    if (settings.settings.danmakuRememberSelection && currentItemId.value) {
+      localStorage.setItem(rememberedDanmakuKey(currentItemId.value), selected);
+    }
   } catch {
     resetDanmakuState();
   } finally {
@@ -697,13 +728,19 @@ watch(
   { immediate: true },
 );
 
-watch(currentItemId, (id, oldId) => {
-  if (!oldId || id === oldId) return;
-  introSkipAppliedItemId = null;
-  outroSkipAppliedItemId = null;
-  closePlayerPanels();
-  resetDanmakuState();
-});
+watch(
+  currentItemId,
+  (id, oldId) => {
+    if (oldId && id !== oldId) {
+      introSkipAppliedItemId = null;
+      outroSkipAppliedItemId = null;
+      closePlayerPanels();
+      resetDanmakuState();
+    }
+    if (id) void autoStartDanmaku(id);
+  },
+  { immediate: true },
+);
 
 watch(() => player.localFilePath, (filePath, oldFilePath) => {
   if (!filePath || filePath === oldFilePath) return;
@@ -2647,6 +2684,10 @@ onBeforeUnmount(async () => {
         :font-size="danmakuFontSize"
         :avoid-subtitles="danmakuAvoidSubtitles"
         :bottom-reserve-pct="danmakuBottomReservePct"
+        :scroll-max-rows="settings.settings.danmakuScrollMaxRows"
+        :top-max-rows="settings.settings.danmakuTopMaxRows"
+        :bottom-max-rows="settings.settings.danmakuBottomMaxRows"
+        :bold="settings.settings.danmakuBold"
       />
 
       <SubtitlePanel

@@ -71,6 +71,12 @@ pub struct SettingsPatch {
     pub danmaku_font_size: Option<u32>,
     pub danmaku_avoid_subtitles: Option<bool>,
     pub danmaku_bottom_reserve_pct: Option<u32>,
+    pub danmaku_enabled_default: Option<bool>,
+    pub danmaku_scroll_max_rows: Option<u32>,
+    pub danmaku_top_max_rows: Option<u32>,
+    pub danmaku_bottom_max_rows: Option<u32>,
+    pub danmaku_bold: Option<bool>,
+    pub danmaku_remember_selection: Option<bool>,
     pub subtitle_scale: Option<f64>,
     pub subtitle_text_color: Option<String>,
     pub subtitle_outline_color: Option<String>,
@@ -307,6 +313,24 @@ pub async fn update_settings(
         }
         if let Some(v) = patch.danmaku_bottom_reserve_pct {
             s.danmaku_bottom_reserve_pct = v.clamp(0, 40);
+        }
+        if let Some(v) = patch.danmaku_enabled_default {
+            s.danmaku_enabled_default = v;
+        }
+        if let Some(v) = patch.danmaku_scroll_max_rows {
+            s.danmaku_scroll_max_rows = v.clamp(1, 20);
+        }
+        if let Some(v) = patch.danmaku_top_max_rows {
+            s.danmaku_top_max_rows = v.clamp(1, 20);
+        }
+        if let Some(v) = patch.danmaku_bottom_max_rows {
+            s.danmaku_bottom_max_rows = v.clamp(1, 20);
+        }
+        if let Some(v) = patch.danmaku_bold {
+            s.danmaku_bold = v;
+        }
+        if let Some(v) = patch.danmaku_remember_selection {
+            s.danmaku_remember_selection = v;
         }
         if let Some(v) = patch.subtitle_scale {
             s.subtitle_scale = v.clamp(0.5, 2.5);

@@ -56,6 +56,12 @@ export interface AppSettings {
   preferredAudioLanguage: string;
   preferredSubtitleLanguage: string;
   forceStereoAudio: boolean;
+  danmakuEnabledDefault: boolean;
+  danmakuScrollMaxRows: number;
+  danmakuTopMaxRows: number;
+  danmakuBottomMaxRows: number;
+  danmakuBold: boolean;
+  danmakuRememberSelection: boolean;
   mpvBackend: "ipc" | "embedded";
   externalPlayerPath?: string | null;
   externalPlayerArgs: string;

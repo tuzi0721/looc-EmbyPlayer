@@ -21,6 +21,11 @@ const props = withDefaults(
     lanes?: number;
     avoidSubtitles?: boolean;
     bottomReservePct?: number;
+    // Reference parity (HillsLite 弹幕设置): per-area max rows + bold text.
+    scrollMaxRows?: number;
+    topMaxRows?: number;
+    bottomMaxRows?: number;
+    bold?: boolean;
   }>(),
   {
     opacity: 0.85,
@@ -29,6 +34,10 @@ const props = withDefaults(
     lanes: 14,
     avoidSubtitles: true,
     bottomReservePct: 18,
+    scrollMaxRows: 5,
+    topMaxRows: 3,
+    bottomMaxRows: 3,
+    bold: false,
   },
 );
 
@@ -58,12 +67,22 @@ const containerStyle = computed(() => ({
   bottom: `${bottomReservePct.value}%`,
 }));
 
+function laneCap(area: "scroll" | "top" | "bottom", byHeight: number): number {
+  const max =
+    area === "scroll"
+      ? props.scrollMaxRows
+      : area === "top"
+        ? props.topMaxRows
+        : props.bottomMaxRows;
+  return Math.max(1, Math.min(byHeight, Math.max(1, max)));
+}
+
 function reset() {
   cursor.value = 0;
   active.splice(0).forEach((a) => a.el.remove());
-  scrollLanes.value = Array.from({ length: props.lanes }, () => 0);
-  topLanes.value = Array.from({ length: Math.min(6, props.lanes) }, () => 0);
-  bottomLanes.value = Array.from({ length: Math.min(6, props.lanes) }, () => 0);
+  scrollLanes.value = Array.from({ length: laneCap("scroll", props.lanes) }, () => 0);
+  topLanes.value = Array.from({ length: laneCap("top", props.lanes) }, () => 0);
+  bottomLanes.value = Array.from({ length: laneCap("bottom", props.lanes) }, () => 0);
 }
 
 function findLane(lanes: number[], now: number): number {
@@ -85,6 +104,7 @@ function spawn(c: Comment, now: number) {
   el.style.color = c.color;
   el.style.opacity = String(props.opacity);
   el.style.fontSize = `${props.fontSize}px`;
+  el.style.fontWeight = props.bold ? "700" : "500";
   container.value.appendChild(el);
   const w = el.offsetWidth;
   const containerW = container.value.clientWidth;
@@ -97,8 +117,9 @@ function spawn(c: Comment, now: number) {
   let duration: number;
 
   if (mode === "scroll" || mode === "reverse") {
-    if (scrollLanes.value.length !== laneCount) {
-      scrollLanes.value = Array.from({ length: laneCount }, () => 0);
+    const cap = laneCap("scroll", laneCount);
+    if (scrollLanes.value.length !== cap) {
+      scrollLanes.value = Array.from({ length: cap }, () => 0);
     }
     lane = findLane(scrollLanes.value, now);
     duration = 8 / props.speed;
@@ -111,8 +132,9 @@ function spawn(c: Comment, now: number) {
       el.style.transform = `translate3d(${-w}px, ${lane * laneHeight + 4}px, 0)`;
     }
   } else if (mode === "top") {
-    if (topLanes.value.length !== Math.min(6, laneCount)) {
-      topLanes.value = Array.from({ length: Math.min(6, laneCount) }, () => 0);
+    const cap = laneCap("top", laneCount);
+    if (topLanes.value.length !== cap) {
+      topLanes.value = Array.from({ length: cap }, () => 0);
     }
     lane = findLane(topLanes.value, now);
     duration = 5 / props.speed;
@@ -121,8 +143,9 @@ function spawn(c: Comment, now: number) {
     el.style.top = `${lane * laneHeight + 4}px`;
   } else {
     // bottom
-    if (bottomLanes.value.length !== Math.min(6, laneCount)) {
-      bottomLanes.value = Array.from({ length: Math.min(6, laneCount) }, () => 0);
+    const cap = laneCap("bottom", laneCount);
+    if (bottomLanes.value.length !== cap) {
+      bottomLanes.value = Array.from({ length: cap }, () => 0);
     }
     lane = findLane(bottomLanes.value, now);
     duration = 5 / props.speed;
@@ -207,7 +230,16 @@ watch(
 );
 
 watch(
-  () => [props.fontSize, props.lanes, props.avoidSubtitles, props.bottomReservePct],
+  () => [
+    props.fontSize,
+    props.lanes,
+    props.avoidSubtitles,
+    props.bottomReservePct,
+    props.scrollMaxRows,
+    props.topMaxRows,
+    props.bottomMaxRows,
+    props.bold,
+  ],
   () => reset(),
 );
 

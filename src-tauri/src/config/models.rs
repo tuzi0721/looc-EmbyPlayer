@@ -160,6 +160,20 @@ pub struct AppSettings {
     pub preferred_subtitle_language: String,
     #[serde(default)]
     pub force_stereo_audio: bool,
+    // Reference parity (HillsLite 设置·播放器·弹幕): default-on switch, per-area
+    // max rows, bold text, and remembering manually selected danmaku.
+    #[serde(default = "default_true")]
+    pub danmaku_enabled_default: bool,
+    #[serde(default = "default_danmaku_scroll_rows")]
+    pub danmaku_scroll_max_rows: u32,
+    #[serde(default = "default_danmaku_fixed_rows")]
+    pub danmaku_top_max_rows: u32,
+    #[serde(default = "default_danmaku_fixed_rows")]
+    pub danmaku_bottom_max_rows: u32,
+    #[serde(default)]
+    pub danmaku_bold: bool,
+    #[serde(default = "default_true")]
+    pub danmaku_remember_selection: bool,
     #[serde(default)]
     pub mpv_backend: MpvBackendKind,
     #[serde(default)]
@@ -262,6 +276,12 @@ impl Default for AppSettings {
             preferred_audio_language: String::new(),
             preferred_subtitle_language: String::new(),
             force_stereo_audio: false,
+            danmaku_enabled_default: true,
+            danmaku_scroll_max_rows: default_danmaku_scroll_rows(),
+            danmaku_top_max_rows: default_danmaku_fixed_rows(),
+            danmaku_bottom_max_rows: default_danmaku_fixed_rows(),
+            danmaku_bold: false,
+            danmaku_remember_selection: true,
             mpv_backend: MpvBackendKind::default(),
             external_player_path: None,
             external_player_args: String::new(),
@@ -458,4 +478,10 @@ fn default_seek_step_seconds() -> u32 {
 }
 fn default_long_press_speed_rate() -> f64 {
     2.0
+}
+fn default_danmaku_scroll_rows() -> u32 {
+    5
+}
+fn default_danmaku_fixed_rows() -> u32 {
+    3
 }
