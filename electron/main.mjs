@@ -3064,6 +3064,23 @@ function createWindow() {
   win.once("ready-to-show", () => win.show());
   win.on("close", (event) => {
     if (runtimeCleanupFinished || mainWindowCloseAllowed) return;
+    // Reference parity (HillsLite 设置·通用「关闭时最小化到托盘」): hide to the
+    // tray instead of exiting unless quit came from the tray menu.
+    if (!desktopIntegration?.quitting) {
+      let closeToTray = false;
+      try {
+        closeToTray = store.getSettingsSync
+          ? store.getSettingsSync().closeToTray === true
+          : false;
+      } catch {
+        closeToTray = false;
+      }
+      if (closeToTray) {
+        event.preventDefault();
+        win.hide();
+        return;
+      }
+    }
     event.preventDefault();
     if (mainWindowCloseRequested) return;
     mainWindowCloseRequested = true;

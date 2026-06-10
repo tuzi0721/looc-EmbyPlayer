@@ -139,6 +139,10 @@ pub struct AppSettings {
     pub blur_strength: u32,
     #[serde(default = "default_true")]
     pub enable_window_vibrancy: bool,
+    /// Reference parity (HillsLite 设置·通用): closing the main window hides to
+    /// the system tray instead of exiting. Default off.
+    #[serde(default)]
+    pub close_to_tray: bool,
     #[serde(default)]
     pub mpv_backend: MpvBackendKind,
     #[serde(default)]
@@ -226,6 +230,7 @@ impl Default for AppSettings {
             theme: Theme::default(),
             blur_strength: default_blur_strength(),
             enable_window_vibrancy: true,
+            close_to_tray: false,
             mpv_backend: MpvBackendKind::default(),
             external_player_path: None,
             external_player_args: String::new(),

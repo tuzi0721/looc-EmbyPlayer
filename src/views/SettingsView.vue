@@ -1140,6 +1140,15 @@ const danmakuSummary = computed(() => {
         </div>
         <div v-if="backupStatus" class="status-line">{{ backupStatus }}</div>
       </div>
+      <label class="row">
+        <span>关闭时最小化到托盘</span>
+        <input
+          class="switch"
+          type="checkbox"
+          :checked="settings.settings.closeToTray"
+          @change="(e: any) => save('closeToTray', e.target.checked)"
+        />
+      </label>
       <button class="row" @click="togglePanel('network')">
         <span>网络</span>
         <Icon icon="lucide:chevron-right" width="16" class="chev" />

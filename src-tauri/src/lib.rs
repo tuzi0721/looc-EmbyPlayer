@@ -213,10 +213,24 @@ pub fn run() {
         }
         tauri::RunEvent::WindowEvent {
             label,
-            event: tauri::WindowEvent::CloseRequested { .. },
+            event: tauri::WindowEvent::CloseRequested { api, .. },
             ..
         } if label == "main" => {
-            cleanup_playback_on_exit(app);
+            // Reference parity (HillsLite 设置·通用「关闭时最小化到托盘」):
+            // when enabled, closing the main window hides to the tray and the
+            // app keeps running; quitting goes through the tray menu.
+            let close_to_tray = app
+                .try_state::<Arc<AppState>>()
+                .map(|state| state.config.settings().close_to_tray)
+                .unwrap_or(false);
+            if close_to_tray {
+                api.prevent_close();
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.hide();
+                }
+            } else {
+                cleanup_playback_on_exit(app);
+            }
         }
         _ => {}
     });

@@ -30,6 +30,7 @@ pub struct SettingsPatch {
     pub theme: Option<Theme>,
     pub blur_strength: Option<u32>,
     pub enable_window_vibrancy: Option<bool>,
+    pub close_to_tray: Option<bool>,
     pub mpv_backend: Option<MpvBackendKind>,
     #[serde(default, deserialize_with = "deserialize_nullable_field")]
     pub external_player_path: Option<Option<String>>,
@@ -158,6 +159,9 @@ pub async fn update_settings(
         }
         if let Some(v) = patch.enable_window_vibrancy {
             s.enable_window_vibrancy = v;
+        }
+        if let Some(v) = patch.close_to_tray {
+            s.close_to_tray = v;
         }
         if let Some(v) = patch.mpv_backend {
             s.mpv_backend = v;

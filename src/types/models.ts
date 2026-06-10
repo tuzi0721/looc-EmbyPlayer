@@ -49,6 +49,7 @@ export interface AppSettings {
   theme: "dark" | "light" | "auto";
   blurStrength: number;
   enableWindowVibrancy: boolean;
+  closeToTray: boolean;
   mpvBackend: "ipc" | "embedded";
   externalPlayerPath?: string | null;
   externalPlayerArgs: string;

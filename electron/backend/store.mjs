@@ -11,6 +11,7 @@ export const DEFAULT_SETTINGS = {
   theme: "dark",
   blurStrength: 24,
   enableWindowVibrancy: true,
+  closeToTray: false,
   mpvBackend: "ipc",
   externalPlayerPath: null,
   externalPlayerArgs: "",
@@ -442,6 +443,13 @@ export class JsonStore {
 
   async getSettings() {
     await this.load();
+    return normalizeSettings(this.state.settings);
+  }
+
+  // Synchronous snapshot of the already-loaded settings. Used from window
+  // lifecycle handlers (e.g. close-to-tray) where awaiting is not possible;
+  // falls back to defaults before the first load() completes.
+  getSettingsSync() {
     return normalizeSettings(this.state.settings);
   }
 

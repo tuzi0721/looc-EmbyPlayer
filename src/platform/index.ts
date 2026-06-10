@@ -94,6 +94,7 @@ const WEB_DEFAULT_SETTINGS: AppSettings = {
   theme: "dark",
   blurStrength: 24,
   enableWindowVibrancy: true,
+  closeToTray: false,
   mpvBackend: "ipc",
   externalPlayerPath: null,
   externalPlayerArgs: "",
