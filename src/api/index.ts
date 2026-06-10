@@ -448,6 +448,7 @@ export const api = {
   getCacheUsage: () => invoke<CacheUsage>("get_cache_usage"),
   clearAppCache: () => invoke<CacheUsage>("clear_app_cache"),
   ensureMpvConf: () => invoke<string>("ensure_mpv_conf"),
+  openPlayerLogDir: () => invoke<string>("open_player_log_dir"),
 
   // Danmaku
   listDanmakuProviders: () =>

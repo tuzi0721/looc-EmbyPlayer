@@ -75,6 +75,7 @@ export interface AppSettings {
     | "high-bitrate"
     | "low-bitrate"
     | "high-framerate";
+  playerLogEnabled: boolean;
   mpvBackend: "ipc" | "embedded";
   externalPlayerPath?: string | null;
   externalPlayerArgs: string;

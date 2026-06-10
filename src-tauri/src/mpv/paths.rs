@@ -64,6 +64,13 @@ pub fn resolve_user_mpv_conf() -> Option<PathBuf> {
     Some(base.join("app.embyplayer").join("mpv.conf"))
 }
 
+/// Directory for mpv log files (reference parity: HillsLite 设置·调试
+/// 「播放器日志」). Shared by both runtimes: `%APPDATA%/app.embyplayer/logs`.
+pub fn resolve_player_log_dir() -> Option<PathBuf> {
+    let base = std::env::var_os("APPDATA").map(PathBuf::from)?;
+    Some(base.join("app.embyplayer").join("logs"))
+}
+
 pub fn resolve_reporter_script() -> Option<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {

@@ -46,6 +46,7 @@ pub struct SettingsPatch {
     pub external_potplayer_path: Option<Option<String>>,
     pub mark_watched_threshold_pct: Option<u32>,
     pub preferred_version_strategy: Option<PreferredVersionStrategy>,
+    pub player_log_enabled: Option<bool>,
     pub mpv_backend: Option<MpvBackendKind>,
     #[serde(default, deserialize_with = "deserialize_nullable_field")]
     pub external_player_path: Option<Option<String>>,
@@ -229,6 +230,9 @@ pub async fn update_settings(
         }
         if let Some(v) = patch.preferred_version_strategy {
             s.preferred_version_strategy = v;
+        }
+        if let Some(v) = patch.player_log_enabled {
+            s.player_log_enabled = v;
         }
         if let Some(v) = patch.mpv_backend {
             s.mpv_backend = v;

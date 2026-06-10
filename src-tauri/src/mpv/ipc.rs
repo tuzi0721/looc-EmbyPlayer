@@ -534,6 +534,16 @@ async fn spawn_mpv_ipc(
         }
     }
 
+    // Player logs (reference parity: 设置·调试「播放器日志」).
+    if settings.player_log_enabled {
+        if let Some(dir) = crate::mpv::paths::resolve_player_log_dir() {
+            if std::fs::create_dir_all(&dir).is_ok() {
+                let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+                args.push(format!("--log-file={}", dir.join(format!("mpv-{stamp}.log")).display()));
+            }
+        }
+    }
+
     // Inject the progress reporter for parity with the external-mpv path. This
     // embedded/IPC backend leaves stdout on `Stdio::null()` and already drives
     // Emby reporting from the frontend snapshot loop, so the script's events are

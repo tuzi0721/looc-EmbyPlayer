@@ -31,6 +31,7 @@ export const DEFAULT_SETTINGS = {
   externalPotplayerPath: null,
   markWatchedThresholdPct: 90,
   preferredVersionStrategy: "default",
+  playerLogEnabled: false,
   mpvBackend: "ipc",
   externalPlayerPath: null,
   externalPlayerArgs: "",

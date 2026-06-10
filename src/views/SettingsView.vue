@@ -688,6 +688,14 @@ async function editMpvConf() {
     /* opener failure is non-fatal */
   }
 }
+
+async function openPlayerLogs() {
+  try {
+    await api.openPlayerLogDir();
+  } catch {
+    /* opener failure is non-fatal */
+  }
+}
 const isWindowsPlatform = computed(() => platformLabel.value.toLowerCase().includes("windows"));
 
 type CapabilityStatus = "available" | "disabled";
@@ -1490,6 +1498,22 @@ const danmakuSummary = computed(() => {
           <span>编辑 mpv.conf（下次播放生效）</span>
           <button type="button" class="action-btn" @click="editMpvConf">
             <Icon icon="lucide:file-cog" width="15" />
+            <span>打开</span>
+          </button>
+        </label>
+        <label class="field field--inline">
+          <span>播放器日志（下次播放生效）</span>
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.playerLogEnabled"
+            @change="(e: any) => save('playerLogEnabled', e.target.checked)"
+          />
+        </label>
+        <label class="field field--inline">
+          <span>打开日志文件夹</span>
+          <button type="button" class="action-btn" @click="openPlayerLogs">
+            <Icon icon="lucide:folder-open" width="15" />
             <span>打开</span>
           </button>
         </label>

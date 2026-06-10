@@ -2715,6 +2715,15 @@ async function handleInvoke(command, args = {}) {
     return null;
   }
 
+  if (command === "open_player_log_dir") {
+    const base = process.env.APPDATA;
+    if (!base) throw new Error("cannot resolve player log directory");
+    const logDir = path.join(base, "app.embyplayer", "logs");
+    fs.mkdirSync(logDir, { recursive: true });
+    await shell.openPath(logDir);
+    return logDir;
+  }
+
   if (command === "ensure_mpv_conf") {
     const base = process.env.APPDATA;
     if (!base) throw new Error("cannot resolve mpv.conf location");

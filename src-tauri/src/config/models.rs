@@ -195,6 +195,10 @@ pub struct AppSettings {
     // has multiple local-decode-capable media sources.
     #[serde(default)]
     pub preferred_version_strategy: PreferredVersionStrategy,
+    // Reference parity (HillsLite 设置·调试「播放器日志」): write mpv logs to
+    // the app log directory for diagnosis.
+    #[serde(default)]
+    pub player_log_enabled: bool,
     #[serde(default)]
     pub mpv_backend: MpvBackendKind,
     #[serde(default)]
@@ -310,6 +314,7 @@ impl Default for AppSettings {
             external_potplayer_path: None,
             mark_watched_threshold_pct: default_mark_watched_threshold_pct(),
             preferred_version_strategy: PreferredVersionStrategy::default(),
+            player_log_enabled: false,
             mpv_backend: MpvBackendKind::default(),
             external_player_path: None,
             external_player_args: String::new(),

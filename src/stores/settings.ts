@@ -33,6 +33,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   externalPotplayerPath: null,
   markWatchedThresholdPct: 90,
   preferredVersionStrategy: "default",
+  playerLogEnabled: false,
   mpvBackend: "embedded",
   externalPlayerPath: null,
   externalPlayerArgs: "",

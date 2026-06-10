@@ -336,6 +336,16 @@ export class MpvController {
     }
     const userConf = resolveUserMpvConf();
     if (userConf) args.push(`--include=${userConf}`);
+    if (settings.playerLogEnabled && process.env.APPDATA) {
+      try {
+        const logDir = path.join(process.env.APPDATA, "app.embyplayer", "logs");
+        fs.mkdirSync(logDir, { recursive: true });
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        args.push(`--log-file=${path.join(logDir, `mpv-${stamp}.log`)}`);
+      } catch {
+        /* logging is best-effort */
+      }
+    }
 
     // Parity with the Rust embedded backend: load the bundled progress reporter
     // on every mpv launch path. This controller drives Emby reporting from

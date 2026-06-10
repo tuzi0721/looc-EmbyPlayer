@@ -3250,6 +3250,17 @@ pub async fn open_path(path: String) -> AppResult<()> {
     Ok(())
 }
 
+/// Reference parity (HillsLite 设置·调试「播放器日志」): ensure the player log
+/// directory exists and open it in the system file manager.
+#[tauri::command]
+pub async fn open_player_log_dir() -> AppResult<String> {
+    let dir = crate::mpv::paths::resolve_player_log_dir()
+        .ok_or_else(|| AppError::Other("cannot resolve player log directory".into()))?;
+    std::fs::create_dir_all(&dir).map_err(|e| AppError::Other(format!("create log dir: {e}")))?;
+    open::that(&dir).map_err(|e| AppError::Other(format!("open log dir: {e}")))?;
+    Ok(dir.display().to_string())
+}
+
 /// Reference parity (HillsLite 设置·调试「编辑 mpv.conf」): make sure the
 /// user-editable mpv.conf exists and return its path so the frontend can open
 /// it in the system editor. The file is applied on the next mpv spawn.
