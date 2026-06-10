@@ -37,6 +37,13 @@ pub struct SettingsPatch {
     pub preferred_audio_language: Option<String>,
     pub preferred_subtitle_language: Option<String>,
     pub force_stereo_audio: Option<bool>,
+    pub external_mpv_enabled: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_nullable_field")]
+    pub external_mpv_path: Option<Option<String>>,
+    pub external_mpv_use_proxy: Option<bool>,
+    pub external_potplayer_enabled: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_nullable_field")]
+    pub external_potplayer_path: Option<Option<String>>,
     pub mpv_backend: Option<MpvBackendKind>,
     #[serde(default, deserialize_with = "deserialize_nullable_field")]
     pub external_player_path: Option<Option<String>>,
@@ -195,6 +202,25 @@ pub async fn update_settings(
         }
         if let Some(v) = patch.force_stereo_audio {
             s.force_stereo_audio = v;
+        }
+        if let Some(v) = patch.external_mpv_enabled {
+            s.external_mpv_enabled = v;
+        }
+        if let Some(v) = patch.external_mpv_path {
+            s.external_mpv_path = v
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty());
+        }
+        if let Some(v) = patch.external_mpv_use_proxy {
+            s.external_mpv_use_proxy = v;
+        }
+        if let Some(v) = patch.external_potplayer_enabled {
+            s.external_potplayer_enabled = v;
+        }
+        if let Some(v) = patch.external_potplayer_path {
+            s.external_potplayer_path = v
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty());
         }
         if let Some(v) = patch.mpv_backend {
             s.mpv_backend = v;

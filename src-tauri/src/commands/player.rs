@@ -2174,15 +2174,45 @@ pub async fn play_external(
     ));
 
     let settings = state.config.settings();
-    let Some(player_path) = settings
-        .external_player_path
-        .as_deref()
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
-    else {
+
+    // Reference parity (HillsLite 设置·外部播放器): the explicit external mpv /
+    // PotPlayer groups take precedence over the legacy generic external player.
+    enum ExternalKind {
+        Mpv,
+        PotPlayer,
+        Legacy,
+    }
+    fn configured_path(path: &Option<String>) -> Option<String> {
+        path.as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .map(str::to_string)
+    }
+    let (player_path, kind) = if settings.external_mpv_enabled {
+        match configured_path(&settings.external_mpv_path) {
+            Some(p) => (p, ExternalKind::Mpv),
+            None => {
+                return Err(AppError::InvalidState(
+                    "已开启外部 mpv 播放器，但未设置 mpv 位置。".into(),
+                ))
+            }
+        }
+    } else if settings.external_potplayer_enabled {
+        match configured_path(&settings.external_potplayer_path) {
+            Some(p) => (p, ExternalKind::PotPlayer),
+            None => {
+                return Err(AppError::InvalidState(
+                    "已开启外部 PotPlayer 播放器，但未设置 PotPlayer 位置。".into(),
+                ))
+            }
+        }
+    } else if let Some(p) = configured_path(&settings.external_player_path) {
+        (p, ExternalKind::Legacy)
+    } else {
         open::that(url.as_str()).map_err(|e| AppError::Other(format!("open stream: {e}")))?;
         return Ok(());
     };
+    let player_path = player_path.as_str();
 
     if !Path::new(player_path).exists() {
         return Err(AppError::Other(format!(
@@ -2193,13 +2223,22 @@ pub async fn play_external(
     // Only mpv understands `--script`, so the reporter is injected (and stdout
     // captured) exclusively for mpv players. Anything else keeps the original
     // detached-launch behaviour.
-    let reporter_script = if looks_like_mpv(player_path) {
+    let treat_as_mpv = match kind {
+        ExternalKind::Mpv => true,
+        ExternalKind::PotPlayer => false,
+        ExternalKind::Legacy => looks_like_mpv(player_path),
+    };
+    let reporter_script = if treat_as_mpv {
         crate::mpv::paths::resolve_reporter_script()
     } else {
         None
     };
-    let args = build_external_player_args(
-        &settings.external_player_args,
+    let args_template = match kind {
+        ExternalKind::Legacy => settings.external_player_args.as_str(),
+        _ => "",
+    };
+    let mut args = build_external_player_args(
+        args_template,
         player_path,
         url.as_str(),
         payload.title.as_deref().unwrap_or(&item.name),
@@ -2208,6 +2247,34 @@ pub async fn play_external(
         payload.start_ms.unwrap_or_default(),
         reporter_script.as_deref().and_then(Path::to_str),
     );
+    match kind {
+        ExternalKind::PotPlayer => {
+            // PotPlayer CLI: `<url> /seek=hh:mm:ss`.
+            args = vec![url.as_str().to_string()];
+            let start_secs = payload.start_ms.unwrap_or_default() / 1000;
+            if start_secs > 0 {
+                args.push(format!(
+                    "/seek={}:{:02}:{:02}",
+                    start_secs / 3600,
+                    (start_secs % 3600) / 60,
+                    start_secs % 60
+                ));
+            }
+        }
+        ExternalKind::Mpv => {
+            // "外部 mpv 使用系统代理": system-mode proxy env vars are inherited
+            // by the child automatically; a custom proxy must be passed on.
+            if settings.external_mpv_use_proxy
+                && settings.network_proxy_mode == crate::config::models::NetworkProxyMode::Custom
+            {
+                let proxy = settings.http_proxy_url.trim();
+                if !proxy.is_empty() && !args.is_empty() {
+                    args.insert(args.len() - 1, format!("--http-proxy={proxy}"));
+                }
+            }
+        }
+        ExternalKind::Legacy => {}
+    }
 
     if reporter_script.is_some() {
         // External mpv with the bundled reporter: capture stdout and bridge its

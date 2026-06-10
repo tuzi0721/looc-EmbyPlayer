@@ -174,6 +174,19 @@ pub struct AppSettings {
     pub danmaku_bold: bool,
     #[serde(default = "default_true")]
     pub danmaku_remember_selection: bool,
+    // Reference parity (HillsLite 设置·外部播放器): explicit external mpv /
+    // PotPlayer groups (enable + path; mpv additionally honors the app proxy).
+    // The legacy generic external_player_path stays as a fallback.
+    #[serde(default)]
+    pub external_mpv_enabled: bool,
+    #[serde(default)]
+    pub external_mpv_path: Option<String>,
+    #[serde(default)]
+    pub external_mpv_use_proxy: bool,
+    #[serde(default)]
+    pub external_potplayer_enabled: bool,
+    #[serde(default)]
+    pub external_potplayer_path: Option<String>,
     #[serde(default)]
     pub mpv_backend: MpvBackendKind,
     #[serde(default)]
@@ -282,6 +295,11 @@ impl Default for AppSettings {
             danmaku_bottom_max_rows: default_danmaku_fixed_rows(),
             danmaku_bold: false,
             danmaku_remember_selection: true,
+            external_mpv_enabled: false,
+            external_mpv_path: None,
+            external_mpv_use_proxy: false,
+            external_potplayer_enabled: false,
+            external_potplayer_path: None,
             mpv_backend: MpvBackendKind::default(),
             external_player_path: None,
             external_player_args: String::new(),

@@ -322,6 +322,22 @@ async function pickExternalPlayer() {
   }
 }
 
+// Reference parity (HillsLite 设置·外部播放器): dedicated mpv / PotPlayer groups.
+async function pickExternalExe(key: "externalMpvPath" | "externalPotplayerPath", title: string) {
+  const selected = await openFileDialog({
+    multiple: false,
+    directory: false,
+    filters: [
+      { name: "Executable", extensions: ["exe"] },
+      { name: "All", extensions: ["*"] },
+    ],
+    title,
+  });
+  if (typeof selected === "string" && selected.length > 0) {
+    await save(key, selected as any);
+  }
+}
+
 async function saveDownloadDirectory(value = downloadDirectoryDraft.value) {
   const normalized = value.trim() || null;
   const current = settings.settings.downloadDirectory ?? null;
@@ -765,6 +781,8 @@ const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
 ]);
 
 const externalPlayerSummary = computed(() => {
+  if (settings.settings.externalMpvEnabled) return "外部 mpv";
+  if (settings.settings.externalPotplayerEnabled) return "PotPlayer";
   const path = settings.settings.externalPlayerPath?.trim();
   if (!path) return "系统默认";
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
@@ -1534,8 +1552,77 @@ const danmakuSummary = computed(() => {
         <span class="value">{{ externalPlayerSummary }}</span>
       </button>
       <div v-if="openPanel === 'externalPlayer'" class="panel glass">
+        <label class="field field--inline">
+          <span>开启外部 mpv 播放器</span>
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.externalMpvEnabled"
+            @change="(e: any) => save('externalMpvEnabled', e.target.checked)"
+          />
+        </label>
+        <template v-if="settings.settings.externalMpvEnabled">
+          <label class="field">
+            <span>外部 mpv 播放器位置</span>
+            <GlassInput
+              :model-value="settings.settings.externalMpvPath ?? ''"
+              placeholder="例如 C:\\mpv\\mpv.exe"
+              @update:modelValue="(v) => save('externalMpvPath', (String(v).trim() || null) as any)"
+            />
+          </label>
+          <div class="panel__actions">
+            <button
+              type="button"
+              class="action-btn"
+              @click="pickExternalExe('externalMpvPath', '选择 mpv.exe')"
+            >
+              <Icon icon="lucide:folder-open" width="15" />
+              <span>选择</span>
+            </button>
+          </div>
+          <label class="field field--inline">
+            <span>外部 mpv 使用代理（自定义代理时传入）</span>
+            <input
+              class="switch"
+              type="checkbox"
+              :checked="settings.settings.externalMpvUseProxy"
+              @change="(e: any) => save('externalMpvUseProxy', e.target.checked)"
+            />
+          </label>
+        </template>
+        <label class="field field--inline">
+          <span>开启外部 PotPlayer 播放器</span>
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.externalPotplayerEnabled"
+            @change="(e: any) => save('externalPotplayerEnabled', e.target.checked)"
+          />
+        </label>
+        <template v-if="settings.settings.externalPotplayerEnabled">
+          <label class="field">
+            <span>外部 PotPlayer 播放器位置</span>
+            <GlassInput
+              :model-value="settings.settings.externalPotplayerPath ?? ''"
+              placeholder="例如 C:\\Program Files\\DAUM\\PotPlayer\\PotPlayerMini64.exe"
+              @update:modelValue="
+                (v) => save('externalPotplayerPath', (String(v).trim() || null) as any)
+              "
+            />
+          </label>
+          <div class="panel__actions">
+            <button
+              type="button"
+              class="action-btn"
+              @click="pickExternalExe('externalPotplayerPath', '选择 PotPlayer')"
+            >
+              <Icon icon="lucide:folder-open" width="15" />
+              <span>选择</span>
+            </button>
+          </div>
+        </template>
         <label class="field">
-          <span>播放器路径</span>
+          <span>其他播放器路径（以上未开启时生效）</span>
           <GlassInput
             v-model="externalPlayerPathDraft"
             placeholder="留空使用系统默认"

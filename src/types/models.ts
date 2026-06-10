@@ -62,6 +62,11 @@ export interface AppSettings {
   danmakuBottomMaxRows: number;
   danmakuBold: boolean;
   danmakuRememberSelection: boolean;
+  externalMpvEnabled: boolean;
+  externalMpvPath: string | null;
+  externalMpvUseProxy: boolean;
+  externalPotplayerEnabled: boolean;
+  externalPotplayerPath: string | null;
   mpvBackend: "ipc" | "embedded";
   externalPlayerPath?: string | null;
   externalPlayerArgs: string;
