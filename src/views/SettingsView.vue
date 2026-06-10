@@ -28,6 +28,7 @@ type PanelId =
   | "fileServices"
   | "backup"
   | "network"
+  | "interaction"
   | "player"
   | "downloads"
   | "enhancement"
@@ -1185,6 +1186,43 @@ const danmakuSummary = computed(() => {
       </div>
 
       <h2 class="group-title">播放器</h2>
+
+      <button class="row" @click="togglePanel('interaction')">
+        <span>交互</span>
+        <Icon icon="lucide:chevron-right" width="16" class="chev" />
+      </button>
+      <div v-if="openPanel === 'interaction'" class="panel glass">
+        <label class="field">
+          <span>快进时间（秒）</span>
+          <GlassInput
+            type="number"
+            :model-value="String(settings.settings.seekForwardSeconds)"
+            @update:modelValue="
+              (v) => save('seekForwardSeconds', Math.min(300, Math.max(1, Number(v) || 10)))
+            "
+          />
+        </label>
+        <label class="field">
+          <span>快退时间（秒）</span>
+          <GlassInput
+            type="number"
+            :model-value="String(settings.settings.seekBackwardSeconds)"
+            @update:modelValue="
+              (v) => save('seekBackwardSeconds', Math.min(300, Math.max(1, Number(v) || 10)))
+            "
+          />
+        </label>
+        <label class="field">
+          <span>倍速播放速度（长按）</span>
+          <GlassInput
+            type="number"
+            :model-value="String(settings.settings.longPressSpeedRate)"
+            @update:modelValue="
+              (v) => save('longPressSpeedRate', Math.min(5, Math.max(1.1, Number(v) || 2)))
+            "
+          />
+        </label>
+      </div>
 
       <button class="row" @click="togglePanel('player')">
         <span>播放器</span>

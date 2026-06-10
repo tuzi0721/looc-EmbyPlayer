@@ -46,6 +46,9 @@ pub struct SettingsPatch {
     pub skip_intro_outro_enabled: Option<bool>,
     pub skip_intro_seconds: Option<u32>,
     pub skip_outro_seconds: Option<u32>,
+    pub seek_forward_seconds: Option<u32>,
+    pub seek_backward_seconds: Option<u32>,
+    pub long_press_speed_rate: Option<f64>,
     pub screenshot_include_subtitles: Option<bool>,
     pub append_auth_query: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_nullable_field")]
@@ -215,6 +218,15 @@ pub async fn update_settings(
         }
         if let Some(v) = patch.skip_outro_seconds {
             s.skip_outro_seconds = v.clamp(0, 600);
+        }
+        if let Some(v) = patch.seek_forward_seconds {
+            s.seek_forward_seconds = v.clamp(1, 300);
+        }
+        if let Some(v) = patch.seek_backward_seconds {
+            s.seek_backward_seconds = v.clamp(1, 300);
+        }
+        if let Some(v) = patch.long_press_speed_rate {
+            s.long_press_speed_rate = v.clamp(1.1, 5.0);
         }
         if let Some(v) = patch.screenshot_include_subtitles {
             s.screenshot_include_subtitles = v;

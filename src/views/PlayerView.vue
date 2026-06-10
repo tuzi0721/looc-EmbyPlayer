@@ -1238,7 +1238,7 @@ async function activateLongPressSpeed() {
   longPressRestoreSpeed = speed.value;
   longPressSpeedActive.value = true;
   try {
-    await setSpeed(2);
+    await setSpeed(settings.settings.longPressSpeedRate || 2);
   } catch (error) {
     longPressSpeedActive.value = false;
     longPressRestoreSpeed = null;
@@ -2080,8 +2080,8 @@ watch(
 
 const playerShortcutHandlers: Record<PlayerShortcutAction, () => void | Promise<void>> = {
   "toggle-play": togglePlay,
-  "seek-back-small": () => nudgeSeek(-10),
-  "seek-forward-small": () => nudgeSeek(10),
+  "seek-back-small": () => nudgeSeek(-(settings.settings.seekBackwardSeconds || 10)),
+  "seek-forward-small": () => nudgeSeek(settings.settings.seekForwardSeconds || 10),
   "seek-back-large": () => nudgeSeek(-60),
   "seek-forward-large": () => nudgeSeek(60),
   "volume-up": () => nudgeVolume(5),
@@ -2708,7 +2708,7 @@ onBeforeUnmount(async () => {
 
       <transition name="fade">
         <div v-if="longPressSpeedActive" class="player__speed-hold" aria-live="polite">
-          2.0x
+          {{ (settings.settings.longPressSpeedRate || 2).toFixed(1) }}x
         </div>
       </transition>
 
@@ -2825,8 +2825,8 @@ onBeforeUnmount(async () => {
               class="iconbtn"
               data-control="seek-back"
               :disabled="!seekAvailable"
-              :title="seekAvailable ? '后退 10 秒' : seekUnavailableTitle"
-              @click="nudgeSeek(-10)"
+              :title="seekAvailable ? `后退 ${settings.settings.seekBackwardSeconds} 秒` : seekUnavailableTitle"
+              @click="nudgeSeek(-(settings.settings.seekBackwardSeconds || 10))"
             >
               <Icon icon="lucide:rotate-ccw" width="19" />
             </button>
@@ -2844,8 +2844,8 @@ onBeforeUnmount(async () => {
               class="iconbtn"
               data-control="seek-forward"
               :disabled="!seekAvailable"
-              :title="seekAvailable ? '前进 30 秒' : seekUnavailableTitle"
-              @click="nudgeSeek(30)"
+              :title="seekAvailable ? `前进 ${settings.settings.seekForwardSeconds} 秒` : seekUnavailableTitle"
+              @click="nudgeSeek(settings.settings.seekForwardSeconds || 10)"
             >
               <Icon icon="lucide:rotate-cw" width="19" />
             </button>

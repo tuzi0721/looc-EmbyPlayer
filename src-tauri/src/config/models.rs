@@ -173,6 +173,14 @@ pub struct AppSettings {
     pub skip_intro_seconds: u32,
     #[serde(default = "default_skip_outro_seconds")]
     pub skip_outro_seconds: u32,
+    // Reference parity (HillsLite 设置·播放器·交互): seek-step seconds for the
+    // forward/back nudges and the long-press speed-play rate.
+    #[serde(default = "default_seek_step_seconds")]
+    pub seek_forward_seconds: u32,
+    #[serde(default = "default_seek_step_seconds")]
+    pub seek_backward_seconds: u32,
+    #[serde(default = "default_long_press_speed_rate")]
+    pub long_press_speed_rate: f64,
     #[serde(default = "default_true")]
     pub screenshot_include_subtitles: bool,
     #[serde(default)]
@@ -245,6 +253,9 @@ impl Default for AppSettings {
             skip_intro_outro_enabled: false,
             skip_intro_seconds: default_skip_intro_seconds(),
             skip_outro_seconds: default_skip_outro_seconds(),
+            seek_forward_seconds: default_seek_step_seconds(),
+            seek_backward_seconds: default_seek_step_seconds(),
+            long_press_speed_rate: default_long_press_speed_rate(),
             screenshot_include_subtitles: true,
             append_auth_query: false,
             download_directory: None,
@@ -401,4 +412,10 @@ fn default_skip_intro_seconds() -> u32 {
 }
 fn default_skip_outro_seconds() -> u32 {
     90
+}
+fn default_seek_step_seconds() -> u32 {
+    10
+}
+fn default_long_press_speed_rate() -> f64 {
+    2.0
 }

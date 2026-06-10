@@ -63,6 +63,9 @@ export interface AppSettings {
   preserveTrackSwitchCache: boolean;
   skipIntroOutroEnabled: boolean;
   skipIntroSeconds: number;
+  seekForwardSeconds: number;
+  seekBackwardSeconds: number;
+  longPressSpeedRate: number;
   skipOutroSeconds: number;
   screenshotIncludeSubtitles: boolean;
   appendAuthQuery: boolean;
