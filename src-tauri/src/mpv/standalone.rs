@@ -104,6 +104,11 @@ pub struct StandaloneStartRequest {
     pub volume: i32,
     pub hardware_decoding: bool,
     pub cache_mb: u32,
+    /// Item runtime in ms (from Emby `RunTimeTicks`), used for the mark-watched
+    /// threshold on stop. `None` when unknown (then we never auto-mark).
+    pub runtime_ms: Option<i64>,
+    /// Percent of runtime past which the item is explicitly marked played on stop.
+    pub mark_watched_threshold_pct: u32,
 }
 
 /// Identity + reporting sink shared with the stdout reader task.
@@ -115,6 +120,8 @@ struct ReportState {
     play_session_id: String,
     play_method: String,
     volume: i32,
+    runtime_ms: Option<i64>,
+    mark_watched_threshold_pct: u32,
     last_position_ms: AtomicI64,
     stopped: AtomicBool,
 }
@@ -156,6 +163,23 @@ impl ReportState {
             .await
         {
             tracing::warn!(target = "mpv-standalone", error = %error, "report_stopped failed");
+        }
+        // Reference parity (HillsLite「标记已看的进度阈值」): explicitly mark the
+        // item played when the stop position is past the threshold, instead of
+        // relying solely on the server's near-end heuristic.
+        if let Some(runtime_ms) = self.runtime_ms {
+            if runtime_ms > 0 {
+                let watched_pct = position_ms.max(0) as f64 / runtime_ms as f64 * 100.0;
+                if watched_pct >= f64::from(self.mark_watched_threshold_pct) {
+                    if let Err(error) = self
+                        .emby
+                        .set_played(&self.server, &self.account, &self.item_id, true)
+                        .await
+                    {
+                        tracing::warn!(target = "mpv-standalone", error = %error, "set_played failed");
+                    }
+                }
+            }
         }
     }
 }
@@ -237,6 +261,8 @@ impl StandalonePlayer {
             play_session_id: req.play_session_id,
             play_method: req.play_method,
             volume: req.volume,
+            runtime_ms: req.runtime_ms,
+            mark_watched_threshold_pct: req.mark_watched_threshold_pct,
             last_position_ms: AtomicI64::new(req.start_ms.unwrap_or(0).max(0)),
             stopped: AtomicBool::new(false),
         });

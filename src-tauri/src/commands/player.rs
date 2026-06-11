@@ -2448,6 +2448,8 @@ pub async fn play_standalone(
             volume: 100,
             hardware_decoding: settings.hardware_decoding,
             cache_mb: settings.mpv_cache_mb,
+            runtime_ms: item.run_time_ticks.map(|ticks| (ticks / 10_000).max(0)),
+            mark_watched_threshold_pct: settings.mark_watched_threshold_pct,
         })
         .await?;
 
