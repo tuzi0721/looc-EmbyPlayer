@@ -43,6 +43,7 @@ export const DEFAULT_SETTINGS = {
   lowQualityDecoding: false,
   hiddenServerIds: [],
   hideJavCodes: false,
+  hideContinueWatching: false,
   showNetworkSpeed: false,
   statsOverlayMode: "winui",
   blackoutOtherDisplays: false,

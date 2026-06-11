@@ -226,6 +226,9 @@ pub struct AppSettings {
     pub hidden_server_ids: Vec<String>,
     #[serde(default)]
     pub hide_jav_codes: bool,
+    // Reference parity (HillsLite 设置·通用): hide the home "continue watching" row.
+    #[serde(default)]
+    pub hide_continue_watching: bool,
     #[serde(default)]
     pub show_network_speed: bool,
     #[serde(default)]
@@ -341,6 +344,7 @@ impl Default for AppSettings {
             low_quality_decoding: false,
             hidden_server_ids: Vec::new(),
             hide_jav_codes: false,
+            hide_continue_watching: false,
             show_network_speed: false,
             stats_overlay_mode: StatsOverlayMode::default(),
             blackout_other_displays: false,

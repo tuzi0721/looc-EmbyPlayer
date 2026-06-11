@@ -87,6 +87,7 @@ export interface AppSettings {
   lowQualityDecoding: boolean;
   hiddenServerIds: string[];
   hideJavCodes: boolean;
+  hideContinueWatching: boolean;
   showNetworkSpeed: boolean;
   statsOverlayMode: StatsOverlayMode;
   blackoutOtherDisplays: boolean;

@@ -1173,6 +1173,15 @@ const danmakuSummary = computed(() => {
             @change="(e: any) => save('hideJavCodes', e.target.checked)"
           />
         </label>
+        <label class="field field--inline">
+          <span>隐藏继续观看</span>
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.hideContinueWatching"
+            @change="(e: any) => save('hideContinueWatching', e.target.checked)"
+          />
+        </label>
       </div>
 
       <button class="row" @click="togglePanel('fileServices')">

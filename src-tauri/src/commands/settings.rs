@@ -59,6 +59,7 @@ pub struct SettingsPatch {
     pub low_quality_decoding: Option<bool>,
     pub hidden_server_ids: Option<Vec<String>>,
     pub hide_jav_codes: Option<bool>,
+    pub hide_continue_watching: Option<bool>,
     pub show_network_speed: Option<bool>,
     pub stats_overlay_mode: Option<StatsOverlayMode>,
     pub blackout_other_displays: Option<bool>,
@@ -283,6 +284,9 @@ pub async fn update_settings(
         }
         if let Some(v) = patch.hide_jav_codes {
             s.hide_jav_codes = v;
+        }
+        if let Some(v) = patch.hide_continue_watching {
+            s.hide_continue_watching = v;
         }
         if let Some(v) = patch.show_network_speed {
             s.show_network_speed = v;

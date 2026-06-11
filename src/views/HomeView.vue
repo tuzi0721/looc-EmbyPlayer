@@ -162,7 +162,10 @@ function gotoAddServer() {
           <Skeleton :rows="8" aspect="backdrop" />
         </section>
 
-        <section v-if="lib.resume.length > 0" class="row-section">
+        <section
+          v-if="lib.resume.length > 0 && !settings.settings.hideContinueWatching"
+          class="row-section"
+        >
           <header class="row-head content__pad">
             <h2>继续观看</h2>
           </header>
