@@ -500,7 +500,7 @@ async fn spawn_mpv_ipc(
     // Reference parity (HillsLite 设置·播放器「视频输出驱动」): mpv --vo.
     args.push(format!("--vo={}", settings.video_output_driver.mpv_value()));
     if settings.hardware_decoding {
-        args.push("--hwdec=auto-safe".into());
+        args.push(format!("--hwdec={}", settings.hwdec_mode.mpv_value()));
     }
     // Reference parity (HillsLite「低质量视频解码」): trade quality for speed.
     if settings.low_quality_decoding {

@@ -207,6 +207,8 @@ pub struct AppSettings {
     pub external_player_args: String,
     #[serde(default = "default_true")]
     pub hardware_decoding: bool,
+    #[serde(default)]
+    pub hwdec_mode: HwdecMode,
     #[serde(default = "default_cache_mb")]
     pub mpv_cache_mb: u32,
     // Reference parity (HillsLite 设置·播放器): video output driver (mpv --vo),
@@ -332,6 +334,7 @@ impl Default for AppSettings {
             external_player_path: None,
             external_player_args: String::new(),
             hardware_decoding: true,
+            hwdec_mode: HwdecMode::default(),
             mpv_cache_mb: default_cache_mb(),
             video_output_driver: VideoOutputDriver::default(),
             mpv_cache_secs: 0,
@@ -446,6 +449,34 @@ impl VideoOutputDriver {
         match self {
             Self::GpuNext => "gpu-next",
             Self::Gpu => "gpu",
+        }
+    }
+}
+
+/// Reference parity (HillsLite 设置·播放器「解码方式」): hardware decode method
+/// (mpv `--hwdec`) used when hardware decoding is enabled. `Auto` = auto-safe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HwdecMode {
+    Auto,
+    D3d11va,
+    Vulkan,
+    Copy,
+}
+
+impl Default for HwdecMode {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+impl HwdecMode {
+    pub fn mpv_value(self) -> &'static str {
+        match self {
+            Self::Auto => "auto-safe",
+            Self::D3d11va => "d3d11va",
+            Self::Vulkan => "vulkan",
+            Self::Copy => "auto-copy",
         }
     }
 }

@@ -13,7 +13,7 @@ use crate::commands::shortcuts::{
     self, merge_shortcut_bindings, normalize_shortcut_bindings, ShortcutBinding,
 };
 use crate::config::models::{
-    Account, Anime4kMode, AppSettings, HomeHeroStyle, MpvBackendKind, NetworkProxyMode,
+    Account, Anime4kMode, AppSettings, HomeHeroStyle, HwdecMode, MpvBackendKind, NetworkProxyMode,
     PreferredVersionStrategy, Server, StatsOverlayMode, Theme, VideoOutputDriver,
 };
 use crate::error::{AppError, AppResult};
@@ -52,6 +52,7 @@ pub struct SettingsPatch {
     pub external_player_path: Option<Option<String>>,
     pub external_player_args: Option<String>,
     pub hardware_decoding: Option<bool>,
+    pub hwdec_mode: Option<HwdecMode>,
     pub mpv_cache_mb: Option<u32>,
     pub video_output_driver: Option<VideoOutputDriver>,
     pub mpv_cache_secs: Option<u32>,
@@ -261,6 +262,9 @@ pub async fn update_settings(
         }
         if let Some(v) = patch.hardware_decoding {
             s.hardware_decoding = v;
+        }
+        if let Some(v) = patch.hwdec_mode {
+            s.hwdec_mode = v;
         }
         if let Some(v) = patch.mpv_cache_mb {
             s.mpv_cache_mb = v;

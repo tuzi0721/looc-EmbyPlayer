@@ -317,7 +317,15 @@ export class MpvController {
 
     const hwdecOverride = process.env.HILLS_ELECTRON_MPV_HWDEC?.trim();
     if (hwdecOverride) args.push(`--hwdec=${hwdecOverride}`);
-    else if (settings.hardwareDecoding) args.push("--hwdec=auto-safe");
+    else if (settings.hardwareDecoding) {
+      const hwdecModeMap = {
+        auto: "auto-safe",
+        d3d11va: "d3d11va",
+        vulkan: "vulkan",
+        copy: "auto-copy",
+      };
+      args.push(`--hwdec=${hwdecModeMap[settings.hwdecMode] ?? "auto-safe"}`);
+    }
     if ((settings.mpvCacheMb ?? 0) > 0) {
       args.push("--cache=yes");
       args.push(`--demuxer-max-bytes=${settings.mpvCacheMb}MiB`);

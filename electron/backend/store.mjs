@@ -36,6 +36,7 @@ export const DEFAULT_SETTINGS = {
   externalPlayerPath: null,
   externalPlayerArgs: "",
   hardwareDecoding: true,
+  hwdecMode: "auto",
   mpvCacheMb: 256,
   videoOutputDriver: "gpu-next",
   mpvCacheSecs: 0,

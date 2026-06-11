@@ -119,6 +119,7 @@ const WEB_DEFAULT_SETTINGS: AppSettings = {
   externalPlayerPath: null,
   externalPlayerArgs: "",
   hardwareDecoding: true,
+  hwdecMode: "auto",
   mpvCacheMb: 256,
   videoOutputDriver: "gpu-next",
   mpvCacheSecs: 0,

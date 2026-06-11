@@ -1441,6 +1441,39 @@ const danmakuSummary = computed(() => {
             </button>
           </div>
         </label>
+        <label v-if="settings.settings.hardwareDecoding" class="field">
+          <span>硬解方式（下次播放生效）</span>
+          <div class="seg">
+            <button
+              type="button"
+              :class="{ active: settings.settings.hwdecMode === 'auto' }"
+              @click="save('hwdecMode', 'auto')"
+            >
+              自动
+            </button>
+            <button
+              type="button"
+              :class="{ active: settings.settings.hwdecMode === 'd3d11va' }"
+              @click="save('hwdecMode', 'd3d11va')"
+            >
+              D3D11VA
+            </button>
+            <button
+              type="button"
+              :class="{ active: settings.settings.hwdecMode === 'vulkan' }"
+              @click="save('hwdecMode', 'vulkan')"
+            >
+              Vulkan
+            </button>
+            <button
+              type="button"
+              :class="{ active: settings.settings.hwdecMode === 'copy' }"
+              @click="save('hwdecMode', 'copy')"
+            >
+              Copy
+            </button>
+          </div>
+        </label>
         <label class="field field--inline">
           <span>低质量视频解码（下次播放生效）</span>
           <input

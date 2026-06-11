@@ -80,6 +80,7 @@ export interface AppSettings {
   externalPlayerPath?: string | null;
   externalPlayerArgs: string;
   hardwareDecoding: boolean;
+  hwdecMode: "auto" | "d3d11va" | "vulkan" | "copy";
   mpvCacheMb: number;
   videoOutputDriver: "gpu-next" | "gpu";
   mpvCacheSecs: number;
