@@ -8,8 +8,9 @@ import HillsPlayer
 // The video is a normal Qt Quick item (MpvObject, libmpv render API), so all
 // controls overlay it directly — no native child window, no dead zones.
 //
-// Glyphs are placeholders until CH-2 delivers the icon set; every control is
-// functional: transport/seek/volume/speed/tracks/zoom/Anime4K/subtitle
+// Controls use CH-2's SVG icon set (qml/icons/*.svg, bundled into the QML
+// module); the speed button shows the live multiplier as text. Every control
+// is functional: transport/seek/volume/speed/tracks/zoom/Anime4K/subtitle
 // settings/stats work against mpv directly, and shell-domain intents
 // (versions/episodes/danmaku) are forwarded to the host via ui-action events.
 Window {
@@ -197,19 +198,33 @@ Window {
         }
     }
 
-    // ── bottom-bar control button (glyph placeholder until CH-2 icons) ──────
+    // ── bottom-bar control button (SVG icon from CH-2 set, glyph fallback) ──
     component CtrlButton: Rectangle {
         id: cb
         property string glyph: ""
+        property url iconSource: ""
         property string label: ""
         property bool active: false
+        property int iconSize: 20
+        readonly property bool hasIcon: String(iconSource).length > 0
         signal clicked()
-        width: Math.max(40, cbText.implicitWidth + 18)
+        width: hasIcon ? (iconSize + 18) : Math.max(40, cbText.implicitWidth + 18)
         height: 34
         radius: 6
         color: cbMa.containsMouse ? "#33ffffff" : "transparent"
+        Image {
+            id: cbIcon
+            visible: cb.hasIcon
+            anchors.centerIn: parent
+            source: cb.iconSource
+            sourceSize.width: cb.iconSize
+            sourceSize.height: cb.iconSize
+            smooth: true
+            opacity: cbMa.containsMouse || cb.active ? 1.0 : 0.9
+        }
         Text {
             id: cbText
+            visible: !cb.hasIcon
             anchors.centerIn: parent
             text: cb.glyph
             color: cb.active ? win.accent : "white"
@@ -245,7 +260,8 @@ Window {
                 spacing: 8
                 CtrlButton {
                     objectName: "btnBack"
-                    glyph: "\u2039"   // ‹  back → host shows detail page; window closes
+                    iconSource: "icons/back.svg"   // back → host shows detail page; window closes
+                    iconSize: 22
                     label: qsTr("返回")
                     onClicked: { mpv.uiAction("back"); win.close(); }
                 }
@@ -309,7 +325,7 @@ Window {
 
                 CtrlButton {
                     objectName: "btnPin"
-                    glyph: "\u2299"   // pin placeholder
+                    iconSource: win.pinned ? "icons/pin-active.svg" : "icons/pin.svg"
                     label: qsTr("置顶")
                     active: win.pinned
                     height: topBar.height
@@ -318,9 +334,9 @@ Window {
 
                 Repeater {
                     model: [
-                        { name: "btnMin", glyph: "\u2014", hover: "#33ffffff" },
-                        { name: "btnMax", glyph: "\u25A1", hover: "#33ffffff" },
-                        { name: "btnClose", glyph: "\u2715", hover: "#e81123" }
+                        { name: "btnMin", icon: "icons/minimize.svg", hover: "#33ffffff" },
+                        { name: "btnMax", icon: "icons/maximize.svg", hover: "#33ffffff" },
+                        { name: "btnClose", icon: "icons/close.svg", hover: "#e81123" }
                     ]
                     delegate: Rectangle {
                         required property var modelData
@@ -328,11 +344,12 @@ Window {
                         width: 46
                         height: topBar.height
                         color: wcMa.containsMouse ? modelData.hover : "transparent"
-                        Text {
+                        Image {
                             anchors.centerIn: parent
-                            text: modelData.glyph
-                            color: "white"
-                            font.pixelSize: 14
+                            source: modelData.icon
+                            sourceSize.width: 18
+                            sourceSize.height: 18
+                            smooth: true
                         }
                         MouseArea {
                             id: wcMa
@@ -415,25 +432,28 @@ Window {
                     spacing: 4
 
                     CtrlButton {
-                        glyph: "\u23EE"; label: qsTr("上一集")
+                        iconSource: "icons/prev.svg"; label: qsTr("上一集")
                         onClicked: { mpv.command(["playlist-prev"]); mpv.uiAction("prev-episode"); }
                     }
                     CtrlButton {
-                        glyph: mpv.paused ? "\u23F5" : "\u23F8"
+                        iconSource: mpv.paused ? "icons/play.svg" : "icons/pause.svg"
                         label: mpv.paused ? qsTr("播放") : qsTr("暂停")
-                        width: 46
+                        iconSize: 26
                         onClicked: mpv.togglePause()
                     }
                     CtrlButton {
-                        glyph: "\u23ED"; label: qsTr("下一集")
+                        iconSource: "icons/next.svg"; label: qsTr("下一集")
                         onClicked: { mpv.command(["playlist-next"]); mpv.uiAction("next-episode"); }
                     }
                     CtrlButton {
-                        glyph: "\u266A"
+                        id: volBtn
+                        property bool muted: false
+                        iconSource: muted ? "icons/volume-muted.svg" : "icons/volume.svg"
                         label: qsTr("音量/静音")
                         onClicked: {
-                            var muted = mpv.getProperty("mute") === true;
-                            mpv.setProperty("mute", muted ? "no" : "yes");
+                            var m = mpv.getProperty("mute") === true;
+                            mpv.setProperty("mute", m ? "no" : "yes");
+                            volBtn.muted = !m;
                         }
                     }
                     Slider {
@@ -476,34 +496,34 @@ Window {
                         onClicked: speedMenu.popup(speedBtn)
                     }
                     CtrlButton {
-                        glyph: "\u{1F3AC}"; label: qsTr("版本")
+                        iconSource: "icons/version.svg"; label: qsTr("版本")
                         onClicked: win.hostAction("versions", qsTr("版本切换"))
                     }
                     CtrlButton {
                         id: audioBtn
-                        glyph: "\u266B"; label: qsTr("音轨")
+                        iconSource: "icons/audio-track.svg"; label: qsTr("音轨")
                         onClicked: { audioMenu.reload(); audioMenu.popup(audioBtn); }
                     }
                     CtrlButton {
                         id: subBtn
-                        glyph: "CC"; label: qsTr("字幕")
+                        iconSource: "icons/subtitle.svg"; label: qsTr("字幕")
                         onClicked: { subMenu.reload(); subMenu.popup(subBtn); }
                     }
                     CtrlButton {
-                        glyph: "\u5F39"; label: qsTr("弹幕")
+                        iconSource: "icons/danmaku.svg"; label: qsTr("弹幕")
                         onClicked: win.hostAction("danmaku", qsTr("弹幕"))
                     }
                     CtrlButton {
                         id: gearBtn
-                        glyph: "\u2699"; label: qsTr("设置")
+                        iconSource: "icons/settings.svg"; label: qsTr("设置")
                         onClicked: settingsMenu.popup(gearBtn)
                     }
                     CtrlButton {
-                        glyph: "\u2630"; label: qsTr("选集")
+                        iconSource: "icons/playlist.svg"; label: qsTr("选集")
                         onClicked: win.hostAction("episodes", qsTr("选集"))
                     }
                     CtrlButton {
-                        glyph: "\u26F6"; label: qsTr("全屏")
+                        iconSource: "icons/fullscreen.svg"; label: qsTr("全屏")
                         onClicked: win.toggleFullScreen()
                     }
                 }

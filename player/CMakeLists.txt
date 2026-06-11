@@ -97,11 +97,18 @@ qt_add_executable(hills_player WIN32
     src/control_channel.cpp
 )
 
+# Player control glyphs (CH-2 delivered SVG set) — bundled into the QML module
+# so Main.qml can reference them as "icons/<name>.svg" relative to itself, both
+# from disk during dev and from the compiled resource in the shipped exe.
+file(GLOB HILLS_PLAYER_ICONS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "qml/icons/*.svg")
+
 qt_add_qml_module(hills_player
     URI HillsPlayer
     VERSION 1.0
     QML_FILES
         qml/Main.qml
+    RESOURCES
+        ${HILLS_PLAYER_ICONS}
 )
 
 target_include_directories(hills_player PRIVATE src)
