@@ -117,6 +117,7 @@ export interface AppSettings {
   subtitleShadowOffset: number;
   subtitlePositionPct: number;
   subtitleForceStyle: boolean;
+  subtitleBold: boolean;
   anime4kMode: Anime4kMode;
 }
 
@@ -380,6 +381,7 @@ export interface SubtitleStyleSettings {
   shadowOffset: number;
   positionPct: number;
   forceStyle: boolean;
+  bold: boolean;
 }
 
 export interface RemotePlayState {

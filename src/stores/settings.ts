@@ -75,6 +75,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   subtitleShadowOffset: 0,
   subtitlePositionPct: 100,
   subtitleForceStyle: false,
+  subtitleBold: false,
   anime4kMode: "off",
 };
 

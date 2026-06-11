@@ -40,6 +40,7 @@ type SubtitleStylePatch = Partial<
     | "subtitleShadowOffset"
     | "subtitlePositionPct"
     | "subtitleForceStyle"
+    | "subtitleBold"
   >
 >;
 
@@ -89,6 +90,7 @@ function stylePayload(next: AppSettings): SubtitleStyleSettings {
     shadowOffset: next.subtitleShadowOffset,
     positionPct: next.subtitlePositionPct,
     forceStyle: next.subtitleForceStyle,
+    bold: next.subtitleBold,
   };
 }
 
@@ -107,6 +109,7 @@ async function resetSubtitleStyle() {
     subtitleShadowOffset: 0,
     subtitlePositionPct: 100,
     subtitleForceStyle: false,
+    subtitleBold: false,
   });
 }
 
@@ -504,6 +507,15 @@ onMounted(() => {
             type="checkbox"
             :checked="settings.settings.subtitleForceStyle"
             @change="(e: any) => saveSubtitleStyle({ subtitleForceStyle: e.target.checked })"
+          />
+        </label>
+        <label class="toggle-row">
+          <span>字幕粗体</span>
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.subtitleBold"
+            @change="(e: any) => saveSubtitleStyle({ subtitleBold: e.target.checked })"
           />
         </label>
       </section>

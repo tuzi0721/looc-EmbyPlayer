@@ -289,6 +289,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub subtitle_force_style: bool,
     #[serde(default)]
+    pub subtitle_bold: bool,
+    #[serde(default)]
     pub anime4k_mode: Anime4kMode,
 }
 
@@ -365,6 +367,7 @@ impl Default for AppSettings {
             subtitle_shadow_offset: 0.0,
             subtitle_position_pct: default_subtitle_position_pct(),
             subtitle_force_style: false,
+            subtitle_bold: false,
             anime4k_mode: Anime4kMode::default(),
         }
     }

@@ -552,6 +552,8 @@ pub struct SubtitleStylePayload {
     pub shadow_offset: f64,
     pub position_pct: u32,
     pub force_style: bool,
+    #[serde(default)]
+    pub bold: bool,
 }
 
 impl From<SubtitleStylePayload> for SubtitleStyle {
@@ -564,6 +566,7 @@ impl From<SubtitleStylePayload> for SubtitleStyle {
             shadow_offset: value.shadow_offset.clamp(0.0, 8.0),
             position_pct: value.position_pct.clamp(0, 100),
             force_style: value.force_style,
+            bold: value.bold,
         }
     }
 }

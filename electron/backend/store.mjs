@@ -73,6 +73,7 @@ export const DEFAULT_SETTINGS = {
   subtitleShadowOffset: 0,
   subtitlePositionPct: 100,
   subtitleForceStyle: false,
+  subtitleBold: false,
   anime4kMode: "off",
 };
 

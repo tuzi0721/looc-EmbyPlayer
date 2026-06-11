@@ -905,7 +905,8 @@ impl MpvBackend for MpvIpcBackend {
                     .await?;
                 let ass_override = if style.force_style { "force" } else { "scale" };
                 self.set_property("sub-ass-override", json!(ass_override))
-                    .await
+                    .await?;
+                self.set_property("sub-bold", json!(style.bold)).await
             }
             MpvCommand::CycleSubtitle => {
                 self.send_command(vec![json!("cycle"), json!("sub")])

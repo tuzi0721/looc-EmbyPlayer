@@ -727,6 +727,8 @@ impl MpvBackend for MpvEmbeddedBackend {
                     .map_err(|e| AppError::Mpv(e.to_string()))?;
                 let ass_override = if style.force_style { "force" } else { "scale" };
                 m.set_property("sub-ass-override", ass_override)
+                    .map_err(|e| AppError::Mpv(e.to_string()))?;
+                m.set_property("sub-bold", style.bold)
                     .map_err(|e| AppError::Mpv(e.to_string()))
             }
             MpvCommand::CycleSubtitle => m

@@ -2051,6 +2051,7 @@ function subtitleStyleFrom(value = {}) {
       clampNumber(value.positionPct ?? value.subtitlePositionPct, 0, 100, 100),
     ),
     forceStyle: Boolean(value.forceStyle ?? value.subtitleForceStyle),
+    bold: Boolean(value.bold ?? value.subtitleBold),
   };
 }
 
@@ -2065,6 +2066,7 @@ async function applySubtitleStyle(value) {
   await mpv.setProperty("sub-ass-override", style.forceStyle ? "force" : "scale", {
     start: false,
   });
+  await mpv.setProperty("sub-bold", style.bold, { start: false });
 }
 
 async function requireActivePair() {
