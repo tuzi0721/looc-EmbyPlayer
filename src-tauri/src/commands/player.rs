@@ -2353,6 +2353,43 @@ pub async fn stop(state: State<'_, Arc<AppState>>) -> AppResult<()> {
 /// `crate::mpv::standalone`). It reuses the exact Direct Play / Direct Stream
 /// source selection and local stream proxy as `play`, so no server-side
 /// transcoding is ever involved.
+///
+/// Best-effort: fetch danmaku for the item and write a JSON file the standalone
+/// player overlays via `--danmaku-file` (reference parity). Bounded by a short
+/// timeout so a slow lookup never blocks playback start; `None` on miss/timeout.
+async fn build_standalone_danmaku_file(
+    client: &reqwest::Client,
+    item: &MediaItem,
+    session_id: &str,
+) -> Option<String> {
+    use crate::danmaku::types::DanmakuMode;
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        crate::danmaku::fetch_item_danmaku(client, item),
+    )
+    .await
+    .ok()
+    .flatten()?;
+    if result.comments.is_empty() {
+        return None;
+    }
+    let arr: Vec<serde_json::Value> = result
+        .comments
+        .iter()
+        .map(|c| {
+            let mode = match c.mode {
+                DanmakuMode::Top => "top",
+                DanmakuMode::Bottom => "bottom",
+                _ => "scroll",
+            };
+            serde_json::json!({ "t": c.time, "text": c.text, "mode": mode, "color": c.color })
+        })
+        .collect();
+    let path = std::env::temp_dir().join(format!("hills-danmaku-{session_id}.json"));
+    std::fs::write(&path, serde_json::to_vec(&arr).ok()?).ok()?;
+    Some(path.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 pub async fn play_standalone(
     state: State<'_, Arc<AppState>>,
@@ -2430,6 +2467,14 @@ pub async fn play_standalone(
         None
     };
 
+    // Reference parity (播放器内弹幕覆层): feed danmaku via --danmaku-file when
+    // danmaku is enabled. Best-effort and time-bounded; never blocks start.
+    let danmaku_file = if settings.danmaku_enabled_default {
+        build_standalone_danmaku_file(state.emby.http(), &item, &pb.play_session_id).await
+    } else {
+        None
+    };
+
     state
         .standalone
         .start(crate::mpv::StandaloneStartRequest {
@@ -2450,6 +2495,7 @@ pub async fn play_standalone(
             cache_mb: settings.mpv_cache_mb,
             runtime_ms: item.run_time_ticks.map(|ticks| (ticks / 10_000).max(0)),
             mark_watched_threshold_pct: settings.mark_watched_threshold_pct,
+            danmaku_file,
         })
         .await?;
 

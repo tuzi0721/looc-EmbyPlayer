@@ -109,6 +109,9 @@ pub struct StandaloneStartRequest {
     pub runtime_ms: Option<i64>,
     /// Percent of runtime past which the item is explicitly marked played on stop.
     pub mark_watched_threshold_pct: u32,
+    /// Path to a danmaku JSON file fed to the player via `--danmaku-file`
+    /// (reference parity: 播放器内弹幕覆层). `None` to disable.
+    pub danmaku_file: Option<String>,
 }
 
 /// Identity + reporting sink shared with the stdout reader task.
@@ -414,6 +417,9 @@ fn build_args(req: &StandaloneStartRequest, exe: &Path, ipc_path: &str) -> Vec<S
     if req.cache_mb > 0 {
         args.push("--cache=yes".into());
         args.push(format!("--demuxer-max-bytes={}MiB", req.cache_mb));
+    }
+    if let Some(danmaku) = req.danmaku_file.as_deref().filter(|p| !p.is_empty()) {
+        args.push(format!("--danmaku-file={danmaku}"));
     }
     if let Some(ms) = req.start_ms.filter(|ms| *ms > 0) {
         args.push(format!("--start={:.3}", ms as f64 / 1000.0));

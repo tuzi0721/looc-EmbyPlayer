@@ -33,3 +33,13 @@ pub fn registry() -> Vec<&'static (dyn DanmakuProvider + 'static)> {
 pub fn by_id(id: &str) -> Option<&'static (dyn DanmakuProvider + 'static)> {
     registry().into_iter().find(|p| p.id() == id)
 }
+
+/// Best-effort danmaku fetch for a media item using the default provider
+/// (dandanplay): match the item to an episode then fetch its comments. Returns
+/// `None` on any error or when there is no confident match. Used by the
+/// standalone player host to feed `--danmaku-file`.
+pub async fn fetch_item_danmaku(client: &Client, item: &MediaItem) -> Option<DanmakuResult> {
+    let provider = by_id("dandanplay")?;
+    let ep_id = provider.match_item(client, item).await.ok().flatten()?;
+    provider.fetch(client, &ep_id).await.ok()
+}
