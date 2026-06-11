@@ -1,14 +1,18 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
+#include <QQmlContext>
 #include <QQuickWindow>
 #include <QQuickItem>
 #include <QtQuickControls2/QQuickStyle>
 #include <QSGRendererInterface>
+#include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QRegularExpression>
+#include <QVariant>
 
+#include <algorithm>
 #include <clocale>
 
 #include "argv_options.h"
@@ -20,6 +24,43 @@
 #endif
 
 namespace {
+
+// Load a danmaku overlay file (reference parity: HillsLite 在播放器内做弹幕覆层).
+// Format: JSON array of {t:<seconds>, text:"", mode:"scroll|top|bottom", color:"#RRGGBB"}.
+// The host (T9c) writes this from its dandanplay/XML danmaku data and passes
+// `--danmaku-file=<path>`. Returns a position-sorted list for the QML overlay.
+QVariantList loadDanmaku(const QString &path) {
+    QVariantList out;
+    if (path.isEmpty())
+        return out;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return out;
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    if (!doc.isArray())
+        return out;
+    for (const QJsonValue &v : doc.array()) {
+        if (!v.isObject())
+            continue;
+        const QJsonObject o = v.toObject();
+        const QString text = o.value(QStringLiteral("text")).toString();
+        if (text.isEmpty())
+            continue;
+        const QString mode = o.value(QStringLiteral("mode")).toString();
+        const QString color = o.value(QStringLiteral("color")).toString();
+        QVariantMap m;
+        m[QStringLiteral("t")] = o.value(QStringLiteral("t")).toDouble();
+        m[QStringLiteral("text")] = text;
+        m[QStringLiteral("mode")] = mode.isEmpty() ? QStringLiteral("scroll") : mode;
+        m[QStringLiteral("color")] = color.isEmpty() ? QStringLiteral("#FFFFFF") : color;
+        out.push_back(m);
+    }
+    std::sort(out.begin(), out.end(), [](const QVariant &a, const QVariant &b) {
+        return a.toMap().value(QStringLiteral("t")).toDouble()
+             < b.toMap().value(QStringLiteral("t")).toDouble();
+    });
+    return out;
+}
 
 void applyLaunchOptions(MpvObject *mpv, const ArgvOptions &opt) {
     // mpv options must be set before loadfile.
@@ -149,6 +190,11 @@ int main(int argc, char *argv[]) {
     const ArgvOptions opt = ArgvOptions::parse(app.arguments().mid(1));
 
     QQmlApplicationEngine engine;
+    // Danmaku overlay data (reference parity). Must be set before the module
+    // loads so Main.qml sees it at construction.
+    const QVariantList danmaku = loadDanmaku(opt.danmakuFile);
+    engine.rootContext()->setContextProperty("hillsDanmaku", danmaku);
+    engine.rootContext()->setContextProperty("hillsDanmakuEnabled", !danmaku.isEmpty());
     engine.loadFromModule("HillsPlayer", "Main");
     if (engine.rootObjects().isEmpty()) {
         return -1;

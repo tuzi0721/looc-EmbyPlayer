@@ -28,6 +28,7 @@ struct ArgvOptions {
 
     QString anime4kPreset;                         // --anime4k=<preset>
     bool stdinControl = false;                      // --stdin-control (opt-in IPC)
+    QString danmakuFile;                            // --danmaku-file=<json> (overlay)
 
     // Any other `--key=value` / `--key value` passthrough to libmpv.
     QVector<QPair<QString, QString>> extraMpvOptions;

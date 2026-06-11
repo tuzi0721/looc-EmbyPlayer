@@ -86,6 +86,8 @@ ArgvOptions ArgvOptions::parse(const QStringList &args) {
             out.forceWindow = ok ? value : QStringLiteral("yes");
         } else if (f.key == "anime4k" || f.key == "anime4k-preset") {
             if (ok) out.anime4kPreset = value;
+        } else if (f.key == "danmaku-file") {
+            if (ok) out.danmakuFile = value;
         } else if (!f.key.isEmpty()) {
             // Unknown flag → forward to libmpv as key=value (value may be empty
             // for boolean mpv options, which libmpv treats as "yes").

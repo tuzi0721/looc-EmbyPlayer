@@ -118,6 +118,103 @@ Window {
         onPositionChanged: win.reveal()
     }
 
+    // ── danmaku overlay (reference parity: 播放器内原生弹幕覆层) ───────────────
+    // Data comes from the host via --danmaku-file (JSON), exposed as the
+    // `hillsDanmaku` context list; comments are spawned as playback advances.
+    Item {
+        id: danmakuLayer
+        anchors.fill: parent
+        visible: hillsDanmakuEnabled && danmakuOn
+        property bool danmakuOn: true
+        property real fontPixelSize: 24
+        property real opacityValue: 0.9
+        property real speedFactor: 1.0
+        property int cursor: 0
+        property int nextLane: 0
+        property real lastPos: 0
+        readonly property var comments: hillsDanmakuEnabled ? hillsDanmaku : []
+        readonly property int laneHeight: Math.round(fontPixelSize * 1.5)
+        readonly property int laneCount: Math.max(1, Math.floor(height * 0.55 / laneHeight))
+
+        Component {
+            id: scrollComp
+            Text {
+                id: d
+                property int lane: 0
+                color: "white"
+                style: Text.Outline
+                styleColor: "#000000"
+                font.pixelSize: danmakuLayer.fontPixelSize
+                font.bold: true
+                opacity: danmakuLayer.opacityValue
+                y: lane * danmakuLayer.laneHeight + 4
+                x: danmakuLayer.width
+                Component.onCompleted: scrollAnim.start()
+                NumberAnimation {
+                    id: scrollAnim
+                    target: d
+                    property: "x"
+                    from: danmakuLayer.width
+                    to: -d.implicitWidth
+                    duration: Math.max(4000,
+                        (danmakuLayer.width + d.implicitWidth) / 0.18 * danmakuLayer.speedFactor)
+                    onFinished: d.destroy()
+                }
+            }
+        }
+        Component {
+            id: staticComp
+            Text {
+                id: s
+                property bool atTop: true
+                color: "white"
+                style: Text.Outline
+                styleColor: "#000000"
+                font.pixelSize: danmakuLayer.fontPixelSize
+                font.bold: true
+                opacity: danmakuLayer.opacityValue
+                x: (danmakuLayer.width - implicitWidth) / 2
+                y: atTop ? 8 : danmakuLayer.height - implicitHeight - 90
+                Timer { interval: 4500; running: true; onTriggered: s.destroy() }
+            }
+        }
+
+        function spawn(c) {
+            var mode = c.mode || "scroll";
+            var col = c.color || "white";
+            if (mode === "top" || mode === "bottom") {
+                staticComp.createObject(danmakuLayer,
+                    { text: c.text, color: col, atTop: mode === "top" });
+            } else {
+                var lane = nextLane % laneCount;
+                nextLane = (nextLane + 1) % laneCount;
+                scrollComp.createObject(danmakuLayer,
+                    { text: c.text, color: col, lane: lane });
+            }
+        }
+        function syncTo(pos) {
+            while (cursor < comments.length && comments[cursor].t <= pos) {
+                if (pos - comments[cursor].t <= 1.0) spawn(comments[cursor]);
+                cursor++;
+            }
+        }
+        function resetTo(pos) {
+            cursor = 0;
+            while (cursor < comments.length && comments[cursor].t < pos) cursor++;
+        }
+
+        Connections {
+            target: mpv
+            function onPositionChanged() {
+                if (!danmakuLayer.visible) return;
+                var pos = mpv.position;
+                if (pos + 0.5 < danmakuLayer.lastPos) danmakuLayer.resetTo(pos);
+                danmakuLayer.lastPos = pos;
+                danmakuLayer.syncTo(pos);
+            }
+        }
+    }
+
     Timer {
         id: hideTimer
         interval: 2800
@@ -511,7 +608,12 @@ Window {
                     }
                     CtrlButton {
                         iconSource: "icons/danmaku.svg"; label: qsTr("弹幕")
-                        onClicked: win.hostAction("danmaku", qsTr("弹幕"))
+                        active: hillsDanmakuEnabled && danmakuLayer.danmakuOn
+                        onClicked: {
+                            if (hillsDanmakuEnabled)
+                                danmakuLayer.danmakuOn = !danmakuLayer.danmakuOn;
+                            mpv.uiAction("danmaku");
+                        }
                     }
                     CtrlButton {
                         id: gearBtn
