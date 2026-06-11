@@ -14,7 +14,7 @@ use crate::commands::shortcuts::{
 };
 use crate::config::models::{
     Account, Anime4kMode, AppSettings, HomeHeroStyle, MpvBackendKind, NetworkProxyMode,
-    PreferredVersionStrategy, Server, StatsOverlayMode, Theme,
+    PreferredVersionStrategy, Server, StatsOverlayMode, Theme, VideoOutputDriver,
 };
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -53,6 +53,9 @@ pub struct SettingsPatch {
     pub external_player_args: Option<String>,
     pub hardware_decoding: Option<bool>,
     pub mpv_cache_mb: Option<u32>,
+    pub video_output_driver: Option<VideoOutputDriver>,
+    pub mpv_cache_secs: Option<u32>,
+    pub low_quality_decoding: Option<bool>,
     pub hidden_server_ids: Option<Vec<String>>,
     pub hide_jav_codes: Option<bool>,
     pub show_network_speed: Option<bool>,
@@ -259,6 +262,15 @@ pub async fn update_settings(
         }
         if let Some(v) = patch.mpv_cache_mb {
             s.mpv_cache_mb = v;
+        }
+        if let Some(v) = patch.video_output_driver {
+            s.video_output_driver = v;
+        }
+        if let Some(v) = patch.mpv_cache_secs {
+            s.mpv_cache_secs = v;
+        }
+        if let Some(v) = patch.low_quality_decoding {
+            s.low_quality_decoding = v;
         }
         if let Some(v) = patch.hidden_server_ids {
             s.hidden_server_ids = v;

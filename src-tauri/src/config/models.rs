@@ -209,6 +209,15 @@ pub struct AppSettings {
     pub hardware_decoding: bool,
     #[serde(default = "default_cache_mb")]
     pub mpv_cache_mb: u32,
+    // Reference parity (HillsLite 设置·播放器): video output driver (mpv --vo),
+    // max cache duration in seconds (mpv --cache-secs; 0 = mpv default), and a
+    // low-quality fast-decode toggle (mpv --vd-lavc-fast + skiploopfilter).
+    #[serde(default)]
+    pub video_output_driver: VideoOutputDriver,
+    #[serde(default)]
+    pub mpv_cache_secs: u32,
+    #[serde(default)]
+    pub low_quality_decoding: bool,
     /// Server ids that should be hidden from the sidebar list.
     /// They still exist in the store, they're just filtered out of the primary nav.
     #[serde(default)]
@@ -320,6 +329,9 @@ impl Default for AppSettings {
             external_player_args: String::new(),
             hardware_decoding: true,
             mpv_cache_mb: default_cache_mb(),
+            video_output_driver: VideoOutputDriver::default(),
+            mpv_cache_secs: 0,
+            low_quality_decoding: false,
             hidden_server_ids: Vec::new(),
             hide_jav_codes: false,
             show_network_speed: false,
@@ -405,6 +417,30 @@ pub enum PreferredVersionStrategy {
 impl Default for PreferredVersionStrategy {
     fn default() -> Self {
         Self::Default
+    }
+}
+
+/// Reference parity (HillsLite 设置·播放器「视频输出驱动」): mpv `--vo`. The
+/// reference default is gpu-next; gpu is the broadly-compatible fallback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum VideoOutputDriver {
+    GpuNext,
+    Gpu,
+}
+
+impl Default for VideoOutputDriver {
+    fn default() -> Self {
+        Self::GpuNext
+    }
+}
+
+impl VideoOutputDriver {
+    pub fn mpv_value(self) -> &'static str {
+        match self {
+            Self::GpuNext => "gpu-next",
+            Self::Gpu => "gpu",
+        }
     }
 }
 

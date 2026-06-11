@@ -497,12 +497,24 @@ async fn spawn_mpv_ipc(
     args.push("--force-window=no".into());
     args.push("--title=Hills Lite".into());
 
+    // Reference parity (HillsLite 设置·播放器「视频输出驱动」): mpv --vo.
+    args.push(format!("--vo={}", settings.video_output_driver.mpv_value()));
     if settings.hardware_decoding {
         args.push("--hwdec=auto-safe".into());
     }
+    // Reference parity (HillsLite「低质量视频解码」): trade quality for speed.
+    if settings.low_quality_decoding {
+        args.push("--vd-lavc-fast=yes".into());
+        args.push("--vd-lavc-skiploopfilter=all".into());
+    }
     if settings.mpv_cache_mb > 0 {
-        args.push(format!("--cache=yes"));
+        args.push("--cache=yes".into());
         args.push(format!("--demuxer-max-bytes={}MiB", settings.mpv_cache_mb));
+    }
+    // Reference parity (HillsLite「最大缓存时长」): mpv --cache-secs (0 = default).
+    if settings.mpv_cache_secs > 0 {
+        args.push("--cache=yes".into());
+        args.push(format!("--cache-secs={}", settings.mpv_cache_secs));
     }
 
     // Reference parity (HillsLite 设置·播放器): preferred track languages and

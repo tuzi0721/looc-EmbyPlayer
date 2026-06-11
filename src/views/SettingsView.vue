@@ -1404,6 +1404,25 @@ const danmakuSummary = computed(() => {
           <strong>{{ mpvBackendLabel }}</strong>
         </div>
         <label class="field">
+          <span>视频输出驱动（下次播放生效）</span>
+          <div class="seg">
+            <button
+              type="button"
+              :class="{ active: settings.settings.videoOutputDriver === 'gpu-next' }"
+              @click="save('videoOutputDriver', 'gpu-next')"
+            >
+              gpu-next
+            </button>
+            <button
+              type="button"
+              :class="{ active: settings.settings.videoOutputDriver === 'gpu' }"
+              @click="save('videoOutputDriver', 'gpu')"
+            >
+              gpu
+            </button>
+          </div>
+        </label>
+        <label class="field">
           <span>硬件解码</span>
           <div class="seg">
             <button
@@ -1422,11 +1441,27 @@ const danmakuSummary = computed(() => {
             </button>
           </div>
         </label>
+        <label class="field field--inline">
+          <span>低质量视频解码（下次播放生效）</span>
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.lowQualityDecoding"
+            @change="(e: any) => save('lowQualityDecoding', e.target.checked)"
+          />
+        </label>
         <label class="field">
           <span>缓存（MB）</span>
           <GlassInput
             :model-value="String(settings.settings.mpvCacheMb)"
             @update:modelValue="(v) => save('mpvCacheMb', Number(v) || 256)"
+          />
+        </label>
+        <label class="field">
+          <span>最大缓存时长（秒，0=默认）</span>
+          <GlassInput
+            :model-value="String(settings.settings.mpvCacheSecs)"
+            @update:modelValue="(v) => save('mpvCacheSecs', Math.max(0, Number(v) || 0))"
           />
         </label>
         <label class="field">

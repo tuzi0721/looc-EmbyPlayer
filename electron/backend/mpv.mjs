@@ -322,6 +322,17 @@ export class MpvController {
       args.push("--cache=yes");
       args.push(`--demuxer-max-bytes=${settings.mpvCacheMb}MiB`);
     }
+    // Reference parity (HillsLite「最大缓存时长」/「低质量视频解码」). The
+    // Electron --vo is fixed by the d3d11 embedding path above, so the
+    // videoOutputDriver setting only drives the Tauri/IPC backend.
+    if ((settings.mpvCacheSecs ?? 0) > 0) {
+      args.push("--cache=yes");
+      args.push(`--cache-secs=${settings.mpvCacheSecs}`);
+    }
+    if (settings.lowQualityDecoding) {
+      args.push("--vd-lavc-fast=yes");
+      args.push("--vd-lavc-skiploopfilter=all");
+    }
 
     // Parity with the Rust IPC backend: preferred track languages, forced
     // stereo, custom proxy passthrough and the user mpv.conf include.

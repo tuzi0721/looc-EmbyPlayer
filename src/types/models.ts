@@ -81,6 +81,9 @@ export interface AppSettings {
   externalPlayerArgs: string;
   hardwareDecoding: boolean;
   mpvCacheMb: number;
+  videoOutputDriver: "gpu-next" | "gpu";
+  mpvCacheSecs: number;
+  lowQualityDecoding: boolean;
   hiddenServerIds: string[];
   hideJavCodes: boolean;
   showNetworkSpeed: boolean;
