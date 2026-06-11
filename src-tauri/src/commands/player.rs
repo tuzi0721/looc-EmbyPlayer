@@ -994,6 +994,7 @@ pub async fn play(
         position_pct: settings.subtitle_position_pct,
         force_style: settings.subtitle_force_style,
         bold: settings.subtitle_bold,
+        secondary_position_pct: settings.subtitle_secondary_position_pct,
     };
     if let Err(error) = backend
         .execute(MpvCommand::SetSubtitleStyle(subtitle_style))
@@ -1946,6 +1947,7 @@ pub async fn play_file(state: State<'_, Arc<AppState>>, payload: PlayFilePayload
         position_pct: settings.subtitle_position_pct,
         force_style: settings.subtitle_force_style,
         bold: settings.subtitle_bold,
+        secondary_position_pct: settings.subtitle_secondary_position_pct,
     };
     if let Err(error) = backend
         .execute(MpvCommand::SetSubtitleStyle(subtitle_style))

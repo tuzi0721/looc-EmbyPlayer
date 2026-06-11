@@ -149,6 +149,7 @@ pub struct SubtitleStyle {
     pub position_pct: u32,
     pub force_style: bool,
     pub bold: bool,
+    pub secondary_position_pct: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

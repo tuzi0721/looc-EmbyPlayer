@@ -554,6 +554,8 @@ pub struct SubtitleStylePayload {
     pub force_style: bool,
     #[serde(default)]
     pub bold: bool,
+    #[serde(default)]
+    pub secondary_position_pct: u32,
 }
 
 impl From<SubtitleStylePayload> for SubtitleStyle {
@@ -567,6 +569,7 @@ impl From<SubtitleStylePayload> for SubtitleStyle {
             position_pct: value.position_pct.clamp(0, 100),
             force_style: value.force_style,
             bold: value.bold,
+            secondary_position_pct: value.secondary_position_pct.clamp(0, 100),
         }
     }
 }

@@ -98,6 +98,7 @@ pub struct SettingsPatch {
     pub subtitle_position_pct: Option<u32>,
     pub subtitle_force_style: Option<bool>,
     pub subtitle_bold: Option<bool>,
+    pub subtitle_secondary_position_pct: Option<u32>,
     pub anime4k_mode: Option<Anime4kMode>,
 }
 
@@ -408,6 +409,9 @@ pub async fn update_settings(
         }
         if let Some(v) = patch.subtitle_bold {
             s.subtitle_bold = v;
+        }
+        if let Some(v) = patch.subtitle_secondary_position_pct {
+            s.subtitle_secondary_position_pct = v.clamp(0, 100);
         }
         if let Some(v) = patch.anime4k_mode {
             s.anime4k_mode = v;

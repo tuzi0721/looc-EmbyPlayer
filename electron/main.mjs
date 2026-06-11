@@ -2052,6 +2052,14 @@ function subtitleStyleFrom(value = {}) {
     ),
     forceStyle: Boolean(value.forceStyle ?? value.subtitleForceStyle),
     bold: Boolean(value.bold ?? value.subtitleBold),
+    secondaryPositionPct: Math.round(
+      clampNumber(
+        value.secondaryPositionPct ?? value.subtitleSecondaryPositionPct,
+        0,
+        100,
+        0,
+      ),
+    ),
   };
 }
 
@@ -2067,6 +2075,9 @@ async function applySubtitleStyle(value) {
     start: false,
   });
   await mpv.setProperty("sub-bold", style.bold, { start: false });
+  await mpv.setProperty("secondary-sub-pos", style.secondaryPositionPct, {
+    start: false,
+  });
 }
 
 async function requireActivePair() {

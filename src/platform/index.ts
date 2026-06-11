@@ -157,6 +157,7 @@ const WEB_DEFAULT_SETTINGS: AppSettings = {
   subtitlePositionPct: 100,
   subtitleForceStyle: false,
   subtitleBold: false,
+  subtitleSecondaryPositionPct: 0,
   anime4kMode: "off",
 };
 

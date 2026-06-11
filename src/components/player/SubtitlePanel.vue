@@ -41,6 +41,7 @@ type SubtitleStylePatch = Partial<
     | "subtitlePositionPct"
     | "subtitleForceStyle"
     | "subtitleBold"
+    | "subtitleSecondaryPositionPct"
   >
 >;
 
@@ -80,6 +81,12 @@ const subtitlePositionPct = computed({
     void saveSubtitleStyle({ subtitlePositionPct: Math.round(v) });
   },
 });
+const subtitleSecondaryPositionPct = computed({
+  get: () => settings.settings.subtitleSecondaryPositionPct,
+  set: (v) => {
+    void saveSubtitleStyle({ subtitleSecondaryPositionPct: Math.round(v) });
+  },
+});
 
 function stylePayload(next: AppSettings): SubtitleStyleSettings {
   return {
@@ -91,6 +98,7 @@ function stylePayload(next: AppSettings): SubtitleStyleSettings {
     positionPct: next.subtitlePositionPct,
     forceStyle: next.subtitleForceStyle,
     bold: next.subtitleBold,
+    secondaryPositionPct: next.subtitleSecondaryPositionPct,
   };
 }
 
@@ -110,6 +118,7 @@ async function resetSubtitleStyle() {
     subtitlePositionPct: 100,
     subtitleForceStyle: false,
     subtitleBold: false,
+    subtitleSecondaryPositionPct: 0,
   });
 }
 
@@ -498,6 +507,18 @@ onMounted(() => {
             step="1"
             :value="subtitlePositionPct"
             @input="(e: any) => (subtitlePositionPct = Number(e.target.value))"
+          />
+        </label>
+        <label class="metric-row">
+          <span>次字幕位置</span>
+          <strong>{{ subtitleSecondaryPositionPct }}%</strong>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            :value="subtitleSecondaryPositionPct"
+            @input="(e: any) => (subtitleSecondaryPositionPct = Number(e.target.value))"
           />
         </label>
         <label class="toggle-row">

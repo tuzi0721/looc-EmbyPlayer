@@ -729,6 +729,8 @@ impl MpvBackend for MpvEmbeddedBackend {
                 m.set_property("sub-ass-override", ass_override)
                     .map_err(|e| AppError::Mpv(e.to_string()))?;
                 m.set_property("sub-bold", style.bold)
+                    .map_err(|e| AppError::Mpv(e.to_string()))?;
+                m.set_property("secondary-sub-pos", style.secondary_position_pct as i64)
                     .map_err(|e| AppError::Mpv(e.to_string()))
             }
             MpvCommand::CycleSubtitle => m
