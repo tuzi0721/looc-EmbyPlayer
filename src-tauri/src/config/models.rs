@@ -229,6 +229,9 @@ pub struct AppSettings {
     // Reference parity (HillsLite 设置·通用): hide the home "continue watching" row.
     #[serde(default)]
     pub hide_continue_watching: bool,
+    // Reference parity (HillsLite 设置·通用): show community rating on poster cards.
+    #[serde(default)]
+    pub show_cover_rating: bool,
     #[serde(default)]
     pub show_network_speed: bool,
     #[serde(default)]
@@ -345,6 +348,7 @@ impl Default for AppSettings {
             hidden_server_ids: Vec::new(),
             hide_jav_codes: false,
             hide_continue_watching: false,
+            show_cover_rating: false,
             show_network_speed: false,
             stats_overlay_mode: StatsOverlayMode::default(),
             blackout_other_displays: false,

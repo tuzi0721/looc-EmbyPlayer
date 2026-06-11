@@ -127,6 +127,7 @@ const WEB_DEFAULT_SETTINGS: AppSettings = {
   hiddenServerIds: [],
   hideJavCodes: false,
   hideContinueWatching: false,
+  showCoverRating: false,
   showNetworkSpeed: false,
   statsOverlayMode: "winui",
   blackoutOtherDisplays: false,

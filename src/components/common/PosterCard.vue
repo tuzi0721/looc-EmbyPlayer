@@ -4,6 +4,7 @@ import { Icon } from "@iconify/vue";
 
 import { useAuthStore } from "@/stores/auth";
 import { useServerStore } from "@/stores/server";
+import { useSettingsStore } from "@/stores/settings";
 import { useLazyVisible } from "@/composables/useLazyVisible";
 import type { MediaItem } from "@/types/models";
 import { mediaImageUrl, type MediaImageType } from "@/utils/mediaImages";
@@ -29,6 +30,7 @@ const imageCandidateIndex = ref(0);
 
 const auth = useAuthStore();
 const serverStore = useServerStore();
+const settings = useSettingsStore();
 
 const isCollection = computed(() => props.item.Type === "BoxSet");
 const resolvedAspect = computed<PosterAspect>(() => {
@@ -138,6 +140,13 @@ function onImageError() {
 const progress = computed(() => props.item.UserData?.PlayedPercentage ?? 0);
 const watched = computed(() => props.item.UserData?.Played === true);
 
+// Reference parity (HillsLite 设置·通用「显示封面评分」).
+const rating = computed(() => {
+  if (!settings.settings.showCoverRating) return null;
+  const r = props.item.CommunityRating;
+  return typeof r === "number" && r > 0 ? r.toFixed(1) : null;
+});
+
 const subtitle = computed(() => {
   const i = props.item;
   if (i.Type === "Episode" && i.SeriesName) {
@@ -181,6 +190,10 @@ function activate() {
       </div>
       <div v-if="watched" class="poster__badge">
         <Icon icon="lucide:check" width="13" />
+      </div>
+      <div v-if="rating" class="poster__rating">
+        <Icon icon="lucide:star" width="11" />
+        <span>{{ rating }}</span>
       </div>
       <div v-if="progress > 0 && progress < 100" class="poster__progress">
         <span :style="{ width: `${progress}%` }" />
@@ -278,6 +291,20 @@ function activate() {
   place-items: center;
   color: white;
   font-size: 13px;
+}
+.poster__rating {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #ffd45e;
+  font-size: 11px;
+  font-weight: 600;
 }
 .poster__progress {
   position: absolute;

@@ -1182,6 +1182,15 @@ const danmakuSummary = computed(() => {
             @change="(e: any) => save('hideContinueWatching', e.target.checked)"
           />
         </label>
+        <label class="field field--inline">
+          <span>显示封面评分</span>
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.showCoverRating"
+            @change="(e: any) => save('showCoverRating', e.target.checked)"
+          />
+        </label>
       </div>
 
       <button class="row" @click="togglePanel('fileServices')">
