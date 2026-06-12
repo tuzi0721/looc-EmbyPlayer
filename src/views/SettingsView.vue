@@ -5,6 +5,8 @@ import { useRoute, useRouter } from "vue-router";
 
 import GlassInput from "@/components/common/GlassInput.vue";
 import LineStatusDot from "@/components/common/LineStatusDot.vue";
+import SettingRow from "@/components/settings/SettingRow.vue";
+import SettingsSection from "@/components/settings/SettingsSection.vue";
 import ShortcutsPanel from "@/components/settings/ShortcutsPanel.vue";
 import AddServerDialog from "@/components/login/AddServerDialog.vue";
 import { api } from "@/api";
@@ -21,23 +23,21 @@ import type { Line, Server } from "@/types/models";
 import { headersToText, normalizeNullableText, parseHeaderText } from "@/utils/headerText";
 import { normalizeServerBaseUrl } from "@/utils/serverUrl";
 
-type PanelId =
-  | null
-  | "about"
-  | "theme"
-  | "library"
-  | "fileServices"
-  | "backup"
-  | "network"
-  | "interaction"
-  | "player"
-  | "downloads"
-  | "enhancement"
-  | "externalPlayer"
-  | "danmaku"
-  | "shortcuts"
+type SectionId =
+  | "general"
   | "servers"
-  | "cache";
+  | "library"
+  | "player"
+  | "subtitle"
+  | "danmaku"
+  | "externalPlayer"
+  | "downloads"
+  | "backup"
+  | "sync"
+  | "network"
+  | "shortcuts"
+  | "cache"
+  | "about";
 
 const auth = useAuthStore();
 const lib = useLibraryStore();
@@ -51,7 +51,7 @@ const router = useRouter();
 
 const probing = ref<string | null>(null);
 const showAdd = ref(false);
-const openPanel = ref<PanelId>(null);
+const expanded = ref<Set<SectionId>>(new Set(["general"]));
 const editingServerId = ref<string | null>(null);
 const savingServerId = ref<string | null>(null);
 const settingActiveLineId = ref<string | null>(null);
@@ -106,36 +106,63 @@ type ServerLinePayload = {
 
 const serverDrafts = ref<Record<string, ServerDraft>>({});
 
-function panelFromQuery(value: unknown): PanelId {
+function isExpanded(id: SectionId): boolean {
+  return expanded.value.has(id);
+}
+
+function toggleSection(id: SectionId) {
+  const next = new Set(expanded.value);
+  if (next.has(id)) {
+    next.delete(id);
+  } else {
+    next.add(id);
+    if (id === "cache") void refreshCacheUsage();
+  }
+  expanded.value = next;
+}
+
+function openSection(id: SectionId) {
+  if (expanded.value.has(id)) return;
+  const next = new Set(expanded.value);
+  next.add(id);
+  expanded.value = next;
+}
+
+// Legacy `?c=` deep links keep working: map old panel ids onto the new sections.
+function sectionFromQuery(value: unknown): SectionId | null {
   const category = Array.isArray(value) ? value[0] : value;
   switch (category) {
+    case "general":
     case "servers":
-    case "network":
+    case "library":
     case "player":
-    case "downloads":
-    case "externalPlayer":
+    case "subtitle":
     case "danmaku":
-    case "shortcuts":
+    case "externalPlayer":
+    case "downloads":
     case "backup":
+    case "sync":
+    case "network":
+    case "shortcuts":
+    case "cache":
+    case "about":
       return category;
     case "download":
       return "downloads";
+    case "external-player":
+      return "externalPlayer";
+    case "appearance":
+    case "theme":
+      return "general";
+    case "interaction":
+    case "enhancement":
+      return "player";
     case "file-services":
     case "fileServices":
     case "files":
     case "connectors":
     case "sources":
-      return "fileServices";
-    case "enhancement":
-      return "enhancement";
-    case "external-player":
-      return "externalPlayer";
-    case "appearance":
-      return "theme";
-    case "library":
       return "library";
-    case "about":
-      return "about";
     default:
       return null;
   }
@@ -144,8 +171,8 @@ function panelFromQuery(value: unknown): PanelId {
 watch(
   () => route.query.c,
   (category) => {
-    const panel = panelFromQuery(category);
-    if (panel) openPanel.value = panel;
+    const section = sectionFromQuery(category);
+    if (section) openSection(section);
   },
   { immediate: true },
 );
@@ -177,6 +204,7 @@ watch(
 onMounted(async () => {
   await Promise.all([settings.refresh(), serverStore.refresh()]);
   platformLabel.value = await platformType().catch(() => "unknown");
+  if (isExpanded("cache")) void refreshCacheUsage();
 });
 
 async function probe(id: string) {
@@ -268,7 +296,7 @@ function splitServerBaseUrl(baseUrl: string): { address: string; port: string } 
 
 async function onServerCreated(_id: string, loggedIn = false) {
   showAdd.value = false;
-  openPanel.value = "servers";
+  openSection("servers");
   await Promise.all([
     serverStore.refresh().catch(() => {}),
     loggedIn ? auth.refresh().catch(() => {}) : Promise.resolve(),
@@ -547,10 +575,6 @@ async function saveServerDraft(server: Server) {
   }
 }
 
-function togglePanel(id: PanelId) {
-  openPanel.value = openPanel.value === id ? null : id;
-}
-
 // Reference parity (HillsLite 设置·通用·缓存管理).
 const cacheUsage = ref<CacheUsage | null>(null);
 const cacheBusy = ref(false);
@@ -564,11 +588,6 @@ function formatCacheBytes(bytes: number): string {
   const mb = bytes / (1024 * 1024);
   if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`;
   return `${mb.toFixed(1)} MB`;
-}
-
-function toggleCachePanel() {
-  togglePanel("cache");
-  if (openPanel.value === "cache") void refreshCacheUsage();
 }
 
 async function refreshCacheUsage() {
@@ -680,6 +699,18 @@ const preferredVersionOptions = [
   { value: "high-framerate", label: "高帧率" },
 ] as const;
 
+const anime4kLabel = computed(() => {
+  const map: Record<string, string> = {
+    off: "关闭",
+    modeAFast: "Mode A 快",
+    modeA: "Mode A",
+    modeB: "Mode B",
+    modeC: "Mode C",
+    high: "高质",
+  };
+  return map[settings.settings.anime4kMode] ?? "关闭";
+});
+
 async function editMpvConf() {
   try {
     const confPath = await api.ensureMpvConf();
@@ -699,16 +730,6 @@ async function openPlayerLogs() {
 const isWindowsPlatform = computed(() => platformLabel.value.toLowerCase().includes("windows"));
 
 type CapabilityStatus = "available" | "disabled";
-type EnhancementStatus = CapabilityStatus;
-
-type EnhancementCapability = {
-  key: string;
-  label: string;
-  detail: string;
-  icon: string;
-  status: EnhancementStatus;
-  action?: "windows-hdr";
-};
 
 type FileServiceCapability = {
   key: string;
@@ -722,36 +743,6 @@ const capabilityStatusLabel: Record<CapabilityStatus, string> = {
   available: "可用",
   disabled: "禁用",
 };
-
-const enhancementSummary = computed(() => {
-  const parts: string[] = [];
-  if (settings.settings.anime4kMode && settings.settings.anime4kMode !== "off") {
-    parts.push("Anime4K");
-  }
-  if (isWindowsPlatform.value) parts.push("HDR");
-  return parts.length > 0 ? parts.join(" / ") : "播放器内切换";
-});
-const fileServicesSummary = computed(() => "本地 / WebDAV / Alist 可用");
-
-const enhancementCapabilities = computed<EnhancementCapability[]>(() => {
-  return [
-    {
-      key: "anime4k",
-      label: "Anime4K GLSL",
-      detail: "播放器设置菜单可切换关闭 / Mode A 快 / A / B / C / 高质",
-      icon: "lucide:sparkles",
-      status: "available",
-    },
-    {
-      key: "windows-hdr",
-      label: "Windows HDR",
-      detail: isWindowsPlatform.value ? "系统显示设置" : "仅 Windows",
-      icon: "lucide:sun-medium",
-      status: isWindowsPlatform.value ? "available" : "disabled",
-      action: "windows-hdr",
-    },
-  ];
-});
 
 const fileServiceCapabilities = computed<FileServiceCapability[]>(() => [
   {
@@ -884,269 +875,244 @@ const danmakuSummary = computed(() => {
     </header>
 
     <div class="settings__list">
-      <h2 class="group-title">通用</h2>
-
-      <button class="row" @click="togglePanel('about')">
-        <span>关于 Hills Lite</span>
-        <Icon icon="lucide:chevron-right" width="16" class="chev" />
-      </button>
-      <div v-if="openPanel === 'about'" class="panel glass about-panel">
-        <div class="about-hero">
-          <div class="about-hero__icon">
-            <Icon icon="lucide:info" width="22" />
+      <!-- 1. 通用 -->
+      <SettingsSection
+        title="通用"
+        :summary="themeLabel"
+        :expanded="isExpanded('general')"
+        @toggle="toggleSection('general')"
+      >
+        <SettingRow label="主题模式" description="应用整体配色" stacked>
+          <div class="seg">
+            <button
+              type="button"
+              :class="{ active: settings.settings.theme === 'dark' }"
+              @click="save('theme', 'dark')"
+            >
+              深色
+            </button>
+            <button
+              type="button"
+              :class="{ active: settings.settings.theme === 'light' }"
+              @click="save('theme', 'light')"
+            >
+              浅色
+            </button>
+            <button
+              type="button"
+              :class="{ active: settings.settings.theme === 'auto' }"
+              @click="save('theme', 'auto')"
+            >
+              Auto
+            </button>
           </div>
-          <div>
-            <strong>Hills Lite</strong>
-            <span>v{{ appVersion }}</span>
+        </SettingRow>
+        <SettingRow label="模糊强度" description="玻璃模糊效果强度" stacked>
+          <div class="range-row">
+            <input
+              type="range"
+              min="0"
+              max="48"
+              :value="settings.settings.blurStrength"
+              @input="(e: any) => save('blurStrength', Number(e.target.value))"
+            />
+            <strong>{{ settings.settings.blurStrength }}</strong>
           </div>
-        </div>
-        <div class="about-grid">
-          <div class="about-cell">
-            <span>运行壳</span>
-            <strong>{{ runtimeLabel }}</strong>
-          </div>
-          <div class="about-cell">
-            <span>平台</span>
-            <strong>{{ platformLabel }}</strong>
-          </div>
-          <div class="about-cell">
-            <span>服务器</span>
-            <strong>{{ serverStore.servers.length }}</strong>
-          </div>
-          <div class="about-cell">
-            <span>账号</span>
-            <strong>{{ activeAccountLabel }}</strong>
-          </div>
-          <div class="about-cell">
-            <span>播放核心</span>
-            <strong>{{ mpvBackendLabel }}</strong>
-          </div>
-          <div class="about-cell">
-            <span>打包产物</span>
-            <strong>win-unpacked</strong>
-          </div>
-        </div>
-        <div class="panel__actions">
-          <button class="action-btn" type="button" @click="togglePanel('backup')">
-            <Icon icon="lucide:archive-restore" width="15" />
-            <span>备份配置</span>
-          </button>
-          <button class="action-btn" type="button" @click="togglePanel('servers')">
-            <Icon icon="lucide:server" width="15" />
-            <span>服务器</span>
-          </button>
-        </div>
-      </div>
-
-      <button class="row" @click="togglePanel('theme')">
-        <span>主题</span>
-        <span class="value">{{ themeLabel }}</span>
-      </button>
-      <div v-if="openPanel === 'theme'" class="panel glass">
-        <div class="seg">
-          <button
-            type="button"
-            :class="{ active: settings.settings.theme === 'dark' }"
-            @click="save('theme', 'dark')"
-          >
-            深色
-          </button>
-          <button
-            type="button"
-            :class="{ active: settings.settings.theme === 'light' }"
-            @click="save('theme', 'light')"
-          >
-            浅色
-          </button>
-          <button
-            type="button"
-            :class="{ active: settings.settings.theme === 'auto' }"
-            @click="save('theme', 'auto')"
-          >
-            Auto
-          </button>
-        </div>
-        <label class="field">
-          <span>模糊强度</span>
+        </SettingRow>
+        <SettingRow
+          label="窗口亚克力效果"
+          description="窗口背景材质，重启后生效"
+          advanced
+          is-new
+        >
           <input
-            type="range"
-            min="0"
-            max="48"
-            :value="settings.settings.blurStrength"
-            @input="(e: any) => save('blurStrength', Number(e.target.value))"
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.enableWindowVibrancy"
+            @change="(e: any) => save('enableWindowVibrancy', e.target.checked)"
           />
-        </label>
-      </div>
+        </SettingRow>
+        <SettingRow label="关闭时最小化到托盘" description="点关闭按钮隐藏到托盘而不退出应用">
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.closeToTray"
+            @change="(e: any) => save('closeToTray', e.target.checked)"
+          />
+        </SettingRow>
+        <SettingRow
+          label="通知中心"
+          description="查看应用通知与消息"
+          clickable
+          @click="openNotificationsCenter"
+        >
+          <span v-if="notifications.unread > 0" class="row-value">{{ unreadNotificationsLabel }} 未读</span>
+          <Icon icon="lucide:chevron-right" width="16" class="row-chev" />
+        </SettingRow>
+        <SettingRow
+          label="遥控器"
+          description="控制其他 Emby / Jellyfin 客户端"
+          clickable
+          @click="openRemoteControl"
+        >
+          <Icon icon="lucide:chevron-right" width="16" class="row-chev" />
+        </SettingRow>
+      </SettingsSection>
 
-      <h2 class="group-title">工具</h2>
-
-      <button class="row" @click="openDownloadsCenter">
-        <span>下载中心</span>
-        <span v-if="activeDownloads > 0" class="value">{{ activeDownloadsLabel }} 个任务</span>
-        <Icon v-else icon="lucide:chevron-right" width="16" class="chev" />
-      </button>
-
-      <button class="row" @click="openNotificationsCenter">
-        <span>通知中心</span>
-        <span v-if="notifications.unread > 0" class="value">{{ unreadNotificationsLabel }} 未读</span>
-        <Icon v-else icon="lucide:chevron-right" width="16" class="chev" />
-      </button>
-
-      <button class="row" @click="openRemoteControl">
-        <span>遥控器</span>
-        <Icon icon="lucide:chevron-right" width="16" class="chev" />
-      </button>
-
-      <button class="row" @click="togglePanel('servers')">
-        <span>媒体库 / 服务器</span>
-        <Icon icon="lucide:chevron-right" width="16" class="chev" />
-      </button>
-      <div v-if="openPanel === 'servers'" class="panel glass">
-        <div class="panel__head">
-          <span>已保存的服务器</span>
-          <button class="link" @click="showAdd = true">添加</button>
-        </div>
-        <div v-if="serverStore.servers.length === 0" class="empty">还没有服务器</div>
-        <div v-for="s in serverStore.servers" :key="s.id" class="server">
-          <div class="server__top">
-            <strong>{{ s.name }}</strong>
-            <div class="server__actions">
-              <button class="link" :disabled="probing === s.id" @click="probe(s.id)">测活</button>
-              <button
-                v-if="editingServerId !== s.id"
-                class="link"
-                @click="beginServerEdit(s)"
-              >
-                编辑
-              </button>
-              <button v-else class="link" @click="cancelServerEdit(s.id)">取消</button>
-              <button class="link" @click="toggleHidden(s.id, hiddenSet.has(s.id))">
-                {{ hiddenSet.has(s.id) ? "显示" : "隐藏" }}
-              </button>
-              <button class="link danger" @click="serverStore.removeServer(s.id)">删除</button>
-            </div>
+      <!-- 2. 服务器 -->
+      <SettingsSection
+        title="服务器"
+        :expanded="isExpanded('servers')"
+        @toggle="toggleSection('servers')"
+      >
+        <div class="servers-block">
+          <div class="panel__head">
+            <span>已保存的服务器</span>
+            <button class="link" @click="showAdd = true">添加</button>
           </div>
-          <ul v-if="editingServerId !== s.id" class="lines">
-            <li v-for="l in s.lines" :key="l.id">
-              <div>
-                <div>{{ l.name }}</div>
-                <div class="dim" title="编辑服务器可查看完整 URL">
-                  {{ lineUrlPreview(l.baseUrl) }}
+          <div v-if="serverStore.servers.length === 0" class="empty">还没有服务器</div>
+          <div v-for="s in serverStore.servers" :key="s.id" class="server">
+            <div class="server__top">
+              <strong>{{ s.name }}</strong>
+              <div class="server__actions">
+                <button class="link" :disabled="probing === s.id" @click="probe(s.id)">测活</button>
+                <button
+                  v-if="editingServerId !== s.id"
+                  class="link"
+                  @click="beginServerEdit(s)"
+                >
+                  编辑
+                </button>
+                <button v-else class="link" @click="cancelServerEdit(s.id)">取消</button>
+                <button class="link" @click="toggleHidden(s.id, hiddenSet.has(s.id))">
+                  {{ hiddenSet.has(s.id) ? "显示" : "隐藏" }}
+                </button>
+                <button class="link danger" @click="serverStore.removeServer(s.id)">删除</button>
+              </div>
+            </div>
+            <ul v-if="editingServerId !== s.id" class="lines">
+              <li v-for="l in s.lines" :key="l.id">
+                <div>
+                  <div>{{ l.name }}</div>
+                  <div class="dim" title="编辑服务器可查看完整 URL">
+                    {{ lineUrlPreview(l.baseUrl) }}
+                  </div>
+                  <div class="line-meta">
+                    <span v-if="l.id === s.activeLineId" class="line-pill active">当前</span>
+                    <span v-if="l.userAgent" class="line-pill">UA</span>
+                    <span v-if="l.headers?.length" class="line-pill">Headers {{ l.headers.length }}</span>
+                    <span v-if="l.enabled === false" class="line-pill muted">禁用</span>
+                    <button
+                      v-if="l.enabled !== false && l.id !== s.activeLineId"
+                      type="button"
+                      class="line-pill line-pill--button"
+                      :disabled="settingActiveLineId === l.id"
+                      @click="setActiveLine(s.id, l.id)"
+                    >
+                      {{ settingActiveLineId === l.id ? "切换中" : "设为当前" }}
+                    </button>
+                  </div>
                 </div>
-                <div class="line-meta">
-                  <span v-if="l.id === s.activeLineId" class="line-pill active">当前</span>
-                  <span v-if="l.userAgent" class="line-pill">UA</span>
-                  <span v-if="l.headers?.length" class="line-pill">Headers {{ l.headers.length }}</span>
-                  <span v-if="l.enabled === false" class="line-pill muted">禁用</span>
+                <LineStatusDot :status="l.lastStatus" :latency-ms="l.lastLatencyMs" />
+              </li>
+            </ul>
+            <div v-else-if="serverDrafts[s.id]" class="server-edit">
+              <div
+                v-for="(line, index) in serverDrafts[s.id].lines"
+                :key="line.id ?? index"
+                class="server-edit__line"
+              >
+                <div class="server-edit__line-head">
+                  <strong>线路 {{ index + 1 }}</strong>
                   <button
-                    v-if="l.enabled !== false && l.id !== s.activeLineId"
-                    type="button"
-                    class="line-pill line-pill--button"
-                    :disabled="settingActiveLineId === l.id"
-                    @click="setActiveLine(s.id, l.id)"
+                    class="link danger"
+                    :disabled="serverDrafts[s.id].lines.length === 1"
+                    @click="removeServerDraftLine(s.id, index)"
                   >
-                    {{ settingActiveLineId === l.id ? "切换中" : "设为当前" }}
+                    移除
                   </button>
                 </div>
+                <div class="server-edit__grid">
+                  <label class="field">
+                    <span>地址</span>
+                    <input
+                      v-model="line.baseUrl"
+                      class="plain-input"
+                      placeholder="https://example.com 或 192.168.1.2"
+                    />
+                  </label>
+                  <label class="field">
+                    <span>端口</span>
+                    <input v-model="line.port" class="plain-input" placeholder="443 / 8096 / 任意" />
+                  </label>
+                </div>
+                <label class="field field--inline server-edit__toggle">
+                  <span>启用线路</span>
+                  <input v-model="line.enabled" class="switch" type="checkbox" />
+                </label>
+                <details class="server-edit__advanced">
+                  <summary>
+                    <Icon icon="lucide:sliders-horizontal" width="14" />
+                    高级
+                  </summary>
+                  <label class="field">
+                    <span>线路名（可选）</span>
+                    <input
+                      v-model="line.name"
+                      class="plain-input"
+                      placeholder="留空自动使用线路序号"
+                    />
+                  </label>
+                  <label class="field">
+                    <span>User-Agent</span>
+                    <input
+                      v-model="line.userAgent"
+                      class="plain-input"
+                      placeholder="留空使用应用默认"
+                    />
+                  </label>
+                  <label class="field">
+                    <span>Headers</span>
+                    <textarea
+                      v-model="line.headersText"
+                      class="plain-textarea"
+                      placeholder="X-Header: value"
+                    ></textarea>
+                  </label>
+                </details>
               </div>
-              <LineStatusDot :status="l.lastStatus" :latency-ms="l.lastLatencyMs" />
-            </li>
-          </ul>
-          <div v-else-if="serverDrafts[s.id]" class="server-edit">
-            <div
-              v-for="(line, index) in serverDrafts[s.id].lines"
-              :key="line.id ?? index"
-              class="server-edit__line"
-            >
-              <div class="server-edit__line-head">
-                <strong>线路 {{ index + 1 }}</strong>
+
+              <p v-if="serverDrafts[s.id].error" class="status-line error">
+                {{ serverDrafts[s.id].error }}
+              </p>
+              <div class="panel__actions">
+                <button class="action-btn" type="button" @click="addServerDraftLine(s.id)">
+                  <Icon icon="lucide:plus" width="15" />
+                  <span>新增线路</span>
+                </button>
                 <button
-                  class="link danger"
-                  :disabled="serverDrafts[s.id].lines.length === 1"
-                  @click="removeServerDraftLine(s.id, index)"
+                  class="action-btn"
+                  type="button"
+                  :disabled="savingServerId === s.id"
+                  @click="saveServerDraft(s)"
                 >
-                  移除
+                  <Icon icon="lucide:save" width="15" />
+                  <span>{{ savingServerId === s.id ? "保存中" : "保存" }}</span>
                 </button>
               </div>
-              <div class="server-edit__grid">
-                <label class="field">
-                  <span>地址</span>
-                  <input
-                    v-model="line.baseUrl"
-                    class="plain-input"
-                    placeholder="https://example.com 或 192.168.1.2"
-                  />
-                </label>
-                <label class="field">
-                  <span>端口</span>
-                  <input v-model="line.port" class="plain-input" placeholder="443 / 8096 / 任意" />
-                </label>
-              </div>
-              <label class="field field--inline server-edit__toggle">
-                <span>启用线路</span>
-                <input v-model="line.enabled" class="switch" type="checkbox" />
-              </label>
-              <details class="server-edit__advanced">
-                <summary>
-                  <Icon icon="lucide:sliders-horizontal" width="14" />
-                  高级
-                </summary>
-                <label class="field">
-                  <span>线路名（可选）</span>
-                  <input
-                    v-model="line.name"
-                    class="plain-input"
-                    placeholder="留空自动使用线路序号"
-                  />
-                </label>
-                <label class="field">
-                  <span>User-Agent</span>
-                  <input
-                    v-model="line.userAgent"
-                    class="plain-input"
-                    placeholder="留空使用应用默认"
-                  />
-                </label>
-                <label class="field">
-                  <span>Headers</span>
-                  <textarea
-                    v-model="line.headersText"
-                    class="plain-textarea"
-                    placeholder="X-Header: value"
-                  ></textarea>
-                </label>
-              </details>
-            </div>
-
-            <p v-if="serverDrafts[s.id].error" class="status-line error">
-              {{ serverDrafts[s.id].error }}
-            </p>
-            <div class="panel__actions">
-              <button class="action-btn" type="button" @click="addServerDraftLine(s.id)">
-                <Icon icon="lucide:plus" width="15" />
-                <span>新增线路</span>
-              </button>
-              <button
-                class="action-btn"
-                type="button"
-                :disabled="savingServerId === s.id"
-                @click="saveServerDraft(s)"
-              >
-                <Icon icon="lucide:save" width="15" />
-                <span>{{ savingServerId === s.id ? "保存中" : "保存" }}</span>
-              </button>
             </div>
           </div>
         </div>
-      </div>
+      </SettingsSection>
 
-      <button class="row" @click="togglePanel('library')">
-        <span>媒体库</span>
-        <span class="value">{{ heroStyleLabel }}</span>
-      </button>
-      <div v-if="openPanel === 'library'" class="panel glass">
-        <label class="field">
-          <span>首页轮播图风格</span>
+      <!-- 3. 媒体库 -->
+      <SettingsSection
+        title="媒体库"
+        :summary="heroStyleLabel"
+        :expanded="isExpanded('library')"
+        @toggle="toggleSection('library')"
+      >
+        <SettingRow label="首页轮播图风格" description="首页顶部 Hero 区样式" stacked>
           <div class="seg">
             <button
               type="button"
@@ -1163,266 +1129,84 @@ const danmakuSummary = computed(() => {
               巨幕
             </button>
           </div>
-        </label>
-        <label class="field field--inline">
-          <span>JAV 番号过滤</span>
-          <input
-            class="switch"
-            type="checkbox"
-            :checked="settings.settings.hideJavCodes"
-            @change="(e: any) => save('hideJavCodes', e.target.checked)"
-          />
-        </label>
-        <label class="field field--inline">
-          <span>隐藏继续观看</span>
+        </SettingRow>
+        <SettingRow label="隐藏继续观看" description="首页不显示继续观看区块">
           <input
             class="switch"
             type="checkbox"
             :checked="settings.settings.hideContinueWatching"
             @change="(e: any) => save('hideContinueWatching', e.target.checked)"
           />
-        </label>
-        <label class="field field--inline">
-          <span>显示封面评分</span>
+        </SettingRow>
+        <SettingRow label="显示封面评分" description="海报角标显示社区评分">
           <input
             class="switch"
             type="checkbox"
             :checked="settings.settings.showCoverRating"
             @change="(e: any) => save('showCoverRating', e.target.checked)"
           />
-        </label>
-      </div>
-
-      <button class="row" @click="togglePanel('fileServices')">
-        <span>文件服务 / 连接器</span>
-        <span class="value">{{ fileServicesSummary }}</span>
-      </button>
-      <div v-if="openPanel === 'fileServices'" class="panel glass">
-        <div class="panel__actions">
-          <button
-            class="action-btn"
-            :disabled="!canOpenFileDialogs"
-            @click="openLocalFile"
-          >
-            <Icon icon="lucide:file-video" width="15" />
-            <span>打开本地文件</span>
-          </button>
-          <button class="action-btn" @click="openLocalFolder">
-            <Icon icon="lucide:folder-open" width="15" />
-            <span>本地文件夹</span>
-          </button>
-          <button class="action-btn" @click="openWebDav">
-            <Icon icon="lucide:cloud" width="15" />
-            <span>WebDAV</span>
-          </button>
-          <button class="action-btn" @click="openAlist">
-            <Icon icon="lucide:list-tree" width="15" />
-            <span>Alist / OpenList</span>
-          </button>
-        </div>
-        <ul class="cap-list">
-          <li v-for="cap in fileServiceCapabilities" :key="cap.key" class="cap-row">
-            <div class="cap-row__icon">
-              <Icon :icon="cap.icon" width="16" />
-            </div>
-            <div class="cap-row__main">
-              <strong>{{ cap.label }}</strong>
-              <span>{{ cap.detail }}</span>
-            </div>
-            <span class="cap-status" :class="`cap-status--${cap.status}`">
-              {{ capabilityStatusLabel[cap.status] }}
-            </span>
-          </li>
-        </ul>
-      </div>
-
-      <button
-        class="row"
-        :disabled="!backupAvailable"
-        @click="backupAvailable && togglePanel('backup')"
-      >
-        <span>备份与还原</span>
-        <Icon icon="lucide:chevron-right" width="16" class="chev dim" />
-      </button>
-      <div v-if="openPanel === 'backup'" class="panel glass">
-        <div class="panel__actions">
-          <button class="action-btn" :disabled="backupBusy !== null" @click="exportConfig">
-            <Icon icon="lucide:download" width="15" />
-            <span>{{ backupBusy === "export" ? "导出中" : "导出配置" }}</span>
-          </button>
-          <button class="action-btn" :disabled="backupBusy !== null" @click="importConfig('merge')">
-            <Icon icon="lucide:upload" width="15" />
-            <span>{{ backupBusy === "import" ? "导入中" : "合并导入" }}</span>
-          </button>
-          <button class="action-btn" :disabled="backupBusy !== null" @click="importConfig('replace')">
-            <Icon icon="lucide:file-warning" width="15" />
-            <span>替换导入</span>
-          </button>
-        </div>
-        <div v-if="backupStatus" class="status-line">{{ backupStatus }}</div>
-      </div>
-      <label class="row">
-        <span>关闭时最小化到托盘</span>
-        <input
-          class="switch"
-          type="checkbox"
-          :checked="settings.settings.closeToTray"
-          @change="(e: any) => save('closeToTray', e.target.checked)"
-        />
-      </label>
-      <button class="row" @click="toggleCachePanel()">
-        <span>缓存管理</span>
-        <span class="value">{{ cacheSummary }}</span>
-      </button>
-      <div v-if="openPanel === 'cache'" class="panel glass">
-        <ul v-if="cacheUsage" class="cap-list">
-          <li v-for="entry in cacheUsage.entries" :key="entry.label" class="cap-row">
-            <div class="cap-row__main">
-              <strong>{{ entry.label }}</strong>
-              <span>{{ formatCacheBytes(entry.bytes) }}</span>
-            </div>
-          </li>
-        </ul>
-        <div class="panel__actions">
-          <button class="action-btn" :disabled="cacheBusy" @click="refreshCacheUsage">
-            <Icon icon="lucide:refresh-cw" width="15" />
-            <span>刷新</span>
-          </button>
-          <button class="action-btn" :disabled="cacheBusy" @click="clearCache">
-            <Icon icon="lucide:trash-2" width="15" />
-            <span>{{ cacheBusy ? "清理中" : "清理缓存" }}</span>
-          </button>
-        </div>
-        <div v-if="cacheStatus" class="status-line">{{ cacheStatus }}</div>
-      </div>
-      <button class="row" @click="togglePanel('network')">
-        <span>网络</span>
-        <Icon icon="lucide:chevron-right" width="16" class="chev" />
-      </button>
-      <div v-if="openPanel === 'network'" class="panel glass">
-        <label class="field field--inline">
-          <span>忽略 SSL 证书校验（重启后生效）</span>
+        </SettingRow>
+        <SettingRow label="JAV 番号过滤" description="隐藏番号命名的内容" advanced>
           <input
             class="switch"
             type="checkbox"
-            :checked="settings.settings.ignoreSslErrors"
-            @change="(e: any) => save('ignoreSslErrors', e.target.checked)"
+            :checked="settings.settings.hideJavCodes"
+            @change="(e: any) => save('hideJavCodes', e.target.checked)"
           />
-        </label>
-        <label class="field">
-          <span>网络代理（重启后生效）</span>
-          <div class="seg">
-            <button
-              type="button"
-              :class="{ active: settings.settings.networkProxyMode === 'none' }"
-              @click="save('networkProxyMode', 'none')"
-            >
-              不使用
-            </button>
-            <button
-              type="button"
-              :class="{ active: settings.settings.networkProxyMode === 'system' }"
-              @click="save('networkProxyMode', 'system')"
-            >
-              跟随系统
-            </button>
-            <button
-              type="button"
-              :class="{ active: settings.settings.networkProxyMode === 'custom' }"
-              @click="save('networkProxyMode', 'custom')"
-            >
-              自定义
-            </button>
-          </div>
-        </label>
-        <label v-if="settings.settings.networkProxyMode === 'custom'" class="field">
-          <span>HTTP 代理地址</span>
-          <GlassInput
-            placeholder="http://127.0.0.1:7897"
-            :model-value="settings.settings.httpProxyUrl"
-            @update:modelValue="(v) => save('httpProxyUrl', String(v).trim())"
-          />
-        </label>
-        <label class="field">
-          <span>心跳保号周期（秒）</span>
-          <GlassInput
-            :model-value="String(settings.settings.heartbeatIntervalSecs)"
-            @update:modelValue="(v) => save('heartbeatIntervalSecs', Number(v) || 180)"
-          />
-        </label>
-        <label class="field">
-          <span>线路测活周期（秒）</span>
-          <GlassInput
-            :model-value="String(settings.settings.healthCheckIntervalSecs)"
-            @update:modelValue="(v) => save('healthCheckIntervalSecs', Number(v) || 60)"
-          />
-        </label>
-        <label class="field">
-          <span>线路竞赛超时（ms）</span>
-          <GlassInput
-            :model-value="String(settings.settings.raceTimeoutMs)"
-            @update:modelValue="(v) => save('raceTimeoutMs', Number(v) || 3500)"
-          />
-        </label>
-        <label class="field">
-          <span>请求超时（ms）</span>
-          <GlassInput
-            :model-value="String(settings.settings.requestTimeoutMs)"
-            @update:modelValue="(v) => save('requestTimeoutMs', Number(v) || 15000)"
-          />
-        </label>
-      </div>
+        </SettingRow>
+        <SettingRow
+          label="打开本地文件"
+          description="选择单个视频用内嵌 mpv 播放（仅桌面端可用）"
+          clickable
+          :disabled="!canOpenFileDialogs"
+          @click="openLocalFile"
+        >
+          <Icon icon="lucide:file-video" width="16" class="row-chev" />
+        </SettingRow>
+        <SettingRow label="本地文件夹" description="浏览本地目录作为媒体库" clickable @click="openLocalFolder">
+          <Icon icon="lucide:chevron-right" width="16" class="row-chev" />
+        </SettingRow>
+        <SettingRow label="WebDAV" description="连接 WebDAV 服务浏览播放" clickable @click="openWebDav">
+          <Icon icon="lucide:chevron-right" width="16" class="row-chev" />
+        </SettingRow>
+        <SettingRow label="Alist / OpenList" description="连接 Alist 站点浏览播放" clickable @click="openAlist">
+          <Icon icon="lucide:chevron-right" width="16" class="row-chev" />
+        </SettingRow>
+        <details class="cap-details">
+          <summary>
+            <Icon icon="lucide:sliders-horizontal" width="14" />
+            连接器能力说明
+            <span class="cap-details__tag">高级</span>
+          </summary>
+          <ul class="cap-list">
+            <li v-for="cap in fileServiceCapabilities" :key="cap.key" class="cap-row">
+              <div class="cap-row__icon">
+                <Icon :icon="cap.icon" width="16" />
+              </div>
+              <div class="cap-row__main">
+                <strong>{{ cap.label }}</strong>
+                <span>{{ cap.detail }}</span>
+              </div>
+              <span class="cap-status" :class="`cap-status--${cap.status}`">
+                {{ capabilityStatusLabel[cap.status] }}
+              </span>
+            </li>
+          </ul>
+        </details>
+      </SettingsSection>
 
-      <h2 class="group-title">播放器</h2>
-
-      <button class="row" @click="togglePanel('interaction')">
-        <span>交互</span>
-        <Icon icon="lucide:chevron-right" width="16" class="chev" />
-      </button>
-      <div v-if="openPanel === 'interaction'" class="panel glass">
-        <label class="field">
-          <span>快进时间（秒）</span>
-          <GlassInput
-            type="number"
-            :model-value="String(settings.settings.seekForwardSeconds)"
-            @update:modelValue="
-              (v) => save('seekForwardSeconds', Math.min(300, Math.max(1, Number(v) || 10)))
-            "
-          />
-        </label>
-        <label class="field">
-          <span>快退时间（秒）</span>
-          <GlassInput
-            type="number"
-            :model-value="String(settings.settings.seekBackwardSeconds)"
-            @update:modelValue="
-              (v) => save('seekBackwardSeconds', Math.min(300, Math.max(1, Number(v) || 10)))
-            "
-          />
-        </label>
-        <label class="field">
-          <span>倍速播放速度（长按）</span>
-          <GlassInput
-            type="number"
-            :model-value="String(settings.settings.longPressSpeedRate)"
-            @update:modelValue="
-              (v) => save('longPressSpeedRate', Math.min(5, Math.max(1.1, Number(v) || 2)))
-            "
-          />
-        </label>
-      </div>
-
-      <button class="row" @click="togglePanel('player')">
-        <span>播放器</span>
-        <Icon icon="lucide:chevron-right" width="16" class="chev" />
-      </button>
-      <div v-if="openPanel === 'player'" class="panel glass">
-        <div class="field field--readonly">
-          <span>MPV 后端</span>
-          <strong>{{ mpvBackendLabel }}</strong>
-        </div>
-        <label class="field">
-          <span>视频输出驱动（下次播放生效）</span>
+      <!-- 4. 播放器 -->
+      <SettingsSection
+        title="播放器"
+        :summary="mpvBackendLabel"
+        :expanded="isExpanded('player')"
+        @toggle="toggleSection('player')"
+      >
+        <p class="settings-subhead">解码与输出</p>
+        <SettingRow label="播放核心" description="当前使用的 mpv 后端">
+          <strong class="row-value-strong">{{ mpvBackendLabel }}</strong>
+        </SettingRow>
+        <SettingRow label="视频输出驱动" description="下次播放生效" stacked>
           <div class="seg">
             <button
               type="button"
@@ -1439,28 +1223,21 @@ const danmakuSummary = computed(() => {
               gpu
             </button>
           </div>
-        </label>
-        <label class="field">
-          <span>硬件解码</span>
-          <div class="seg">
-            <button
-              type="button"
-              :class="{ active: settings.settings.hardwareDecoding }"
-              @click="save('hardwareDecoding', true)"
-            >
-              开启
-            </button>
-            <button
-              type="button"
-              :class="{ active: !settings.settings.hardwareDecoding }"
-              @click="save('hardwareDecoding', false)"
-            >
-              关闭
-            </button>
-          </div>
-        </label>
-        <label v-if="settings.settings.hardwareDecoding" class="field">
-          <span>硬解方式（下次播放生效）</span>
+        </SettingRow>
+        <SettingRow label="硬件解码" description="用 GPU 解码降低 CPU 占用">
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.hardwareDecoding"
+            @change="(e: any) => save('hardwareDecoding', e.target.checked)"
+          />
+        </SettingRow>
+        <SettingRow
+          v-if="settings.settings.hardwareDecoding"
+          label="硬解方式"
+          description="下次播放生效"
+          stacked
+        >
           <div class="seg">
             <button
               type="button"
@@ -1491,32 +1268,41 @@ const danmakuSummary = computed(() => {
               Copy
             </button>
           </div>
-        </label>
-        <label class="field field--inline">
-          <span>低质量视频解码（下次播放生效）</span>
+        </SettingRow>
+        <SettingRow
+          label="低质量视频解码"
+          description="低性能设备减负；下次播放生效"
+          advanced
+        >
           <input
             class="switch"
             type="checkbox"
             :checked="settings.settings.lowQualityDecoding"
             @change="(e: any) => save('lowQualityDecoding', e.target.checked)"
           />
-        </label>
-        <label class="field">
-          <span>缓存（MB）</span>
+        </SettingRow>
+        <SettingRow label="播放缓存（MB）" description="mpv demuxer 缓存上限，默认 256" stacked>
           <GlassInput
+            type="number"
             :model-value="String(settings.settings.mpvCacheMb)"
             @update:modelValue="(v) => save('mpvCacheMb', Number(v) || 256)"
           />
-        </label>
-        <label class="field">
-          <span>最大缓存时长（秒，0=默认）</span>
+        </SettingRow>
+        <SettingRow
+          label="最大缓存时长（秒）"
+          description="0 = mpv 默认"
+          advanced
+          stacked
+        >
           <GlassInput
+            type="number"
             :model-value="String(settings.settings.mpvCacheSecs)"
             @update:modelValue="(v) => save('mpvCacheSecs', Math.max(0, Number(v) || 0))"
           />
-        </label>
-        <label class="field">
-          <span>首选音频语言（下次播放生效）</span>
+        </SettingRow>
+
+        <p class="settings-subhead">音轨与语言</p>
+        <SettingRow label="首选音频语言" description="下次播放生效" stacked>
           <div class="seg">
             <button
               v-for="opt in preferredLanguageOptions"
@@ -1528,9 +1314,8 @@ const danmakuSummary = computed(() => {
               {{ opt.label }}
             </button>
           </div>
-        </label>
-        <label class="field">
-          <span>首选字幕语言（下次播放生效）</span>
+        </SettingRow>
+        <SettingRow label="首选字幕语言" description="下次播放生效" stacked>
           <div class="seg">
             <button
               v-for="opt in preferredLanguageOptions"
@@ -1542,32 +1327,18 @@ const danmakuSummary = computed(() => {
               {{ opt.label }}
             </button>
           </div>
-        </label>
-        <label class="field field--inline">
-          <span>强制输出立体声（下次播放生效）</span>
+        </SettingRow>
+        <SettingRow label="强制输出立体声" description="多声道下混为立体声；下次播放生效">
           <input
             class="switch"
             type="checkbox"
             :checked="settings.settings.forceStereoAudio"
             @change="(e: any) => save('forceStereoAudio', e.target.checked)"
           />
-        </label>
-        <label class="field">
-          <span>标记已看的进度阈值</span>
-          <div class="range-row">
-            <input
-              type="range"
-              min="50"
-              max="100"
-              step="1"
-              :value="settings.settings.markWatchedThresholdPct"
-              @input="(e: any) => save('markWatchedThresholdPct', Number(e.target.value))"
-            />
-            <strong>{{ settings.settings.markWatchedThresholdPct }}%</strong>
-          </div>
-        </label>
-        <label class="field">
-          <span>首选版本（多版本自动选源）</span>
+        </SettingRow>
+
+        <p class="settings-subhead">播放行为</p>
+        <SettingRow label="首选版本" description="多版本自动选源策略" stacked>
           <div class="seg">
             <button
               v-for="opt in preferredVersionOptions"
@@ -1579,41 +1350,98 @@ const danmakuSummary = computed(() => {
               {{ opt.label }}
             </button>
           </div>
-        </label>
-        <label class="field field--inline">
-          <span>编辑 mpv.conf（下次播放生效）</span>
-          <button type="button" class="action-btn" @click="editMpvConf">
-            <Icon icon="lucide:file-cog" width="15" />
-            <span>打开</span>
-          </button>
-        </label>
-        <label class="field field--inline">
-          <span>播放器日志（下次播放生效）</span>
+        </SettingRow>
+        <SettingRow label="标记已看阈值" description="播放进度超过此值标记为已观看" stacked>
+          <div class="range-row">
+            <input
+              type="range"
+              min="50"
+              max="100"
+              step="1"
+              :value="settings.settings.markWatchedThresholdPct"
+              @input="(e: any) => save('markWatchedThresholdPct', Number(e.target.value))"
+            />
+            <strong>{{ settings.settings.markWatchedThresholdPct }}%</strong>
+          </div>
+        </SettingRow>
+        <SettingRow label="自动跳过片头/片尾" description="按固定秒数跳过">
           <input
             class="switch"
             type="checkbox"
-            :checked="settings.settings.playerLogEnabled"
-            @change="(e: any) => save('playerLogEnabled', e.target.checked)"
+            :checked="settings.settings.skipIntroOutroEnabled"
+            @change="(e: any) => save('skipIntroOutroEnabled', e.target.checked)"
           />
-        </label>
-        <label class="field field--inline">
-          <span>打开日志文件夹</span>
-          <button type="button" class="action-btn" @click="openPlayerLogs">
-            <Icon icon="lucide:folder-open" width="15" />
-            <span>打开</span>
-          </button>
-        </label>
-        <label class="field field--inline">
-          <span>右上角网速</span>
+        </SettingRow>
+        <SettingRow
+          v-if="settings.settings.skipIntroOutroEnabled"
+          label="片头跳过秒数"
+          description="依赖自动跳过开启"
+          stacked
+        >
+          <GlassInput
+            type="number"
+            :model-value="String(settings.settings.skipIntroSeconds)"
+            @update:modelValue="
+              (v) => save('skipIntroSeconds', normalizeSkipSeconds(v, settings.settings.skipIntroSeconds))
+            "
+          />
+        </SettingRow>
+        <SettingRow
+          v-if="settings.settings.skipIntroOutroEnabled"
+          label="片尾跳过秒数"
+          description="依赖自动跳过开启"
+          stacked
+        >
+          <GlassInput
+            type="number"
+            :model-value="String(settings.settings.skipOutroSeconds)"
+            @update:modelValue="
+              (v) => save('skipOutroSeconds', normalizeSkipSeconds(v, settings.settings.skipOutroSeconds))
+            "
+          />
+        </SettingRow>
+        <SettingRow label="截图包含字幕" description="播放器截图时烧入字幕">
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.screenshotIncludeSubtitles"
+            @change="(e: any) => save('screenshotIncludeSubtitles', e.target.checked)"
+          />
+        </SettingRow>
+
+        <p class="settings-subhead">交互</p>
+        <SettingRow label="快进时间（秒）" description="方向键 / 按钮单次快进步长" stacked>
+          <GlassInput
+            type="number"
+            :model-value="String(settings.settings.seekForwardSeconds)"
+            @update:modelValue="(v) => save('seekForwardSeconds', Math.min(300, Math.max(1, Number(v) || 10)))"
+          />
+        </SettingRow>
+        <SettingRow label="快退时间（秒）" description="单次快退步长" stacked>
+          <GlassInput
+            type="number"
+            :model-value="String(settings.settings.seekBackwardSeconds)"
+            @update:modelValue="(v) => save('seekBackwardSeconds', Math.min(300, Math.max(1, Number(v) || 10)))"
+          />
+        </SettingRow>
+        <SettingRow label="长按倍速" description="长按时的播放速度" stacked>
+          <GlassInput
+            type="number"
+            :model-value="String(settings.settings.longPressSpeedRate)"
+            @update:modelValue="(v) => save('longPressSpeedRate', Math.min(5, Math.max(1.1, Number(v) || 2)))"
+          />
+        </SettingRow>
+
+        <p class="settings-subhead">显示与统计</p>
+        <SettingRow label="右上角网速" description="播放时显示实时网速">
           <input
             class="switch"
             type="checkbox"
             :checked="settings.settings.showNetworkSpeed"
             @change="(e: any) => save('showNetworkSpeed', e.target.checked)"
           />
-        </label>
-        <label class="field">
-          <span>统计浮层</span>
+        </SettingRow>
+        <SettingRow label="统计浮层" description="播放统计信息样式" stacked>
           <div class="seg">
             <button
               type="button"
@@ -1630,353 +1458,192 @@ const danmakuSummary = computed(() => {
               mpv OSD
             </button>
           </div>
-        </label>
-        <label class="field field--inline">
-          <span>全屏遮黑其他副屏</span>
+        </SettingRow>
+        <SettingRow label="全屏遮黑其他副屏" description="多显示器全屏时遮黑副屏" advanced>
           <input
             class="switch"
             type="checkbox"
             :checked="settings.settings.blackoutOtherDisplays"
             @change="(e: any) => save('blackoutOtherDisplays', e.target.checked)"
           />
-        </label>
-        <label class="field field--inline">
-          <span>切换轨道时保留缓存</span>
+        </SettingRow>
+        <SettingRow label="Anime4K 超分" description="在播放器画质增强菜单中切换（关闭 / A快 / A / B / C / 高质）">
+          <strong class="row-value-strong">{{ anime4kLabel }}</strong>
+        </SettingRow>
+        <SettingRow label="Windows HDR" description="仅 Windows 可用，跳转系统显示设置">
+          <button
+            type="button"
+            class="action-btn"
+            :disabled="!isWindowsPlatform"
+            @click="openWindowsHdrSettings"
+          >
+            <Icon icon="lucide:external-link" width="14" />
+            <span>打开系统设置</span>
+          </button>
+        </SettingRow>
+
+        <p class="settings-subhead">调试</p>
+        <SettingRow label="切换轨道时保留缓存" description="关闭可解决部分切轨问题" advanced>
           <input
             class="switch"
             type="checkbox"
             :checked="settings.settings.preserveTrackSwitchCache"
             @change="(e: any) => save('preserveTrackSwitchCache', e.target.checked)"
           />
-        </label>
-        <label class="field field--inline">
-          <span>自动跳过片头/片尾</span>
-          <input
-            class="switch"
-            type="checkbox"
-            :checked="settings.settings.skipIntroOutroEnabled"
-            @change="(e: any) => save('skipIntroOutroEnabled', e.target.checked)"
-          />
-        </label>
-        <label class="field field--inline">
-          <span>截图包含字幕</span>
-          <input
-            class="switch"
-            type="checkbox"
-            :checked="settings.settings.screenshotIncludeSubtitles"
-            @change="(e: any) => save('screenshotIncludeSubtitles', e.target.checked)"
-          />
-        </label>
-        <label class="field">
-          <span>片头跳过秒数</span>
-          <GlassInput
-            type="number"
-            :model-value="String(settings.settings.skipIntroSeconds)"
-            @update:modelValue="
-              (v) =>
-                save(
-                  'skipIntroSeconds',
-                  normalizeSkipSeconds(v, settings.settings.skipIntroSeconds),
-                )
-            "
-          />
-        </label>
-        <label class="field">
-          <span>片尾跳过秒数</span>
-          <GlassInput
-            type="number"
-            :model-value="String(settings.settings.skipOutroSeconds)"
-            @update:modelValue="
-              (v) =>
-                save(
-                  'skipOutroSeconds',
-                  normalizeSkipSeconds(v, settings.settings.skipOutroSeconds),
-                )
-            "
-          />
-        </label>
-        <label class="field field--inline">
-          <span>附加授权查询参数</span>
+        </SettingRow>
+        <SettingRow label="附加授权查询参数" description="流地址附加 api_key 参数，兼容部分服务器" advanced>
           <input
             class="switch"
             type="checkbox"
             :checked="settings.settings.appendAuthQuery"
             @change="(e: any) => save('appendAuthQuery', e.target.checked)"
           />
-        </label>
-      </div>
-
-      <button class="row" @click="togglePanel('downloads')">
-        <span>下载</span>
-        <span class="value">{{ downloadDirectorySummary }}</span>
-      </button>
-      <div v-if="openPanel === 'downloads'" class="panel glass">
-        <label class="field">
-          <span>保存目录</span>
-          <GlassInput
-            v-model="downloadDirectoryDraft"
-            placeholder="留空使用默认目录"
-            @change="() => saveDownloadDirectory()"
-            @blur="() => saveDownloadDirectory()"
-          />
-        </label>
-        <div class="panel__actions">
-          <button
-            type="button"
-            class="action-btn"
-            :disabled="!canPickDownloadDirectory"
-            @click="pickDownloadDirectory"
-          >
-            <Icon icon="lucide:folder-open" width="15" />
-            <span>选择</span>
-          </button>
-          <button
-            type="button"
-            class="action-btn"
-            :disabled="!canPickDownloadDirectory || downloadDirectoryBusy"
-            @click="openDownloadDirectory"
-          >
-            <Icon icon="lucide:external-link" width="15" />
-            <span>{{ downloadDirectoryBusy ? "打开中" : "打开" }}</span>
-          </button>
-          <button
-            type="button"
-            class="action-btn"
-            :disabled="!settings.settings.downloadDirectory"
-            @click="downloadDirectoryDraft = ''; saveDownloadDirectory('')"
-          >
-            <Icon icon="lucide:x" width="15" />
-            <span>清除</span>
-          </button>
-        </div>
-        <div v-if="downloadDirectoryStatus" class="status-line">{{ downloadDirectoryStatus }}</div>
-      </div>
-
-      <button class="row" @click="togglePanel('enhancement')">
-        <span>画质增强</span>
-        <span class="value">{{ enhancementSummary }}</span>
-      </button>
-      <div v-if="openPanel === 'enhancement'" class="panel glass">
-        <ul class="cap-list">
-          <li v-for="cap in enhancementCapabilities" :key="cap.key" class="cap-row">
-            <div class="cap-row__icon">
-              <Icon :icon="cap.icon" width="16" />
-            </div>
-            <div class="cap-row__main">
-              <strong>{{ cap.label }}</strong>
-              <span>{{ cap.detail }}</span>
-            </div>
-            <span class="cap-status" :class="`cap-status--${cap.status}`">
-              {{ capabilityStatusLabel[cap.status] }}
-            </span>
-            <button
-              v-if="cap.action === 'windows-hdr'"
-              type="button"
-              class="action-btn cap-row__action"
-              :disabled="cap.status !== 'available'"
-              title="打开"
-              @click="openWindowsHdrSettings"
-            >
-              <Icon icon="lucide:external-link" width="14" />
-            </button>
-          </li>
-        </ul>
-      </div>
-
-      <button class="row" @click="togglePanel('externalPlayer')">
-        <span>外部播放器</span>
-        <span class="value">{{ externalPlayerSummary }}</span>
-      </button>
-      <div v-if="openPanel === 'externalPlayer'" class="panel glass">
-        <label class="field field--inline">
-          <span>开启外部 mpv 播放器</span>
+        </SettingRow>
+        <SettingRow label="播放器日志" description="下次播放生效" advanced>
           <input
             class="switch"
             type="checkbox"
-            :checked="settings.settings.externalMpvEnabled"
-            @change="(e: any) => save('externalMpvEnabled', e.target.checked)"
+            :checked="settings.settings.playerLogEnabled"
+            @change="(e: any) => save('playerLogEnabled', e.target.checked)"
           />
-        </label>
-        <template v-if="settings.settings.externalMpvEnabled">
-          <label class="field">
-            <span>外部 mpv 播放器位置</span>
-            <GlassInput
-              :model-value="settings.settings.externalMpvPath ?? ''"
-              placeholder="例如 C:\\mpv\\mpv.exe"
-              @update:modelValue="(v) => save('externalMpvPath', (String(v).trim() || null) as any)"
-            />
-          </label>
-          <div class="panel__actions">
-            <button
-              type="button"
-              class="action-btn"
-              @click="pickExternalExe('externalMpvPath', '选择 mpv.exe')"
-            >
-              <Icon icon="lucide:folder-open" width="15" />
-              <span>选择</span>
-            </button>
-          </div>
-          <label class="field field--inline">
-            <span>外部 mpv 使用代理（自定义代理时传入）</span>
+        </SettingRow>
+        <SettingRow label="打开日志文件夹" description="查看播放器日志文件" advanced>
+          <button type="button" class="action-btn" @click="openPlayerLogs">
+            <Icon icon="lucide:folder-open" width="14" />
+            <span>打开</span>
+          </button>
+        </SettingRow>
+        <SettingRow label="编辑 mpv.conf" description="下次播放生效" advanced>
+          <button type="button" class="action-btn" @click="editMpvConf">
+            <Icon icon="lucide:file-cog" width="14" />
+            <span>打开</span>
+          </button>
+        </SettingRow>
+      </SettingsSection>
+
+      <!-- 5. 字幕 -->
+      <SettingsSection
+        title="字幕"
+        summary="播放器内可调"
+        :expanded="isExpanded('subtitle')"
+        @toggle="toggleSection('subtitle')"
+      >
+        <p class="subhint">以下字幕样式同样可在播放器内字幕面板实时调整，这里的修改将作为默认值。</p>
+        <SettingRow label="字幕大小" description="相对缩放倍率" stacked>
+          <div class="range-row">
             <input
-              class="switch"
-              type="checkbox"
-              :checked="settings.settings.externalMpvUseProxy"
-              @change="(e: any) => save('externalMpvUseProxy', e.target.checked)"
+              type="range"
+              min="0.5"
+              max="2.5"
+              step="0.05"
+              :value="settings.settings.subtitleScale"
+              @input="(e: any) => save('subtitleScale', Number(Number(e.target.value).toFixed(2)))"
             />
-          </label>
-        </template>
-        <label class="field field--inline">
-          <span>开启外部 PotPlayer 播放器</span>
+            <strong>{{ settings.settings.subtitleScale.toFixed(2) }}×</strong>
+          </div>
+        </SettingRow>
+        <SettingRow label="字幕粗体">
           <input
             class="switch"
             type="checkbox"
-            :checked="settings.settings.externalPotplayerEnabled"
-            @change="(e: any) => save('externalPotplayerEnabled', e.target.checked)"
+            :checked="settings.settings.subtitleBold"
+            @change="(e: any) => save('subtitleBold', e.target.checked)"
           />
-        </label>
-        <template v-if="settings.settings.externalPotplayerEnabled">
-          <label class="field">
-            <span>外部 PotPlayer 播放器位置</span>
-            <GlassInput
-              :model-value="settings.settings.externalPotplayerPath ?? ''"
-              placeholder="例如 C:\\Program Files\\DAUM\\PotPlayer\\PotPlayerMini64.exe"
-              @update:modelValue="
-                (v) => save('externalPotplayerPath', (String(v).trim() || null) as any)
-              "
+        </SettingRow>
+        <SettingRow label="字体颜色" description="十六进制色值">
+          <input
+            class="color-input"
+            type="color"
+            :value="settings.settings.subtitleTextColor"
+            @input="(e: any) => save('subtitleTextColor', e.target.value)"
+          />
+        </SettingRow>
+        <SettingRow label="描边颜色" description="十六进制色值">
+          <input
+            class="color-input"
+            type="color"
+            :value="settings.settings.subtitleOutlineColor"
+            @input="(e: any) => save('subtitleOutlineColor', e.target.value)"
+          />
+        </SettingRow>
+        <SettingRow label="描边宽度" stacked>
+          <div class="range-row">
+            <input
+              type="range"
+              min="0"
+              max="8"
+              step="0.05"
+              :value="settings.settings.subtitleOutlineSize"
+              @input="(e: any) => save('subtitleOutlineSize', Number(Number(e.target.value).toFixed(2)))"
             />
-          </label>
-          <div class="panel__actions">
-            <button
-              type="button"
-              class="action-btn"
-              @click="pickExternalExe('externalPotplayerPath', '选择 PotPlayer')"
-            >
-              <Icon icon="lucide:folder-open" width="15" />
-              <span>选择</span>
-            </button>
+            <strong>{{ settings.settings.subtitleOutlineSize.toFixed(2) }}</strong>
           </div>
-        </template>
-        <label class="field">
-          <span>其他播放器路径（以上未开启时生效）</span>
-          <GlassInput
-            v-model="externalPlayerPathDraft"
-            placeholder="留空使用系统默认"
-            @change="() => saveExternalPlayerPath()"
-            @blur="() => saveExternalPlayerPath()"
+        </SettingRow>
+        <SettingRow label="阴影偏移" stacked>
+          <div class="range-row">
+            <input
+              type="range"
+              min="0"
+              max="8"
+              step="0.05"
+              :value="settings.settings.subtitleShadowOffset"
+              @input="(e: any) => save('subtitleShadowOffset', Number(Number(e.target.value).toFixed(2)))"
+            />
+            <strong>{{ settings.settings.subtitleShadowOffset.toFixed(2) }}</strong>
+          </div>
+        </SettingRow>
+        <SettingRow label="主字幕位置" description="100 = 底部默认" stacked>
+          <div class="range-row">
+            <input
+              type="range"
+              min="0"
+              max="150"
+              step="1"
+              :value="settings.settings.subtitlePositionPct"
+              @input="(e: any) => save('subtitlePositionPct', Number(e.target.value))"
+            />
+            <strong>{{ settings.settings.subtitlePositionPct }}%</strong>
+          </div>
+        </SettingRow>
+        <SettingRow label="次字幕位置" description="0 = 顶部默认" stacked>
+          <div class="range-row">
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              :value="settings.settings.subtitleSecondaryPositionPct"
+              @input="(e: any) => save('subtitleSecondaryPositionPct', Number(e.target.value))"
+            />
+            <strong>{{ settings.settings.subtitleSecondaryPositionPct }}%</strong>
+          </div>
+        </SettingRow>
+        <SettingRow label="强制覆盖 ASS 样式" description="覆盖内嵌字幕自带样式" advanced>
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.subtitleForceStyle"
+            @change="(e: any) => save('subtitleForceStyle', e.target.checked)"
           />
-        </label>
-        <div class="panel__actions">
-          <button type="button" class="action-btn" @click="pickExternalPlayer">
-            <Icon icon="lucide:folder-open" width="15" />
-            <span>选择</span>
-          </button>
-          <button
-            type="button"
-            class="action-btn"
-            :disabled="!settings.settings.externalPlayerPath"
-            @click="externalPlayerPathDraft = ''; saveExternalPlayerPath('')"
-          >
-            <Icon icon="lucide:x" width="15" />
-            <span>清除</span>
-          </button>
-        </div>
-        <label class="field">
-          <span>启动参数</span>
-          <GlassInput
-            v-model="externalPlayerArgsDraft"
-            placeholder="{headers} {userAgent} {url}"
-            @change="() => saveExternalPlayerArgs()"
-            @blur="() => saveExternalPlayerArgs()"
-          />
-        </label>
-      </div>
-      <button class="row" @click="togglePanel('danmaku')">
-        <span>弹幕</span>
-        <span class="value">{{ danmakuSummary }}</span>
-      </button>
-      <div v-if="openPanel === 'danmaku'" class="panel glass">
-        <label class="field field--inline">
-          <span>开启弹幕（数据来源于 DanDanPlay API）</span>
+        </SettingRow>
+      </SettingsSection>
+
+      <!-- 6. 弹幕 -->
+      <SettingsSection
+        title="弹幕"
+        :summary="danmakuSummary"
+        :expanded="isExpanded('danmaku')"
+        @toggle="toggleSection('danmaku')"
+      >
+        <SettingRow label="开启弹幕" description="数据来源 DanDanPlay API">
           <input
             class="switch"
             type="checkbox"
             :checked="settings.settings.danmakuEnabledDefault"
             @change="(e: any) => save('danmakuEnabledDefault', e.target.checked)"
           />
-        </label>
-        <label class="field">
-          <span>滚动弹幕最大行数</span>
-          <div class="range-row">
-            <input
-              type="range"
-              min="1"
-              max="20"
-              step="1"
-              :value="settings.settings.danmakuScrollMaxRows"
-              @input="(e: any) => save('danmakuScrollMaxRows', Number(e.target.value))"
-            />
-            <strong>{{ settings.settings.danmakuScrollMaxRows }}</strong>
-          </div>
-        </label>
-        <label class="field">
-          <span>顶部弹幕最大行数</span>
-          <div class="range-row">
-            <input
-              type="range"
-              min="1"
-              max="20"
-              step="1"
-              :value="settings.settings.danmakuTopMaxRows"
-              @input="(e: any) => save('danmakuTopMaxRows', Number(e.target.value))"
-            />
-            <strong>{{ settings.settings.danmakuTopMaxRows }}</strong>
-          </div>
-        </label>
-        <label class="field">
-          <span>底部弹幕最大行数</span>
-          <div class="range-row">
-            <input
-              type="range"
-              min="1"
-              max="20"
-              step="1"
-              :value="settings.settings.danmakuBottomMaxRows"
-              @input="(e: any) => save('danmakuBottomMaxRows', Number(e.target.value))"
-            />
-            <strong>{{ settings.settings.danmakuBottomMaxRows }}</strong>
-          </div>
-        </label>
-        <label class="field">
-          <span>透明度</span>
-          <div class="range-row">
-            <input
-              type="range"
-              min="0.2"
-              max="1"
-              step="0.05"
-              :value="settings.settings.danmakuOpacity"
-              @input="(e: any) => save('danmakuOpacity', Number(e.target.value))"
-            />
-            <strong>{{ Math.round(settings.settings.danmakuOpacity * 100) }}%</strong>
-          </div>
-        </label>
-        <label class="field">
-          <span>速度</span>
-          <div class="range-row">
-            <input
-              type="range"
-              min="0.5"
-              max="2.5"
-              step="0.1"
-              :value="settings.settings.danmakuSpeed"
-              @input="(e: any) => save('danmakuSpeed', Number(e.target.value))"
-            />
-            <strong>{{ settings.settings.danmakuSpeed.toFixed(1) }}x</strong>
-          </div>
-        </label>
-        <label class="field">
-          <span>字号</span>
+        </SettingRow>
+        <SettingRow label="字号" stacked>
           <div class="range-row">
             <input
               type="range"
@@ -1988,36 +1655,97 @@ const danmakuSummary = computed(() => {
             />
             <strong>{{ settings.settings.danmakuFontSize }}px</strong>
           </div>
-        </label>
-        <label class="field field--inline">
-          <span>粗体</span>
+        </SettingRow>
+        <SettingRow label="透明度" stacked>
+          <div class="range-row">
+            <input
+              type="range"
+              min="0.2"
+              max="1"
+              step="0.05"
+              :value="settings.settings.danmakuOpacity"
+              @input="(e: any) => save('danmakuOpacity', Number(e.target.value))"
+            />
+            <strong>{{ Math.round(settings.settings.danmakuOpacity * 100) }}%</strong>
+          </div>
+        </SettingRow>
+        <SettingRow label="速度" stacked>
+          <div class="range-row">
+            <input
+              type="range"
+              min="0.5"
+              max="2.5"
+              step="0.1"
+              :value="settings.settings.danmakuSpeed"
+              @input="(e: any) => save('danmakuSpeed', Number(e.target.value))"
+            />
+            <strong>{{ settings.settings.danmakuSpeed.toFixed(1) }}x</strong>
+          </div>
+        </SettingRow>
+        <SettingRow label="滚动弹幕最大行数" stacked>
+          <div class="range-row">
+            <input
+              type="range"
+              min="1"
+              max="20"
+              step="1"
+              :value="settings.settings.danmakuScrollMaxRows"
+              @input="(e: any) => save('danmakuScrollMaxRows', Number(e.target.value))"
+            />
+            <strong>{{ settings.settings.danmakuScrollMaxRows }}</strong>
+          </div>
+        </SettingRow>
+        <SettingRow label="顶部弹幕最大行数" stacked>
+          <div class="range-row">
+            <input
+              type="range"
+              min="1"
+              max="20"
+              step="1"
+              :value="settings.settings.danmakuTopMaxRows"
+              @input="(e: any) => save('danmakuTopMaxRows', Number(e.target.value))"
+            />
+            <strong>{{ settings.settings.danmakuTopMaxRows }}</strong>
+          </div>
+        </SettingRow>
+        <SettingRow label="底部弹幕最大行数" stacked>
+          <div class="range-row">
+            <input
+              type="range"
+              min="1"
+              max="20"
+              step="1"
+              :value="settings.settings.danmakuBottomMaxRows"
+              @input="(e: any) => save('danmakuBottomMaxRows', Number(e.target.value))"
+            />
+            <strong>{{ settings.settings.danmakuBottomMaxRows }}</strong>
+          </div>
+        </SettingRow>
+        <SettingRow label="粗体">
           <input
             class="switch"
             type="checkbox"
             :checked="settings.settings.danmakuBold"
             @change="(e: any) => save('danmakuBold', e.target.checked)"
           />
-        </label>
-        <label class="field field--inline">
-          <span>记忆手动选择的弹幕</span>
+        </SettingRow>
+        <SettingRow label="记忆手动选择的弹幕" description="下次播放同一剧集自动恢复">
           <input
             class="switch"
             type="checkbox"
             :checked="settings.settings.danmakuRememberSelection"
             @change="(e: any) => save('danmakuRememberSelection', e.target.checked)"
           />
-        </label>
-        <label class="field field--inline">
-          <span>避让字幕</span>
+        </SettingRow>
+        <SettingRow label="避让字幕" description="弹幕避开字幕区域">
           <input
             class="switch"
             type="checkbox"
             :checked="settings.settings.danmakuAvoidSubtitles"
             @change="(e: any) => save('danmakuAvoidSubtitles', e.target.checked)"
           />
-        </label>
-        <label class="field">
-          <span>底部避让区域</span>
+        </SettingRow>
+        <SettingRow label="底部避让区域" description="底部保留高度" stacked>
           <div class="range-row">
             <input
               type="range"
@@ -2030,16 +1758,358 @@ const danmakuSummary = computed(() => {
             />
             <strong>{{ settings.settings.danmakuBottomReservePct }}%</strong>
           </div>
-        </label>
-      </div>
+        </SettingRow>
+      </SettingsSection>
 
-      <button class="row" @click="togglePanel('shortcuts')">
-        <span>快捷键</span>
-        <Icon icon="lucide:chevron-right" width="16" class="chev" />
-      </button>
-      <div v-if="openPanel === 'shortcuts'" class="panel">
+      <!-- 7. 外部播放器 -->
+      <SettingsSection
+        title="外部播放器"
+        :summary="externalPlayerSummary"
+        :expanded="isExpanded('externalPlayer')"
+        @toggle="toggleSection('externalPlayer')"
+      >
+        <SettingRow label="外部 mpv 播放器" description="用独立 mpv 程序播放">
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.externalMpvEnabled"
+            @change="(e: any) => save('externalMpvEnabled', e.target.checked)"
+          />
+        </SettingRow>
+        <template v-if="settings.settings.externalMpvEnabled">
+          <SettingRow label="mpv 位置" stacked>
+            <div class="path-row">
+              <GlassInput
+                :model-value="settings.settings.externalMpvPath ?? ''"
+                placeholder="例如 C:\\mpv\\mpv.exe"
+                @update:modelValue="(v) => save('externalMpvPath', (String(v).trim() || null) as any)"
+              />
+              <button
+                type="button"
+                class="action-btn"
+                @click="pickExternalExe('externalMpvPath', '选择 mpv.exe')"
+              >
+                <Icon icon="lucide:folder-open" width="15" />
+                <span>选择</span>
+              </button>
+            </div>
+          </SettingRow>
+          <SettingRow label="mpv 使用代理" description="自定义代理时传给 mpv">
+            <input
+              class="switch"
+              type="checkbox"
+              :checked="settings.settings.externalMpvUseProxy"
+              @change="(e: any) => save('externalMpvUseProxy', e.target.checked)"
+            />
+          </SettingRow>
+        </template>
+        <SettingRow label="外部 PotPlayer 播放器">
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.externalPotplayerEnabled"
+            @change="(e: any) => save('externalPotplayerEnabled', e.target.checked)"
+          />
+        </SettingRow>
+        <template v-if="settings.settings.externalPotplayerEnabled">
+          <SettingRow label="PotPlayer 位置" stacked>
+            <div class="path-row">
+              <GlassInput
+                :model-value="settings.settings.externalPotplayerPath ?? ''"
+                placeholder="例如 C:\\Program Files\\DAUM\\PotPlayer\\PotPlayerMini64.exe"
+                @update:modelValue="(v) => save('externalPotplayerPath', (String(v).trim() || null) as any)"
+              />
+              <button
+                type="button"
+                class="action-btn"
+                @click="pickExternalExe('externalPotplayerPath', '选择 PotPlayer')"
+              >
+                <Icon icon="lucide:folder-open" width="15" />
+                <span>选择</span>
+              </button>
+            </div>
+          </SettingRow>
+        </template>
+        <SettingRow label="其他播放器路径" description="以上未开启时生效；留空用系统默认" advanced stacked>
+          <div class="path-row">
+            <GlassInput
+              v-model="externalPlayerPathDraft"
+              placeholder="留空使用系统默认"
+              @change="() => saveExternalPlayerPath()"
+              @blur="() => saveExternalPlayerPath()"
+            />
+            <button type="button" class="action-btn" @click="pickExternalPlayer">
+              <Icon icon="lucide:folder-open" width="15" />
+              <span>选择</span>
+            </button>
+            <button
+              type="button"
+              class="action-btn"
+              :disabled="!settings.settings.externalPlayerPath"
+              @click="externalPlayerPathDraft = ''; saveExternalPlayerPath('')"
+            >
+              <Icon icon="lucide:x" width="15" />
+              <span>清除</span>
+            </button>
+          </div>
+        </SettingRow>
+        <SettingRow label="启动参数" description="支持 {headers} {userAgent} {url} 占位符" advanced stacked>
+          <GlassInput
+            v-model="externalPlayerArgsDraft"
+            placeholder="{headers} {userAgent} {url}"
+            @change="() => saveExternalPlayerArgs()"
+            @blur="() => saveExternalPlayerArgs()"
+          />
+        </SettingRow>
+      </SettingsSection>
+
+      <!-- 8. 下载 -->
+      <SettingsSection
+        title="下载"
+        :summary="downloadDirectorySummary"
+        :expanded="isExpanded('downloads')"
+        @toggle="toggleSection('downloads')"
+      >
+        <SettingRow label="保存目录" description="留空使用默认目录" stacked>
+          <div class="path-row">
+            <GlassInput
+              v-model="downloadDirectoryDraft"
+              placeholder="留空使用默认目录"
+              @change="() => saveDownloadDirectory()"
+              @blur="() => saveDownloadDirectory()"
+            />
+            <button
+              type="button"
+              class="action-btn"
+              :disabled="!canPickDownloadDirectory"
+              @click="pickDownloadDirectory"
+            >
+              <Icon icon="lucide:folder-open" width="15" />
+              <span>选择</span>
+            </button>
+            <button
+              type="button"
+              class="action-btn"
+              :disabled="!canPickDownloadDirectory || downloadDirectoryBusy"
+              @click="openDownloadDirectory"
+            >
+              <Icon icon="lucide:external-link" width="15" />
+              <span>{{ downloadDirectoryBusy ? "打开中" : "打开" }}</span>
+            </button>
+            <button
+              type="button"
+              class="action-btn"
+              :disabled="!settings.settings.downloadDirectory"
+              @click="downloadDirectoryDraft = ''; saveDownloadDirectory('')"
+            >
+              <Icon icon="lucide:x" width="15" />
+              <span>清除</span>
+            </button>
+          </div>
+        </SettingRow>
+        <p v-if="downloadDirectoryStatus" class="status-line">{{ downloadDirectoryStatus }}</p>
+        <SettingRow
+          label="下载中心"
+          description="查看与管理下载任务"
+          clickable
+          @click="openDownloadsCenter"
+        >
+          <span v-if="activeDownloads > 0" class="row-value">{{ activeDownloadsLabel }} 个任务</span>
+          <Icon icon="lucide:chevron-right" width="16" class="row-chev" />
+        </SettingRow>
+      </SettingsSection>
+
+      <!-- 9. 备份与还原 -->
+      <SettingsSection
+        title="备份与还原"
+        :expanded="isExpanded('backup')"
+        @toggle="toggleSection('backup')"
+      >
+        <template v-if="backupAvailable">
+          <SettingRow label="导出配置" description="导出设置、服务器、账号和快捷键">
+            <button class="action-btn" :disabled="backupBusy !== null" @click="exportConfig">
+              <Icon icon="lucide:download" width="15" />
+              <span>{{ backupBusy === "export" ? "导出中" : "导出" }}</span>
+            </button>
+          </SettingRow>
+          <SettingRow label="合并导入" description="与现有配置合并">
+            <button class="action-btn" :disabled="backupBusy !== null" @click="importConfig('merge')">
+              <Icon icon="lucide:upload" width="15" />
+              <span>{{ backupBusy === "import" ? "导入中" : "合并" }}</span>
+            </button>
+          </SettingRow>
+          <SettingRow label="替换导入" description="覆盖当前全部配置">
+            <button
+              class="action-btn action-btn--danger"
+              :disabled="backupBusy !== null"
+              @click="importConfig('replace')"
+            >
+              <Icon icon="lucide:file-warning" width="15" />
+              <span>替换</span>
+            </button>
+          </SettingRow>
+          <p v-if="backupStatus" class="status-line">{{ backupStatus }}</p>
+        </template>
+        <p v-else class="subhint">当前运行环境不支持配置备份与还原。</p>
+      </SettingsSection>
+
+      <!-- 10. 同步（Trakt）：OAuth 授权流缺失，按项目「无占位 UI」约束暂不渲染该 section。 -->
+
+      <!-- 11. 网络 -->
+      <SettingsSection
+        title="网络"
+        :expanded="isExpanded('network')"
+        @toggle="toggleSection('network')"
+      >
+        <SettingRow label="网络代理" description="重启后生效" stacked>
+          <div class="seg">
+            <button
+              type="button"
+              :class="{ active: settings.settings.networkProxyMode === 'none' }"
+              @click="save('networkProxyMode', 'none')"
+            >
+              不使用
+            </button>
+            <button
+              type="button"
+              :class="{ active: settings.settings.networkProxyMode === 'system' }"
+              @click="save('networkProxyMode', 'system')"
+            >
+              跟随系统
+            </button>
+            <button
+              type="button"
+              :class="{ active: settings.settings.networkProxyMode === 'custom' }"
+              @click="save('networkProxyMode', 'custom')"
+            >
+              自定义
+            </button>
+          </div>
+        </SettingRow>
+        <SettingRow
+          v-if="settings.settings.networkProxyMode === 'custom'"
+          label="HTTP 代理地址"
+          description="如 http://127.0.0.1:7897"
+          stacked
+        >
+          <GlassInput
+            placeholder="http://127.0.0.1:7897"
+            :model-value="settings.settings.httpProxyUrl"
+            @update:modelValue="(v) => save('httpProxyUrl', String(v).trim())"
+          />
+        </SettingRow>
+        <SettingRow label="忽略 SSL 证书校验" description="重启后生效；自签证书服务器用">
+          <input
+            class="switch"
+            type="checkbox"
+            :checked="settings.settings.ignoreSslErrors"
+            @change="(e: any) => save('ignoreSslErrors', e.target.checked)"
+          />
+        </SettingRow>
+        <SettingRow label="心跳保号周期（秒）" description="默认 180" advanced stacked>
+          <GlassInput
+            :model-value="String(settings.settings.heartbeatIntervalSecs)"
+            @update:modelValue="(v) => save('heartbeatIntervalSecs', Number(v) || 180)"
+          />
+        </SettingRow>
+        <SettingRow label="线路测活周期（秒）" description="默认 60" advanced stacked>
+          <GlassInput
+            :model-value="String(settings.settings.healthCheckIntervalSecs)"
+            @update:modelValue="(v) => save('healthCheckIntervalSecs', Number(v) || 60)"
+          />
+        </SettingRow>
+        <SettingRow label="线路竞赛超时（ms）" description="默认 3500" advanced stacked>
+          <GlassInput
+            :model-value="String(settings.settings.raceTimeoutMs)"
+            @update:modelValue="(v) => save('raceTimeoutMs', Number(v) || 3500)"
+          />
+        </SettingRow>
+        <SettingRow label="请求超时（ms）" description="默认 15000" advanced stacked>
+          <GlassInput
+            :model-value="String(settings.settings.requestTimeoutMs)"
+            @update:modelValue="(v) => save('requestTimeoutMs', Number(v) || 15000)"
+          />
+        </SettingRow>
+        <SettingRow label="默认 User-Agent" description="线路未单独配置时使用" advanced is-new stacked>
+          <GlassInput
+            :model-value="settings.settings.defaultUserAgent"
+            placeholder="Emby-Player/0.1 (Tauri; libmpv)"
+            @update:modelValue="(v) => save('defaultUserAgent', String(v))"
+          />
+        </SettingRow>
+      </SettingsSection>
+
+      <!-- 12. 快捷键 -->
+      <SettingsSection
+        title="快捷键"
+        :expanded="isExpanded('shortcuts')"
+        @toggle="toggleSection('shortcuts')"
+      >
         <ShortcutsPanel />
-      </div>
+      </SettingsSection>
+
+      <!-- 13. 缓存 -->
+      <SettingsSection
+        title="缓存"
+        :summary="cacheSummary"
+        :expanded="isExpanded('cache')"
+        @toggle="toggleSection('cache')"
+      >
+        <ul v-if="cacheUsage" class="cap-list">
+          <li v-for="entry in cacheUsage.entries" :key="entry.label" class="cap-row cap-row--plain">
+            <div class="cap-row__main">
+              <strong>{{ entry.label }}</strong>
+            </div>
+            <span class="row-value-strong">{{ formatCacheBytes(entry.bytes) }}</span>
+          </li>
+        </ul>
+        <SettingRow label="刷新" description="重新统计缓存占用">
+          <button class="action-btn" :disabled="cacheBusy" @click="refreshCacheUsage">
+            <Icon icon="lucide:refresh-cw" width="15" />
+            <span>刷新</span>
+          </button>
+        </SettingRow>
+        <SettingRow label="清理缓存" description="使用中的缓存重启后释放">
+          <button class="action-btn action-btn--danger" :disabled="cacheBusy" @click="clearCache">
+            <Icon icon="lucide:trash-2" width="15" />
+            <span>{{ cacheBusy ? "清理中" : "清理" }}</span>
+          </button>
+        </SettingRow>
+        <p v-if="cacheStatus" class="status-line">{{ cacheStatus }}</p>
+      </SettingsSection>
+
+      <!-- 14. 关于 -->
+      <SettingsSection
+        title="关于"
+        :summary="`v${appVersion}`"
+        :expanded="isExpanded('about')"
+        @toggle="toggleSection('about')"
+      >
+        <SettingRow label="版本">
+          <strong class="row-value-strong">v{{ appVersion }}</strong>
+        </SettingRow>
+        <SettingRow label="运行壳">
+          <strong class="row-value-strong">{{ runtimeLabel }}</strong>
+        </SettingRow>
+        <SettingRow label="平台">
+          <strong class="row-value-strong">{{ platformLabel }}</strong>
+        </SettingRow>
+        <SettingRow label="服务器数量">
+          <strong class="row-value-strong">{{ serverStore.servers.length }}</strong>
+        </SettingRow>
+        <SettingRow label="当前账号">
+          <strong class="row-value-strong">{{ activeAccountLabel }}</strong>
+        </SettingRow>
+        <SettingRow label="播放核心">
+          <strong class="row-value-strong">{{ mpvBackendLabel }}</strong>
+        </SettingRow>
+        <SettingRow label="备份配置" description="导出 / 导入应用配置" clickable @click="openSection('backup')">
+          <Icon icon="lucide:chevron-right" width="16" class="row-chev" />
+        </SettingRow>
+        <SettingRow label="服务器" description="管理已保存的服务器与线路" clickable @click="openSection('servers')">
+          <Icon icon="lucide:chevron-right" width="16" class="row-chev" />
+        </SettingRow>
+      </SettingsSection>
     </div>
 
     <AddServerDialog v-if="showAdd" @created="onServerCreated" @close="showAdd = false" />
@@ -2070,56 +2140,42 @@ const danmakuSummary = computed(() => {
   padding: 8px var(--content-pad) 32px;
   max-width: 720px;
 }
-.group-title {
-  margin: 18px 0 8px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--fg-tertiary);
-}
-.group-title:first-child {
-  margin-top: 0;
-}
-.row {
-  appearance: none;
-  border: none;
-  background: transparent;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 4px;
-  border-bottom: 1px solid var(--separator);
-  color: var(--fg-primary);
-  font-size: 15px;
-  text-align: left;
-  cursor: pointer;
-}
-.row--static {
-  cursor: default;
-}
-.row:hover:not(.row--static):not(:disabled) {
-  color: var(--accent-hover);
-}
-.value {
+.row-value {
   color: var(--fg-secondary);
-  font-size: 14px;
+  font-size: 13px;
 }
-.chev {
+.row-value-strong {
+  color: var(--fg-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+.row-chev {
   color: var(--fg-tertiary);
 }
-.chev.dim {
-  opacity: 0.5;
+.subhint {
+  margin: 6px 4px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg-tertiary);
 }
-.panel {
-  margin: 4px 0 8px;
-  padding: 14px;
-  border-radius: 14px;
+.path-row {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.path-row :deep(.ginput) {
+  flex: 1;
+  min-width: 180px;
+}
+.color-input {
+  width: 44px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
 }
 .panel__head {
   display: flex;
@@ -2127,11 +2183,38 @@ const danmakuSummary = computed(() => {
   align-items: center;
   font-size: 13px;
   color: var(--fg-secondary);
+  padding: 6px 0 2px;
 }
 .panel__actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+.cap-details {
+  border-top: 1px solid var(--separator);
+  padding-top: 8px;
+}
+.cap-details > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--fg-secondary);
+  font-size: 13px;
+  padding: 8px 0;
+}
+.cap-details[open] > summary {
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+.cap-details__tag {
+  margin-left: 2px;
+  padding: 1px 6px;
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  color: var(--fg-tertiary);
+  font-size: 10px;
+  font-weight: 600;
 }
 .cap-list {
   list-style: none;
@@ -2143,11 +2226,14 @@ const danmakuSummary = computed(() => {
 .cap-row {
   min-width: 0;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 10px 0;
   border-bottom: 1px solid var(--separator);
+}
+.cap-row--plain {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 .cap-row:last-child {
   border-bottom: none;
@@ -2198,70 +2284,6 @@ const danmakuSummary = computed(() => {
   color: var(--danger);
   border-color: rgba(255, 69, 58, 0.35);
 }
-.cap-row__action {
-  min-width: 34px;
-  padding: 0 9px;
-  justify-content: center;
-}
-.about-panel {
-  gap: 14px;
-}
-.about-hero {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.about-hero__icon {
-  width: 42px;
-  height: 42px;
-  border-radius: 8px;
-  display: grid;
-  place-items: center;
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-.about-hero strong,
-.about-hero span {
-  display: block;
-}
-.about-hero strong {
-  color: var(--fg-primary);
-  font-size: 16px;
-}
-.about-hero span {
-  margin-top: 2px;
-  color: var(--fg-tertiary);
-  font-size: 12px;
-}
-.about-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 16px;
-  border-top: 1px solid var(--separator);
-}
-.about-cell {
-  min-width: 0;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--separator);
-}
-.about-cell span,
-.about-cell strong {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.about-cell span {
-  color: var(--fg-tertiary);
-  font-size: 11px;
-}
-.about-cell strong {
-  margin-top: 4px;
-  color: var(--fg-primary);
-  font-size: 13px;
-  font-weight: 700;
-}
 .action-btn {
   appearance: none;
   border: 1px solid var(--glass-border);
@@ -2280,8 +2302,11 @@ const danmakuSummary = computed(() => {
   border-color: var(--accent);
   color: var(--accent);
 }
-.action-btn:disabled,
-.row:disabled {
+.action-btn--danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.action-btn:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -2290,11 +2315,19 @@ const danmakuSummary = computed(() => {
   font-size: 12px;
   line-height: 1.5;
   word-break: break-all;
+  padding: 4px 4px 0;
+}
+.status-line.error {
+  color: var(--danger);
 }
 .empty {
   font-size: 13px;
   color: var(--fg-tertiary);
   padding: 8px 0;
+}
+.servers-block {
+  display: flex;
+  flex-direction: column;
 }
 .server {
   padding: 12px 0;
@@ -2302,7 +2335,7 @@ const danmakuSummary = computed(() => {
 }
 .panel__head + .server {
   border-top: none;
-  padding-top: 0;
+  padding-top: 4px;
 }
 .server__top {
   display: flex;
@@ -2456,11 +2489,6 @@ const danmakuSummary = computed(() => {
   font-size: 12px;
   color: var(--fg-secondary);
 }
-.field--readonly strong {
-  color: var(--fg-primary);
-  font-size: 13px;
-  font-weight: 700;
-}
 .plain-input,
 .plain-textarea {
   width: 100%;
@@ -2495,9 +2523,6 @@ const danmakuSummary = computed(() => {
   .server-edit__toggle {
     justify-content: space-between;
   }
-}
-.status-line.error {
-  color: var(--danger);
 }
 .range-row {
   display: grid;
@@ -2534,6 +2559,7 @@ const danmakuSummary = computed(() => {
   color: var(--accent);
 }
 input[type="range"] {
+  width: 100%;
   accent-color: var(--accent);
 }
 .switch {
