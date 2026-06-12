@@ -137,7 +137,7 @@ function back() {
   transition: background 160ms var(--easing-glide), color 160ms var(--easing-glide);
 }
 .round-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-hover);
   color: var(--fg-primary);
 }
 
@@ -199,7 +199,7 @@ function back() {
   cursor: pointer;
 }
 .search__clear:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-hover);
   color: var(--fg-primary);
 }
 

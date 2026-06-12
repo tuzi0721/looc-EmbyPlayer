@@ -121,7 +121,7 @@ public:
         QOpenGLFramebufferObject *fbo = framebufferObject();
         mpv_opengl_fbo mpfbo{static_cast<int>(fbo->handle()), fbo->width(),
                              fbo->height(), 0};
-        int flip_y = 1;
+        int flip_y = 0;
         mpv_render_param params[]{
             {MPV_RENDER_PARAM_OPENGL_FBO, &mpfbo},
             {MPV_RENDER_PARAM_FLIP_Y, &flip_y},
@@ -201,6 +201,11 @@ void MpvObject::initMpv() {
     mpv_observe_property(m_mpv, 0, "duration", MPV_FORMAT_DOUBLE);
     mpv_observe_property(m_mpv, 0, "pause", MPV_FORMAT_FLAG);
     mpv_observe_property(m_mpv, 0, "speed", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, 0, "mute", MPV_FORMAT_FLAG);
+    // paused-for-cache drives the buffering spinner: true only while playback is
+    // stalled waiting on the cache (so live streams don't spin forever the way a
+    // duration<=0 check did).
+    mpv_observe_property(m_mpv, 0, "paused-for-cache", MPV_FORMAT_FLAG);
 
     mpv_set_wakeup_callback(m_mpv, wakeup, this);
 }
@@ -269,6 +274,13 @@ void MpvObject::handlePropertyChange(mpv_event_property *prop) {
         m_speed = *static_cast<double *>(prop->data);
         emit speedChanged();
         m_reporter.speed(m_speed);
+    } else if (name == QLatin1String("mute") && prop->format == MPV_FORMAT_FLAG) {
+        m_muted = *static_cast<int *>(prop->data) != 0;
+        emit mutedChanged();
+    } else if (name == QLatin1String("paused-for-cache") &&
+               prop->format == MPV_FORMAT_FLAG) {
+        m_buffering = *static_cast<int *>(prop->data) != 0;
+        emit bufferingChanged();
     }
 }
 

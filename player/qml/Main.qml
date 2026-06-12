@@ -17,6 +17,10 @@ Window {
     id: win
     width: 1280
     height: 720
+    // Floor the window size so the bottom control cluster never collapses /
+    // clips: the transport + right cluster need ~720px to lay out on one row.
+    minimumWidth: 720
+    minimumHeight: 420
     visible: true
     color: "black"
     title: qsTr("Hills Player")
@@ -113,6 +117,9 @@ Window {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton
         hoverEnabled: true
+        // Hide the pointer together with the chrome during playback; any move
+        // calls reveal() which restores both.
+        cursorShape: win.controlsVisible ? Qt.ArrowCursor : Qt.BlankCursor
         onClicked: mpv.togglePause()
         onDoubleClicked: win.toggleFullScreen()
         onPositionChanged: win.reveal()
@@ -173,8 +180,13 @@ Window {
                 font.pixelSize: danmakuLayer.fontPixelSize
                 font.bold: true
                 opacity: danmakuLayer.opacityValue
-                x: (danmakuLayer.width - implicitWidth) / 2
-                y: atTop ? 8 : danmakuLayer.height - implicitHeight - 90
+                // Cap width + elide so an over-long comment can't run off-screen,
+                // and lift the bottom row clear of the 110px control bar.
+                width: Math.min(implicitWidth, danmakuLayer.width - 32)
+                elide: Text.ElideRight
+                horizontalAlignment: Text.AlignHCenter
+                x: (danmakuLayer.width - width) / 2
+                y: atTop ? 8 : danmakuLayer.height - implicitHeight - 130
                 Timer { interval: 4500; running: true; onTriggered: s.destroy() }
             }
         }
@@ -218,14 +230,21 @@ Window {
     Timer {
         id: hideTimer
         interval: 2800
+        // Keep the chrome up while ANY menu (including the secondary zoom /
+        // anime4k / subtitle-settings popups) is open, else it fades mid-pick.
         onTriggered: if (!mpv.paused && !settingsMenu.visible && !speedMenu.visible
-                         && !audioMenu.visible && !subMenu.visible)
+                         && !audioMenu.visible && !subMenu.visible
+                         && !zoomMenu.visible && !anime4kMenu.visible
+                         && !subSettingsMenu.visible)
                          win.controlsVisible = false;
     }
 
     BusyIndicator {
         anchors.centerIn: parent
-        running: mpv.duration <= 0
+        // Spin only while actually buffering (paused-for-cache); the old
+        // duration<=0 check spun forever on live streams and not at all on
+        // mid-playback rebuffering.
+        running: mpv.buffering
         visible: running
     }
 
@@ -255,40 +274,74 @@ Window {
         property int entryWidth: 220
         padding: 6
         background: Rectangle { color: win.menuBg; radius: 10; border.color: "#22ffffff" }
-        contentItem: Column {
-            spacing: 2
-            Repeater {
-                model: pm.entries
-                delegate: Rectangle {
-                    required property var modelData
-                    width: pm.entryWidth
-                    height: 36
-                    radius: 6
-                    color: rowMa.containsMouse ? win.menuHover : "transparent"
-                    Row {
-                        anchors.fill: parent
-                        anchors.leftMargin: 12
-                        anchors.rightMargin: 12
-                        spacing: 8
-                        Text {
+        // Cap height to the window and scroll when the list is taller, so a long
+        // audio/subtitle track list can't overflow off-screen (popupAbove only
+        // clamps the origin, not the extent).
+        contentItem: Flickable {
+            implicitWidth: pm.entryWidth
+            implicitHeight: Math.min(contentHeight, win.height - 32)
+            contentHeight: menuCol.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+            Column {
+                id: menuCol
+                width: pm.entryWidth
+                spacing: 2
+                Repeater {
+                    model: pm.entries
+                    delegate: Rectangle {
+                        required property var modelData
+                        width: pm.entryWidth
+                        height: 36
+                        radius: 6
+                        color: rowMa.containsMouse ? win.menuHover : "transparent"
+                        Row {
+                            anchors.fill: parent
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 12
+                            spacing: 8
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: modelData.checked === true ? "\u2713" : " "
+                                color: win.accent
+                                font.pixelSize: 13
+                                width: 14
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: modelData.label
+                                color: "white"
+                                font.pixelSize: 13
+                            }
+                        }
+                        // PRO badge for premium-tier entries (reference parity
+                        // with HillsLite; cosmetic label, gating is a separate
+                        // IAP feature). Shown only when entry.pro === true.
+                        Rectangle {
+                            visible: modelData.pro === true
                             anchors.verticalCenter: parent.verticalCenter
-                            text: modelData.checked === true ? "\u2713" : " "
+                            anchors.right: parent.right
+                            anchors.rightMargin: 12
+                            width: proBadge.implicitWidth + 12
+                            height: 16
+                            radius: 8
                             color: win.accent
-                            font.pixelSize: 13
-                            width: 14
+                            Text {
+                                id: proBadge
+                                anchors.centerIn: parent
+                                text: "PRO"
+                                color: "white"
+                                font.pixelSize: 9
+                                font.bold: true
+                            }
                         }
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: modelData.label
-                            color: "white"
-                            font.pixelSize: 13
+                        MouseArea {
+                            id: rowMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: { modelData.trigger(); pm.close(); }
                         }
-                    }
-                    MouseArea {
-                        id: rowMa
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        onClicked: { modelData.trigger(); pm.close(); }
                     }
                 }
             }
@@ -346,6 +399,9 @@ Window {
             anchors { left: parent.left; right: parent.right; top: parent.top }
             height: 56
             opacity: win.controlsVisible ? 1 : 0
+            // When faded out the bar must also stop receiving input — opacity:0
+            // alone keeps buttons clickable. Moving the mouse re-reveals it.
+            enabled: win.controlsVisible
             Behavior on opacity { NumberAnimation { duration: 180 } }
             gradient: Gradient {
                 GradientStop { position: 0.0; color: "#cc000000" }
@@ -438,12 +494,19 @@ Window {
                     delegate: Rectangle {
                         required property var modelData
                         objectName: modelData.name
-                        width: 46
+                        // Minimize/maximize are meaningless in fullscreen — keep
+                        // only Close there (Esc also exits fullscreen).
+                        visible: !(win.visibility === Window.FullScreen
+                                   && modelData.name !== "btnClose")
+                        width: visible ? 46 : 0
                         height: topBar.height
                         color: wcMa.containsMouse ? modelData.hover : "transparent"
                         Image {
                             anchors.centerIn: parent
-                            source: modelData.icon
+                            // btnMax tracks the real window state (maximize ↔ restore).
+                            source: (modelData.name === "btnMax"
+                                     && win.visibility === Window.Maximized)
+                                    ? "icons/restore.svg" : modelData.icon
                             sourceSize.width: 18
                             sourceSize.height: 18
                             smooth: true
@@ -469,6 +532,7 @@ Window {
             anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
             height: 110
             opacity: win.controlsVisible ? 1 : 0
+            enabled: win.controlsVisible
             Behavior on opacity { NumberAnimation { duration: 180 } }
             gradient: Gradient {
                 GradientStop { position: 0.0; color: "#00000000" }
@@ -483,10 +547,19 @@ Window {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 10
-                    Label { text: win.fmt(mpv.position); color: "white"; font.pixelSize: 12 }
+                    // While scrubbing show the drag target, not the live position,
+                    // so the readout matches where the thumb will seek to on release.
+                    Label {
+                        text: win.fmt(seekbar.pressed ? seekbar.value : mpv.position)
+                        color: "white"
+                        font.pixelSize: 12
+                    }
                     Slider {
                         id: seekbar
                         Layout.fillWidth: true
+                        // Don't take key focus, else its built-in arrow handling
+                        // fires alongside the global Left/Right seek shortcuts.
+                        focusPolicy: Qt.NoFocus
                         from: 0
                         to: Math.max(1, mpv.duration)
                         Connections {
@@ -544,14 +617,11 @@ Window {
                     }
                     CtrlButton {
                         id: volBtn
-                        property bool muted: false
-                        iconSource: muted ? "icons/volume-muted.svg" : "icons/volume.svg"
+                        // Bind to the observed mpv mute state so the glyph stays
+                        // correct no matter who toggles it (UI, key, host IPC).
+                        iconSource: mpv.muted ? "icons/volume-muted.svg" : "icons/volume.svg"
                         label: qsTr("音量/静音")
-                        onClicked: {
-                            var m = mpv.getProperty("mute") === true;
-                            mpv.setProperty("mute", m ? "no" : "yes");
-                            volBtn.muted = !m;
-                        }
+                        onClicked: mpv.setProperty("mute", mpv.muted ? "no" : "yes")
                     }
                     Slider {
                         id: volSlider
@@ -636,8 +706,11 @@ Window {
     // ── popup menus ──────────────────────────────────────────────────────────
     function popupAbove(menu, anchorItem) {
         var p = anchorItem.mapToItem(controlsLayer, 0, 0);
-        menu.x = Math.min(p.x, win.width - menu.width - 8);
-        menu.y = p.y - menu.implicitHeight - 8;
+        var w = menu.width > 0 ? menu.width : menu.implicitWidth;
+        // Clamp to all four edges so a tall menu or a left-edge anchor never
+        // pushes the popup off-screen (was only clamped against the right edge).
+        menu.x = Math.max(8, Math.min(p.x, win.width - w - 8));
+        menu.y = Math.max(8, p.y - menu.implicitHeight - 8);
         menu.open();
     }
 
@@ -707,8 +780,9 @@ Window {
                   trigger: function () { zoomMenu.popup(gearBtn); } },
                 { label: qsTr("Anime4K  ▸"), checked: mpv.anime4k.preset !== "Off"
                                                        && mpv.anime4k.preset !== "",
+                  pro: true,
                   trigger: function () { anime4kMenu.popup(gearBtn); } },
-                { label: qsTr("跳过片头/片尾"), checked: false,
+                { label: qsTr("跳过片头/片尾"), checked: false, pro: true,
                   trigger: function () { win.hostAction("skip-intro-settings", qsTr("跳过片头/片尾")); } },
                 { label: qsTr("字幕设置  ▸"), checked: false,
                   trigger: function () { subSettingsMenu.popup(gearBtn); } },
@@ -834,5 +908,17 @@ Window {
             win.volumeValue = Math.max(0, win.volumeValue - 5);
             mpv.setVolume(win.volumeValue);
         }
+    }
+    Shortcut {
+        sequences: ["m", "M"]
+        onActivated: mpv.setProperty("mute", mpv.muted ? "no" : "yes")
+    }
+    Shortcut {
+        sequences: [">"]
+        onActivated: { mpv.command(["playlist-next"]); mpv.uiAction("next-episode"); }
+    }
+    Shortcut {
+        sequences: ["<"]
+        onActivated: { mpv.command(["playlist-prev"]); mpv.uiAction("prev-episode"); }
     }
 }

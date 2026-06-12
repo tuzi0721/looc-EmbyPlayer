@@ -94,11 +94,14 @@ void applyWindow(QQuickWindow *win, const ArgvOptions &opt) {
 #ifdef HILLS_HAVE_QWINDOWKIT
     auto *agent = new QWK::QuickWindowAgent(win);
     agent->setup(win);
-    // The QML top bar is the draggable title region; window-control buttons are
-    // marked hit-test-visible so clicks reach them instead of dragging the window.
+    // The QML top bar is the draggable title region; every interactive control
+    // that lives inside it must be marked hit-test-visible, otherwise QWindowKit
+    // treats clicks on it as window drags. Besides the min/max/close buttons this
+    // also covers the back and pin buttons on the left/right of the title bar.
     if (auto *tb = win->findChild<QQuickItem *>(QStringLiteral("titleBar")))
         agent->setTitleBar(tb);
-    for (const QString &n : {QStringLiteral("btnMin"), QStringLiteral("btnMax"),
+    for (const QString &n : {QStringLiteral("btnBack"), QStringLiteral("btnPin"),
+                             QStringLiteral("btnMin"), QStringLiteral("btnMax"),
                              QStringLiteral("btnClose")}) {
         if (auto *b = win->findChild<QQuickItem *>(n))
             agent->setHitTestVisible(b, true);

@@ -238,7 +238,7 @@ onBeforeUnmount(() => {
 }
 .select {
   appearance: none;
-  background: rgba(28, 28, 32, 0.92);
+  background: var(--glass-bg-strong);
   border: 1px solid var(--glass-border);
   color: var(--fg-primary);
   border-radius: 10px;
@@ -266,6 +266,6 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 .iconbtn:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-hover);
 }
 </style>

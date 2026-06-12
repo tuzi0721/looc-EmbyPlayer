@@ -125,7 +125,7 @@ async function sendMessage() {
         <aside class="sidebar glass">
           <header class="side-head">
             <span>在线会话</span>
-            <GlassButton size="sm" variant="ghost" @click="refresh">
+            <GlassButton size="sm" variant="ghost" aria-label="刷新会话" title="刷新会话" @click="refresh">
               <Icon icon="lucide:refresh-cw" width="14" />
             </GlassButton>
           </header>
@@ -176,16 +176,16 @@ async function sendMessage() {
           <div v-else class="now dim">空闲</div>
 
           <div class="controls">
-            <GlassButton variant="ghost" @click="send('Rewind')">
+            <GlassButton variant="ghost" aria-label="快退" title="快退" @click="send('Rewind')">
               <Icon icon="lucide:rewind" width="18" />
             </GlassButton>
-            <GlassButton variant="primary" size="lg" @click="send('PlayPause')">
+            <GlassButton variant="primary" size="lg" aria-label="播放/暂停" title="播放/暂停" @click="send('PlayPause')">
               <Icon icon="lucide:play-pause" width="20" />
             </GlassButton>
-            <GlassButton variant="ghost" @click="send('FastForward')">
+            <GlassButton variant="ghost" aria-label="快进" title="快进" @click="send('FastForward')">
               <Icon icon="lucide:fast-forward" width="18" />
             </GlassButton>
-            <GlassButton variant="ghost" @click="send('Stop')">
+            <GlassButton variant="ghost" aria-label="停止" title="停止" @click="send('Stop')">
               <Icon icon="lucide:square" width="18" />
             </GlassButton>
           </div>
@@ -232,8 +232,10 @@ async function sendMessage() {
 }
 .content {
   flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 280px 1fr;
+  grid-template-rows: minmax(0, 1fr);
   gap: 18px;
   padding: 20px var(--content-pad) 40px;
   overflow: hidden;
@@ -250,6 +252,7 @@ async function sendMessage() {
 .sidebar {
   border-radius: 18px;
   padding: 12px;
+  min-height: 0;
   overflow-y: auto;
 }
 .side-head {
@@ -278,10 +281,10 @@ async function sendMessage() {
   transition: background 160ms;
 }
 .sidebar li:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-subtle);
 }
 .sidebar li.active {
-  background: rgba(10, 132, 255, 0.18);
+  background: var(--accent-soft);
 }
 .li__name {
   display: flex;
@@ -304,6 +307,7 @@ async function sendMessage() {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  min-height: 0;
   overflow-y: auto;
 }
 .device h2 {
@@ -327,7 +331,7 @@ async function sendMessage() {
 .bar {
   margin-top: 10px;
   height: 6px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-subtle);
   border-radius: 999px;
   overflow: hidden;
   cursor: pointer;
@@ -352,7 +356,7 @@ async function sendMessage() {
   flex: 1;
 }
 .message {
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid var(--separator);
   padding-top: 14px;
   display: flex;
   flex-direction: column;
@@ -368,8 +372,8 @@ async function sendMessage() {
 }
 .message input,
 .message textarea {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-subtle);
+  border: 1px solid var(--glass-border);
   color: var(--fg-primary);
   border-radius: 10px;
   padding: 8px 10px;
@@ -385,7 +389,7 @@ async function sendMessage() {
   font-size: 10px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-hover);
   color: var(--fg-secondary);
   font-weight: 700;
   text-transform: uppercase;

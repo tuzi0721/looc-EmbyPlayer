@@ -161,7 +161,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
           />
           <Icon v-if="searching" icon="lucide:loader" width="14" class="spin" />
         </label>
-        <button type="button" class="iconbtn" :disabled="loading" title="刷新" @click="loadAggregate()">
+        <button type="button" class="iconbtn" :disabled="loading" title="刷新" aria-label="刷新" @click="loadAggregate()">
           <Icon icon="lucide:refresh-cw" width="16" :class="{ spin: loading }" />
         </button>
       </div>
@@ -241,7 +241,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
         <section v-if="favoriteItems.length" class="aggregate-section">
           <header class="section-head">
             <h2>收藏</h2>
-            <button type="button" class="link-btn" @click="gotoFavorites">
+            <button type="button" class="link-btn" aria-label="查看全部收藏" title="查看全部收藏" @click="gotoFavorites">
               <Icon icon="lucide:arrow-right" width="13" />
             </button>
           </header>
@@ -260,7 +260,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
         <section v-if="historyItems.length" class="aggregate-section">
           <header class="section-head">
             <h2>最近看过</h2>
-            <button type="button" class="link-btn" @click="gotoHistory">
+            <button type="button" class="link-btn" aria-label="查看全部历史" title="查看全部历史" @click="gotoHistory">
               <Icon icon="lucide:arrow-right" width="13" />
             </button>
           </header>
@@ -348,7 +348,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
   padding: 0 10px;
   border: 1px solid var(--separator);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-subtle);
   color: var(--fg-tertiary);
 }
 .search input {
@@ -377,7 +377,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
   height: 36px;
   border: 1px solid var(--separator);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-subtle);
   color: var(--fg-secondary);
   display: inline-flex;
   align-items: center;
@@ -387,7 +387,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
 .link-btn:hover,
 .retry:hover {
   color: var(--fg-primary);
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-hover);
 }
 .iconbtn:disabled {
   cursor: progress;
@@ -414,15 +414,16 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
 }
 .tabs button:hover {
   color: var(--fg-primary);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-hover);
 }
 .tabs button.active {
   color: var(--accent);
-  border-color: rgba(10, 132, 255, 0.26);
-  background: rgba(10, 132, 255, 0.14);
+  border-color: var(--accent-soft);
+  background: var(--accent-soft);
 }
 .aggregate__body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 8px var(--content-pad) 40px;
 }
@@ -451,7 +452,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
   height: 28px;
   border: 1px solid var(--separator);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-subtle);
   color: var(--fg-secondary);
   display: inline-flex;
   align-items: center;
@@ -500,7 +501,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadAggregate());
   padding: 0 13px;
   border: 1px solid var(--glass-border);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-subtle);
   color: var(--fg-primary);
   font-size: 13px;
 }

@@ -27,6 +27,9 @@ release-electron
 /player/build/
 /src-tauri/resources/player/
 
+# Local smoke-test / dev artifacts (screenshots, captures, dev-server logs)
+.tmp/
+
 # Logs
 *.log
 logs/

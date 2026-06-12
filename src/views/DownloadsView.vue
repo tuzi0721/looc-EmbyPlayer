@@ -340,6 +340,7 @@ function statusLabel(s: DownloadStatus) {
 }
 .content {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 20px var(--content-pad) 40px;
   display: flex;
@@ -426,7 +427,7 @@ function statusLabel(s: DownloadStatus) {
   margin-top: 10px;
   width: 100%;
   height: 4px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-subtle);
   border-radius: 999px;
   overflow: hidden;
 }

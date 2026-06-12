@@ -28,6 +28,8 @@ class MpvObject : public QQuickFramebufferObject {
     Q_PROPERTY(double position READ position NOTIFY positionChanged)
     Q_PROPERTY(bool paused READ paused NOTIFY pausedChanged)
     Q_PROPERTY(double speed READ speed NOTIFY speedChanged)
+    Q_PROPERTY(bool muted READ muted NOTIFY mutedChanged)
+    Q_PROPERTY(bool buffering READ buffering NOTIFY bufferingChanged)
     Q_PROPERTY(Anime4K *anime4k READ anime4k CONSTANT)
 
 public:
@@ -43,6 +45,8 @@ public:
     double position() const { return m_position; }
     bool paused() const { return m_paused; }
     double speed() const { return m_speed; }
+    bool muted() const { return m_muted; }
+    bool buffering() const { return m_buffering; }
 
     // ── Control surface (argv bootstrap, QML UI T9b, and the stdin control
     // channel T9c all drive these) ──────────────────────────────────────────
@@ -77,6 +81,8 @@ signals:
     void positionChanged();
     void pausedChanged();
     void speedChanged();
+    void mutedChanged();
+    void bufferingChanged();
     void fileLoaded();
     void endFile(const QString &reason);
     void onUpdate(); // emitted from the mpv render thread; queued to update()
@@ -98,6 +104,8 @@ private:
     double m_position = 0.0;
     bool m_paused = false;
     double m_speed = 1.0;
+    bool m_muted = false;
+    bool m_buffering = false;
     qint64 m_lastTimePosEmitMs = 0;
 
     friend class MpvRenderer;

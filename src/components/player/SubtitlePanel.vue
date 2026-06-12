@@ -262,13 +262,13 @@ onMounted(() => {
 
 <template>
   <transition name="slide-right">
-    <aside v-if="visible" class="sub-panel glass glass-strong">
+    <aside v-if="visible" class="sub-panel">
       <header class="head">
         <h3>
           <Icon icon="lucide:captions" width="16" />
           字幕
         </h3>
-        <button class="iconbtn" @click="emit('close')" aria-label="Close">
+        <button class="iconbtn" @click="emit('close')" aria-label="关闭字幕面板" title="关闭">
           <Icon icon="lucide:x" width="18" />
         </button>
       </header>
@@ -276,7 +276,7 @@ onMounted(() => {
       <section class="block">
         <div class="row-head">
           <span>当前轨道</span>
-          <button class="ghost" :disabled="loading" @click="refresh">
+          <button class="ghost" :disabled="loading" aria-label="刷新字幕轨道" title="刷新" @click="refresh">
             <Icon :icon="loading ? 'lucide:loader' : 'lucide:refresh-cw'" width="13"
               :class="{ spin: loading }" />
           </button>
@@ -298,6 +298,7 @@ onMounted(() => {
             <button
               class="micro"
               :title="'移除'"
+              aria-label="移除字幕"
               @click.stop="player.removeSubtitle(t.id)"
             >
               <Icon icon="lucide:trash-2" width="12" />
@@ -384,7 +385,7 @@ onMounted(() => {
             v-model="onlineQuery"
             @keydown.enter="searchOnline"
           />
-          <button class="micro" :disabled="onlineLoading" @click="searchOnline">
+          <button class="micro" :disabled="onlineLoading" aria-label="搜索在线字幕" title="搜索" @click="searchOnline">
             <Icon icon="lucide:search" width="13" />
           </button>
         </div>
@@ -402,7 +403,7 @@ onMounted(() => {
                 {{ [result.language, result.format, result.releaseSite].filter(Boolean).join(" · ") || "ASSRT" }}
               </span>
             </span>
-            <button class="micro" :disabled="onlineResolvingId === result.id" @click.stop="attachOnline(result)">
+            <button class="micro" :disabled="onlineResolvingId === result.id" aria-label="添加此字幕" title="添加" @click.stop="attachOnline(result)">
               <Icon :icon="onlineResolvingId === result.id ? 'lucide:loader' : 'lucide:plus'" width="12"
                 :class="{ spin: onlineResolvingId === result.id }" />
             </button>
@@ -417,13 +418,13 @@ onMounted(() => {
           <button class="ghost" @click="resetDelay">归零</button>
         </div>
         <div class="delay-row">
-          <button class="micro" @click="nudgeDelay(-1000)">
+          <button class="micro" aria-label="字幕延迟 -1 秒" title="-1s" @click="nudgeDelay(-1000)">
             <Icon icon="lucide:chevron-first" width="13" />
           </button>
           <button class="micro" @click="nudgeDelay(-100)">−0.1s</button>
           <span class="delay-value">{{ (delay / 1000).toFixed(2) }}s</span>
           <button class="micro" @click="nudgeDelay(100)">+0.1s</button>
-          <button class="micro" @click="nudgeDelay(1000)">
+          <button class="micro" aria-label="字幕延迟 +1 秒" title="+1s" @click="nudgeDelay(1000)">
             <Icon icon="lucide:chevron-last" width="13" />
           </button>
         </div>
@@ -558,6 +559,20 @@ onMounted(() => {
   gap: 14px;
   overflow-y: auto;
   z-index: 8;
+  /* Player chrome: this panel overlays the always-black video, so it stays dark
+     in both app themes (consistent with the player's other popups). Redefine the
+     palette tokens locally so descendant var(--fg-*)/var(--glass-border) resolve
+     to dark values even when the app is in light theme. */
+  --fg-primary: rgba(255, 255, 255, 0.95);
+  --fg-secondary: rgba(255, 255, 255, 0.66);
+  --fg-tertiary: rgba(255, 255, 255, 0.45);
+  --glass-border: rgba(255, 255, 255, 0.10);
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(24, 24, 28, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
 }
 .head {
   display: flex;

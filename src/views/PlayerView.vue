@@ -1016,6 +1016,7 @@ function syncHtmlVideoState() {
 
 function destroyHtmlPlayback() {
   stopHtmlProgressReporter();
+  clearHtmlLoadWatchdog();
   hls?.destroy();
   hls = null;
   const video = videoEl.value;
@@ -1143,6 +1144,7 @@ async function startHtmlPlayback(
     video.src = source.streamUrl;
   }
 
+  armHtmlLoadWatchdog();
   try {
     await video.play();
   } catch (error) {
@@ -1173,6 +1175,7 @@ async function startDirectHtmlPlayback(startMs = 0) {
   video.muted = htmlMuted.value;
   video.playbackRate = htmlSpeed.value;
 
+  armHtmlLoadWatchdog();
   try {
     await video.play();
   } catch (error) {
@@ -1185,6 +1188,7 @@ async function startDirectHtmlPlayback(startMs = 0) {
 }
 
 function onVideoLoadedMetadata() {
+  clearHtmlLoadWatchdog();
   const video = videoEl.value;
   if (!video) return;
   if (pendingStartSeconds != null && Number.isFinite(video.duration)) {
@@ -1196,6 +1200,7 @@ function onVideoLoadedMetadata() {
 
 function onVideoFrame() {
   htmlHasFrame.value = true;
+  clearHtmlLoadWatchdog();
   syncHtmlVideoState();
 }
 
@@ -1204,6 +1209,29 @@ function onVideoError() {
   const message = video?.error?.message || "视频解码或网络加载失败";
   errorText.value = message;
   showControls.value = true;
+  clearHtmlLoadWatchdog();
+}
+
+let htmlLoadWatchdog: number | null = null;
+function clearHtmlLoadWatchdog() {
+  if (htmlLoadWatchdog != null) {
+    window.clearTimeout(htmlLoadWatchdog);
+    htmlLoadWatchdog = null;
+  }
+}
+// Surface an error instead of spinning forever when a stream stalls (e.g. a
+// proxied 500 or an unreachable source that never fires a terminal `error`).
+function armHtmlLoadWatchdog() {
+  clearHtmlLoadWatchdog();
+  htmlLoadWatchdog = window.setTimeout(() => {
+    htmlLoadWatchdog = null;
+    if (htmlHasFrame.value || errorText.value) return;
+    const video = videoEl.value;
+    // Metadata loaded => source is reachable, just buffering: don't false-error.
+    if (video && video.readyState >= HTMLMediaElement.HAVE_METADATA) return;
+    errorText.value = "加载超时：未能获取视频流，可能是源不可用、链路超时或网络问题。";
+    showControls.value = true;
+  }, 30000);
 }
 
 function onVideoEnded() {
@@ -2805,8 +2833,9 @@ onBeforeUnmount(async () => {
             <button
               class="iconbtn"
               :class="{ active: alwaysOnTop }"
-              :title="alwaysOnTop ? '取消置顶' : '置顶'"
-              @click="toggleAlwaysOnTop"
+            :title="alwaysOnTop ? '取消置顶' : '置顶'"
+            :aria-label="alwaysOnTop ? '取消置顶' : '置顶'"
+            @click="toggleAlwaysOnTop"
             >
               <Icon icon="lucide:pin" width="18" />
             </button>
@@ -2816,7 +2845,7 @@ onBeforeUnmount(async () => {
     </transition>
 
     <transition name="fade">
-      <footer v-if="showControls && !overlayActive" class="player__bottom">
+      <footer v-if="showControls && !overlayActive && !errorText" class="player__bottom">
         <div class="bar">
           <span class="time">{{ fmt(positionMs) }}</span>
           <div class="bar__slider">
@@ -2842,6 +2871,7 @@ onBeforeUnmount(async () => {
               :value="isScrubbing ? scrubPct : progressPct"
               :disabled="!seekAvailable"
               :title="seekUnavailableTitle"
+              aria-label="播放进度"
               @input="onScrubInput"
               @change="onScrubCommit"
             />
@@ -2858,6 +2888,7 @@ onBeforeUnmount(async () => {
               data-hide-below="medium"
               :disabled="player.queueIndex <= 0"
               title="上一集"
+              aria-label="上一集"
               @click="playPrevTrack"
             >
               <Icon icon="lucide:skip-back" width="20" />
@@ -2867,6 +2898,7 @@ onBeforeUnmount(async () => {
               data-control="seek-back"
               :disabled="!seekAvailable"
               :title="seekAvailable ? `后退 ${settings.settings.seekBackwardSeconds} 秒` : seekUnavailableTitle"
+              :aria-label="`后退 ${settings.settings.seekBackwardSeconds || 10} 秒`"
               @click="nudgeSeek(-(settings.settings.seekBackwardSeconds || 10))"
             >
               <Icon icon="lucide:rotate-ccw" width="19" />
@@ -2886,6 +2918,7 @@ onBeforeUnmount(async () => {
               data-control="seek-forward"
               :disabled="!seekAvailable"
               :title="seekAvailable ? `前进 ${settings.settings.seekForwardSeconds} 秒` : seekUnavailableTitle"
+              :aria-label="`前进 ${settings.settings.seekForwardSeconds || 10} 秒`"
               @click="nudgeSeek(settings.settings.seekForwardSeconds || 10)"
             >
               <Icon icon="lucide:rotate-cw" width="19" />
@@ -2897,6 +2930,7 @@ onBeforeUnmount(async () => {
               data-hide-below="medium"
               :disabled="player.queueIndex + 1 >= player.queue.length"
               title="下一集"
+              aria-label="下一集"
               @click="playNextTrack"
             >
               <Icon icon="lucide:skip-forward" width="20" />
@@ -2906,6 +2940,7 @@ onBeforeUnmount(async () => {
               data-control="mute-toggle"
               data-hide-below="small"
               title="音量"
+              aria-label="音量/静音"
               @click="toggleMute"
             >
               <Icon icon="lucide:volume-2" width="20" />
@@ -2919,6 +2954,7 @@ onBeforeUnmount(async () => {
               data-hide-below="wide"
               :value="speed"
               title="倍速"
+              aria-label="倍速"
               @change="(e: any) => setSpeed(Number(e.target.value))"
             >
               <option :value="0.5">0.5x</option>
@@ -2935,6 +2971,7 @@ onBeforeUnmount(async () => {
               data-hide-below="wide"
               :disabled="screenshotBusy"
               :title="screenshotBusy ? '截图中' : '截图'"
+              :aria-label="screenshotBusy ? '截图中' : '截图'"
               @click="takeScreenshot"
             >
               <Icon
@@ -2955,6 +2992,7 @@ onBeforeUnmount(async () => {
                 :class="{ active: sourceMenuOpen }"
                 :disabled="playbackSwitching"
                 :title="playbackSwitching ? '切换播放源中' : '播放源'"
+                :aria-label="playbackSwitching ? '切换播放源中' : '播放源'"
                 @click="togglePlayerPanel('source')"
               >
                 <Icon
@@ -3022,11 +3060,12 @@ onBeforeUnmount(async () => {
               data-control="audio"
               data-hide-below="medium"
             >
-              <button class="iconbtn" title="音轨">
+              <button class="iconbtn" title="音轨" aria-label="音轨">
                 <Icon icon="lucide:music-2" width="18" />
               </button>
               <select
                 class="ghost-select"
+                aria-label="选择音轨"
                 :value="audioTracks.find((t) => t.selected)?.id ?? ''"
                 @change="(e: any) => chooseAudio(Number(e.target.value))"
               >
@@ -3041,12 +3080,14 @@ onBeforeUnmount(async () => {
                 class="iconbtn"
                 :class="{ active: subtitlePanelOpen }"
                 title="字幕"
+                aria-label="字幕"
                 @click="togglePlayerPanel('subtitle')"
               >
                 <Icon icon="lucide:captions" width="18" />
               </button>
               <select
                 class="ghost-select"
+                aria-label="选择字幕"
                 :value="subTracks.find((t) => t.selected)?.id ?? ''"
                 @change="(e: any) => chooseSub(e.target.value === '' ? null : Number(e.target.value))"
               >
@@ -3062,6 +3103,7 @@ onBeforeUnmount(async () => {
               data-control="subtitle"
               :class="{ active: subtitlePanelOpen }"
               title="字幕"
+              aria-label="字幕"
               @click="togglePlayerPanel('subtitle')"
             >
               <Icon icon="lucide:captions" width="18" />
@@ -3085,6 +3127,7 @@ onBeforeUnmount(async () => {
                 class="iconbtn danmaku-menu-btn"
                 :class="{ active: danmakuMenuOpen }"
                 title="弹幕菜单"
+                aria-label="弹幕菜单"
                 @click="togglePlayerPanel('danmaku')"
               >
                 <Icon icon="lucide:chevron-up" width="15" />
@@ -3115,6 +3158,7 @@ onBeforeUnmount(async () => {
                 class="iconbtn"
                 :class="{ active: settingsMenuOpen }"
                 title="设置"
+                aria-label="设置"
                 @click="togglePlayerPanel('settings')"
               >
                 <Icon icon="lucide:settings" width="18" />
@@ -3198,6 +3242,7 @@ onBeforeUnmount(async () => {
                 :class="{ active: chapterMenuOpen }"
                 :disabled="chapters.length === 0"
                 :title="chapters.length > 0 ? '章节' : '暂无章节'"
+                :aria-label="chapters.length > 0 ? '章节' : '暂无章节'"
                 @click="togglePlayerPanel('chapter')"
               >
                 <Icon icon="lucide:book-open" width="18" />
@@ -3229,6 +3274,7 @@ onBeforeUnmount(async () => {
                 :class="{ active: episodeMenuOpen }"
                 :disabled="player.queue.length === 0"
                 :title="player.queue.length > 0 ? '选集' : '暂无选集队列'"
+                :aria-label="player.queue.length > 0 ? '选集' : '暂无选集队列'"
                 @click="togglePlayerPanel('episode')"
               >
                 <Icon icon="lucide:list-video" width="18" />
@@ -3262,6 +3308,7 @@ onBeforeUnmount(async () => {
               class="iconbtn"
               data-control="fullscreen"
               :title="documentFullscreen || nativeFullscreen ? '退出全屏' : '全屏'"
+              :aria-label="documentFullscreen || nativeFullscreen ? '退出全屏' : '全屏'"
               @click="toggleFullscreen"
             >
               <Icon :icon="documentFullscreen || nativeFullscreen ? 'lucide:minimize' : 'lucide:maximize'" width="18" />
@@ -3515,6 +3562,9 @@ onBeforeUnmount(async () => {
   position: absolute;
   inset: 0;
   z-index: 7;
+  /* Informational only — let clicks fall through to the controls/back button
+     underneath so the user can still seek, pause or leave while caching. */
+  pointer-events: none;
   display: flex;
   flex-direction: column;
   gap: 12px;

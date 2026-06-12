@@ -181,7 +181,7 @@ function openItem(id: string) {
 
         <div class="sort">
 
-          <select v-model="sortBy" class="select">
+          <select v-model="sortBy" class="select" aria-label="排序方式">
 
             <option value="SortName">名称</option>
 
@@ -195,7 +195,7 @@ function openItem(id: string) {
 
           </select>
 
-          <button class="iconbtn" @click="sortOrder = sortOrder === 'Ascending' ? 'Descending' : 'Ascending'">
+          <button class="iconbtn" :aria-label="sortOrder === 'Ascending' ? '当前升序，点击切换为降序' : '当前降序，点击切换为升序'" :title="sortOrder === 'Ascending' ? '升序' : '降序'" @click="sortOrder = sortOrder === 'Ascending' ? 'Descending' : 'Ascending'">
 
             <Icon :icon="sortOrder === 'Ascending' ? 'lucide:arrow-down-az' : 'lucide:arrow-down-za'" width="18" />
 
@@ -353,7 +353,7 @@ function openItem(id: string) {
 
   appearance: none;
 
-  background: rgba(28, 28, 32, 0.92);
+  background: var(--glass-bg-strong);
 
   border: 1px solid var(--glass-border);
 
@@ -411,7 +411,7 @@ function openItem(id: string) {
 
 .iconbtn:hover {
 
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-hover);
 
 }
 

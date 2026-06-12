@@ -623,7 +623,7 @@ watch(recursive, () => {
   height: 36px;
   border: 1px solid var(--glass-border);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-subtle);
   color: var(--fg-tertiary);
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
@@ -647,7 +647,7 @@ watch(recursive, () => {
   height: 36px;
   border: 1px solid var(--glass-border);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-subtle);
   color: var(--fg-tertiary);
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
@@ -781,7 +781,7 @@ watch(recursive, () => {
   display: grid;
   place-items: center;
   color: var(--fg-secondary);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-subtle);
   overflow: hidden;
   position: relative;
 }
@@ -881,7 +881,7 @@ watch(recursive, () => {
   height: 36px;
   border: 1px solid var(--glass-border);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-subtle);
   color: var(--fg-primary);
   padding: 0 10px;
   outline: none;
@@ -909,7 +909,7 @@ watch(recursive, () => {
 .recent-folder {
   appearance: none;
   border: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-subtle);
   color: var(--fg-secondary);
   min-width: 0;
   min-height: 34px;

@@ -1640,13 +1640,29 @@ async function webPlaybackSource(
   const playMethod = localDecodePlayMethod(mediaSource);
   const playSessionId =
     stringFrom(info?.PlaySessionId) ?? stringFrom(mediaSource.PlaySessionId) ?? createId("play");
-  const streamExt = safeStreamExtension(mediaSource.Container);
-  const streamPath = streamExt ? `Videos/${itemId}/stream.${streamExt}` : `Videos/${itemId}/stream`;
-  const streamUrl = joinWebUrl(line.baseUrl, streamPath);
-  streamUrl.searchParams.set("MediaSourceId", mediaSourceId);
-  streamUrl.searchParams.set("PlaySessionId", playSessionId);
-  streamUrl.searchParams.set("Static", "true");
-  appendToken(streamUrl, account.accessToken, true);
+  // Remote/.strm sources (e.g. cnmbyd smartstrm) play from MediaSource.Path — an
+  // absolute http(s) URL — NOT the server's /Videos/{id}/stream.{container} endpoint,
+  // which returns 500 for a .strm container. Match the desktop path: play
+  // MediaSource.Path directly (token-appended, proxied) when it's an http URL.
+  const rawPath = stringFrom(mediaSource.Path) ?? "";
+  const isHttpSource = /^https?:\/\//i.test(rawPath);
+  let streamUrl: URL;
+  if (isHttpSource) {
+    try {
+      streamUrl = new URL(rawPath);
+    } catch {
+      streamUrl = new URL(encodeURI(rawPath));
+    }
+    appendToken(streamUrl, account.accessToken, true);
+  } else {
+    const streamExt = safeStreamExtension(mediaSource.Container);
+    const streamPath = streamExt ? `Videos/${itemId}/stream.${streamExt}` : `Videos/${itemId}/stream`;
+    streamUrl = joinWebUrl(line.baseUrl, streamPath);
+    streamUrl.searchParams.set("MediaSourceId", mediaSourceId);
+    streamUrl.searchParams.set("PlaySessionId", playSessionId);
+    streamUrl.searchParams.set("Static", "true");
+    appendToken(streamUrl, account.accessToken, true);
+  }
 
   const tracks = Array.isArray(mediaSource.MediaStreams)
     ? mediaSource.MediaStreams.map(normalizeTrack)
@@ -1668,7 +1684,7 @@ async function webPlaybackSource(
     ),
     lines: playbackLineOptions(server, line),
     diagnostics: {
-      streamKind: "web-preview-direct-static",
+      streamKind: isHttpSource ? "web-preview-path-direct" : "web-preview-direct-static",
       sourceKind: localDecodeMode(mediaSource),
       mediaSourceCount: mediaSources.length,
       proxied: true,

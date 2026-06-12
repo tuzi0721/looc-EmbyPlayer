@@ -419,7 +419,7 @@ function gotoAggregate() {
   background: rgba(255, 255, 255, 0.04);
 }
 .srv-row.is-active .srv-row__btn {
-  background: rgba(10, 132, 255, 0.16);
+  background: var(--accent-soft);
 }
 
 .srv-row__avatar {

@@ -72,16 +72,16 @@ function onBlur(event: FocusEvent) {
   padding: 12px 14px;
   border: 1px solid var(--glass-border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-subtle);
   -webkit-backdrop-filter: blur(14px) saturate(160%);
   backdrop-filter: blur(14px) saturate(160%);
   transition: border-color 180ms var(--easing-glide),
     background 180ms var(--easing-glide);
 }
 .ginput:focus-within {
-  border-color: rgba(10, 132, 255, 0.6);
-  background: rgba(255, 255, 255, 0.06);
-  box-shadow: 0 0 0 4px rgba(10, 132, 255, 0.18);
+  border-color: var(--accent);
+  background: var(--surface-hover);
+  box-shadow: 0 0 0 4px var(--accent-soft);
 }
 .ginput--block {
   display: flex;
@@ -114,6 +114,6 @@ function onBlur(event: FocusEvent) {
 }
 .ginput__right:hover {
   color: var(--fg-primary);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-hover);
 }
 </style>

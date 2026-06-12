@@ -116,6 +116,7 @@ function open(item: MediaItem) {
 }
 .fav__body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 12px var(--content-pad) 40px;
 }
@@ -149,7 +150,7 @@ function open(item: MediaItem) {
   appearance: none;
   border: 1px solid var(--separator);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-subtle);
   color: var(--fg-primary);
   cursor: pointer;
   min-height: 32px;

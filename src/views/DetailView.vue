@@ -102,10 +102,18 @@ function itemProgress(target?: MediaItem | null) {
   return clampPercent((position / runtime) * 100);
 }
 
+// Keep the internal Emby user GUID / raw API path out of user-facing errors.
+function redactInternalPaths(text: string): string {
+  return text.replace(/Users\/[0-9a-fA-F-]{8,}/g, "Users/…");
+}
+
 const loadErrorTitle = computed(() => {
   const message = loadError.value ?? "";
   if (/parse JSON|error decoding|expected .* at line/i.test(message)) return "详情数据解析失败";
   if (/network error|timeout|failed to fetch/i.test(message)) return "网络请求失败";
+  if (/HTTP 404|\bnot found\b/i.test(message)) return "未找到该媒体";
+  if (/HTTP 40[13]|unauthorized|forbidden/i.test(message)) return "无权访问该媒体";
+  if (/HTTP 5\d\d/i.test(message)) return "服务器错误";
   return "详情加载失败";
 });
 
@@ -118,11 +126,21 @@ const friendlyLoadError = computed(() => {
   if (/network error|timeout|failed to fetch/i.test(message)) {
     return "连接服务器失败，请检查服务器线路和网络状态后重试。";
   }
-  return message.length > 220 ? `${message.slice(0, 220)}...` : message;
+  if (/HTTP 404|\bnot found\b/i.test(message)) {
+    return "未找到该媒体，可能已从服务器移除，或链接已失效。";
+  }
+  if (/HTTP 40[13]|unauthorized|forbidden/i.test(message)) {
+    return "没有权限访问该媒体，请检查账号或重新登录后重试。";
+  }
+  if (/HTTP 5\d\d/i.test(message)) {
+    return "服务器返回错误，请稍后重试或检查服务器状态。";
+  }
+  const safe = redactInternalPaths(message);
+  return safe.length > 220 ? `${safe.slice(0, 220)}...` : safe;
 });
 
 const loadErrorDetail = computed(() => {
-  const message = (loadError.value ?? "").replace(/\s+/g, " ").trim();
+  const message = redactInternalPaths((loadError.value ?? "").replace(/\s+/g, " ").trim());
   if (!message || message === friendlyLoadError.value) return "";
   return message.length > 720 ? `${message.slice(0, 720)}...` : message;
 });
@@ -410,8 +428,19 @@ function safeMediaSourceName(source: MediaSourceInfo, index: number) {
   return descriptor || `版本 ${index + 1}`;
 }
 
+// Emby returns Id fields inconsistently typed: GenreItems[].Id / Studios[].Id
+// (and sometimes others) come back as numbers on some servers even though our
+// types declare them string. A bare .Id?.trim() then throws "trim is not a
+// function" and crashes the whole detail page (vue-tsc can't catch it — the
+// runtime data violates the declared type). Coerce defensively everywhere.
+function trimId(id: unknown): string | null {
+  if (id == null) return null;
+  const s = String(id).trim();
+  return s.length > 0 ? s : null;
+}
+
 function mediaSourceKey(source: MediaSourceInfo, index: number) {
-  return source.Id?.trim() || `source-${index}`;
+  return trimId(source.Id) ?? `source-${index}`;
 }
 
 function streamKey(stream: MediaStreamInfo, index: number) {
@@ -460,7 +489,7 @@ const selectedMediaSource = computed(() => {
   );
 });
 
-const selectedMediaSourcePlaybackId = computed(() => selectedMediaSource.value?.Id?.trim() || null);
+const selectedMediaSourcePlaybackId = computed(() => trimId(selectedMediaSource.value?.Id));
 
 const mediaSourceCards = computed<MediaSourceCard[]>(() => {
   const sources = item.value?.MediaSources ?? [];
@@ -511,7 +540,7 @@ const mediaInfoRows = computed<MediaInfoRow[]>(() => {
     key: "source",
     icon: "lucide:layers-3",
     label: "媒体源",
-    value: sources.length > 1 ? `${sources.length} 个版本` : source.Name?.trim() || source.Id?.trim() || "默认版本",
+    value: sources.length > 1 ? `${sources.length} 个版本` : source.Name?.trim() || trimId(source.Id) || "默认版本",
     detail: source.Name?.trim() && sources.length > 1 ? source.Name.trim() : undefined,
   });
 
@@ -773,7 +802,7 @@ const genreEntries = computed<GenreEntry[]>(() => {
     const name = genre.Name?.trim();
     if (!name) continue;
     const nameKey = name.toLowerCase();
-    const id = genre.Id?.trim() || null;
+    const id = trimId(genre.Id);
     const key = id ? `id:${id}` : `name:${name.toLowerCase()}`;
     if (seen.has(key) || seenNames.has(nameKey)) continue;
     seen.add(key);
@@ -797,7 +826,7 @@ const genreEntries = computed<GenreEntry[]>(() => {
 function normalizeStudio(studio: NameIdPair): StudioEntry | null {
   const name = studio.Name?.trim();
   if (!name) return null;
-  const id = studio.Id?.trim() || null;
+  const id = trimId(studio.Id);
   return {
     key: id ? `id:${id}` : `name:${name.toLowerCase()}`,
     id,
@@ -1279,7 +1308,7 @@ function openStudio(studio: StudioEntry) {
 function openPerson(person: MediaPerson) {
   const name = person.Name?.trim();
   if (!name) return;
-  const id = person.Id?.trim() || `name:${name}`;
+  const id = trimId(person.Id) ?? `name:${name}`;
   router.push({
     name: "person-detail",
     params: { id },
@@ -1575,7 +1604,7 @@ async function togglePlayed() {
                     :class="{ spin: downloadStarting }"
                   />
                 </button>
-                <button class="circle-btn" :title="shareStatus ?? '复制分享链接'" @click="shareItem">
+                <button class="circle-btn" :title="shareStatus ?? '复制分享链接'" :aria-label="shareStatus ?? '复制分享链接'" @click="shareItem">
                   <Icon icon="lucide:share-2" width="18" />
                 </button>
                 <button
@@ -1583,6 +1612,7 @@ async function togglePlayed() {
                   :class="{ active: item.UserData?.IsFavorite }"
                   :disabled="userDataUpdating === 'favorite'"
                   :title="item.UserData?.IsFavorite ? '取消收藏' : '收藏'"
+                  :aria-label="item.UserData?.IsFavorite ? '取消收藏' : '收藏'"
                   @click="toggleFavorite"
                 >
                   <Icon
@@ -1596,6 +1626,7 @@ async function togglePlayed() {
                   :class="{ active: item.UserData?.Played }"
                   :disabled="userDataUpdating === 'played'"
                   :title="item.UserData?.Played ? '取消已看' : '标记已看'"
+                  :aria-label="item.UserData?.Played ? '取消已看' : '标记已看'"
                   @click="togglePlayed"
                 >
                   <Icon
@@ -2415,7 +2446,11 @@ async function togglePlayed() {
 .hero__studio-popover {
   position: absolute;
   left: 70px;
-  top: calc(100% + 8px);
+  /* Open upward (the studios row sits low in the hero); a downward popover was
+     clipped by .hero { overflow: hidden }. Cap height + scroll for long lists. */
+  bottom: calc(100% + 8px);
+  max-height: 42vh;
+  overflow-y: auto;
   z-index: 5;
   width: min(420px, calc(100vw - 48px));
   display: flex;
@@ -2650,7 +2685,9 @@ async function togglePlayed() {
   .hero {
     min-height: 0;
     max-height: none;
-    height: calc(100dvh - var(--topbar-h) - 72px);
+    /* The player route is fullscreen (no TopBar rendered), so the hero owns the
+       whole viewport — don't subtract a phantom --topbar-h that isn't there. */
+    height: calc(100dvh - 72px);
   }
   .hero__body {
     top: 48px;
@@ -2677,7 +2714,8 @@ async function togglePlayed() {
     aspect-ratio: 16 / 10;
     min-height: 0;
     max-height: none;
-    height: calc(100dvh - var(--topbar-h) - 88px);
+    /* No TopBar on this route → no --topbar-h to subtract (phantom 44px). */
+    height: calc(100dvh - 88px);
   }
   .hero__title {
     font-size: 28px;

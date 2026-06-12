@@ -170,6 +170,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadHistory());
           class="iconbtn"
           :disabled="loading"
           title="刷新"
+          aria-label="刷新"
           @click="loadHistory()"
         >
           <Icon icon="lucide:refresh-cw" width="16" :class="{ spin: loading }" />
@@ -279,7 +280,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadHistory());
   padding: 3px;
   border: 1px solid var(--separator);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-subtle);
 }
 .segmented button,
 .iconbtn,
@@ -304,11 +305,11 @@ watch(() => settings.settings.hideJavCodes, () => void loadHistory());
 }
 .segmented button:hover {
   color: var(--fg-primary);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-hover);
 }
 .segmented button.active {
   color: var(--accent);
-  background: rgba(10, 132, 255, 0.16);
+  background: var(--accent-soft);
 }
 .iconbtn {
   width: 34px;
@@ -318,12 +319,12 @@ watch(() => settings.settings.hideJavCodes, () => void loadHistory());
   justify-content: center;
   border: 1px solid var(--separator);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-subtle);
   color: var(--fg-secondary);
 }
 .iconbtn:hover {
   color: var(--fg-primary);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-hover);
 }
 .iconbtn:disabled {
   cursor: progress;
@@ -331,6 +332,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadHistory());
 }
 .history__body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 12px var(--content-pad) 40px;
 }
@@ -360,7 +362,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadHistory());
   max-width: 100%;
   padding: 3px 7px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--glass-border);
   color: var(--fg-secondary);
   font-size: 11px;
   line-height: 1;
@@ -369,12 +371,12 @@ watch(() => settings.settings.hideJavCodes, () => void loadHistory());
   white-space: nowrap;
 }
 .history-card__date {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-subtle);
 }
 .history-card__kind {
   color: var(--accent);
-  border-color: rgba(10, 132, 255, 0.26);
-  background: rgba(10, 132, 255, 0.12);
+  border-color: var(--accent-soft);
+  background: var(--accent-soft);
 }
 .history-card__progress {
   color: var(--success);
@@ -399,7 +401,7 @@ watch(() => settings.settings.hideJavCodes, () => void loadHistory());
 .retry {
   border: 1px solid var(--glass-border);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-subtle);
   color: var(--fg-primary);
   display: inline-flex;
   align-items: center;
@@ -410,8 +412,8 @@ watch(() => settings.settings.hideJavCodes, () => void loadHistory());
 }
 .load-more:hover,
 .retry:hover {
-  border-color: rgba(255, 255, 255, 0.22);
-  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--glass-border-strong);
+  background: var(--surface-hover);
 }
 .load-more:disabled {
   cursor: progress;
