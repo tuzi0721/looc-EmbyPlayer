@@ -1,16 +1,16 @@
 :root {
-  /* Cinematic dark base (default, primary theme) */
-  --bg-base: #0b0b0f;
-  --bg-elevated: rgba(28, 28, 32, 0.7);
+  /* Neutral gray dark base (default, primary theme) */
+  --bg-base: #17171a;
+  --bg-elevated: rgba(38, 38, 41, 0.7);
   --bg-overlay: rgba(0, 0, 0, 0.25);
 
-  --fg-primary: rgba(255, 255, 255, 0.95);
-  --fg-secondary: rgba(255, 255, 255, 0.66);
-  --fg-tertiary: rgba(255, 255, 255, 0.45);
-  --fg-quaternary: rgba(255, 255, 255, 0.18);
+  --fg-primary: rgba(255, 255, 255, 0.96);
+  --fg-secondary: rgba(255, 255, 255, 0.80);
+  --fg-tertiary: rgba(255, 255, 255, 0.62);
+  --fg-quaternary: rgba(255, 255, 255, 0.34);
 
-  --separator: rgba(255, 255, 255, 0.08);
-  --separator-strong: rgba(255, 255, 255, 0.14);
+  --separator: rgba(255, 255, 255, 0.10);
+  --separator-strong: rgba(255, 255, 255, 0.16);
 
   /* Neutral surface fills that must flip with the theme (the hardcoded
      rgba(255,255,255,.04-.09) overlays became invisible white-on-white in the
@@ -58,9 +58,9 @@
   /* Glass tokens */
   --glass-blur: 24px;
   --glass-saturate: 180%;
-  --glass-bg: rgba(28, 28, 32, 0.55);
-  --glass-bg-thin: rgba(28, 28, 32, 0.35);
-  --glass-bg-strong: rgba(28, 28, 32, 0.72);
+  --glass-bg: rgba(38, 38, 40, 0.62);
+  --glass-bg-thin: rgba(38, 38, 40, 0.42);
+  --glass-bg-strong: rgba(40, 40, 42, 0.80);
   --glass-border: rgba(255, 255, 255, 0.10);
   --glass-border-strong: rgba(255, 255, 255, 0.18);
   --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
@@ -74,9 +74,9 @@
   --sidebar-w: 220px;
 
   /* Reference player surfaces */
-  --surface-1: #121212;
-  --surface-2: #1a1a1a;
-  --surface-3: #252525;
+  --surface-1: #1b1b1d;
+  --surface-2: #242427;
+  --surface-3: #2e2e31;
 
   --font-sans:
     -apple-system, "SF Pro Display", "SF Pro Text", "Segoe UI",
@@ -95,10 +95,10 @@
   --bg-elevated: #ffffff;
   --bg-overlay: rgba(248, 250, 252, 0.88);
 
-  --fg-primary: #111827;
-  --fg-secondary: #243042;
-  --fg-tertiary: #526071;
-  --fg-quaternary: rgba(15, 23, 42, 0.34);
+  --fg-primary: #0d1320;
+  --fg-secondary: #1d2735;
+  --fg-tertiary: #46505f;
+  --fg-quaternary: rgba(15, 23, 42, 0.46);
 
   --separator: rgba(15, 23, 42, 0.14);
   --separator-strong: rgba(15, 23, 42, 0.24);
@@ -203,10 +203,8 @@ textarea {
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(1100px 800px at 12% -8%, rgba(10, 132, 255, 0.28), transparent 60%),
-    radial-gradient(900px 700px at 110% 110%, rgba(191, 90, 255, 0.22), transparent 60%),
-    radial-gradient(700px 500px at 75% 0%, rgba(50, 173, 230, 0.18), transparent 60%),
-    linear-gradient(180deg, #07070a 0%, #0a0a0c 100%);
+    radial-gradient(1200px 820px at 50% -12%, rgba(255, 255, 255, 0.05), transparent 62%),
+    linear-gradient(180deg, #1c1c1f 0%, #161618 100%);
 }
 
 .app-backdrop::after {
