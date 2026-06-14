@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 const DANMAKU_USER_AGENT = "Hills Lite/0.1.0 (danmaku)";
-const DANDANPLAY_API_BASE = "https://api.dandanplay.net";
+const DANDANPLAY_API_BASE_DEFAULT = "https://api.dandanplay.net";
 
 const PROVIDERS = [
   {
@@ -10,6 +10,13 @@ const PROVIDERS = [
     displayName: "DanDanPlay",
   },
 ];
+
+function normalizeDanmakuBase(base) {
+  if (typeof base !== "string" || !base.trim()) return null;
+  const url = base.trim().replace(/\/+$/, "");
+  if (!url.startsWith("http://") && !url.startsWith("https://")) return null;
+  return url;
+}
 
 function bodyPreview(body) {
   const preview = [...body].slice(0, 1200).join("");
@@ -175,7 +182,8 @@ export class DanmakuClient {
     const settings = await this.store.getSettings();
 
     if (provider.id === "dandanplay") {
-      return this.fetchDanDanPlay(item, settings.requestTimeoutMs);
+      const apiBase = normalizeDanmakuBase(settings.danmakuApiBase) ?? DANDANPLAY_API_BASE_DEFAULT;
+      return this.fetchDanDanPlay(item, settings.requestTimeoutMs, apiBase);
     }
     return null;
   }
@@ -219,11 +227,11 @@ export class DanmakuClient {
     return parseDanmakuXml(await response.text(), path.basename(url.pathname) || "webdav-xml");
   }
 
-  async fetchDanDanPlay(item, timeoutMs) {
-    const episodeId = await this.matchDanDanPlay(item, timeoutMs);
+  async fetchDanDanPlay(item, timeoutMs, apiBase = DANDANPLAY_API_BASE_DEFAULT) {
+    const episodeId = await this.matchDanDanPlay(item, timeoutMs, apiBase);
     if (!episodeId) return null;
 
-    const url = `${DANDANPLAY_API_BASE}/api/v2/comment/${encodeURIComponent(episodeId)}?withRelated=true&chConvert=0`;
+    const url = `${apiBase}/api/v2/comment/${encodeURIComponent(episodeId)}?withRelated=true&chConvert=0`;
     const parsed = await fetchJson(
       url,
       {
@@ -246,12 +254,12 @@ export class DanmakuClient {
     };
   }
 
-  async matchDanDanPlay(item, timeoutMs) {
+  async matchDanDanPlay(item, timeoutMs, apiBase = DANDANPLAY_API_BASE_DEFAULT) {
     const fileName = buildFileName(item);
     if (!fileName) return null;
 
     const parsed = await fetchJson(
-      `${DANDANPLAY_API_BASE}/api/v2/match`,
+      `${apiBase}/api/v2/match`,
       {
         method: "POST",
         headers: {

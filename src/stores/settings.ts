@@ -81,6 +81,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   subtitleBold: false,
   subtitleSecondaryPositionPct: 0,
   anime4kMode: "off",
+  danmakuApiBase: null,
 };
 
 function mergeSavedSettings(
@@ -144,10 +145,22 @@ export const useSettingsStore = defineStore("settings", () => {
     await update({ hiddenServerIds: Array.from(cur) });
   }
 
+  // "auto" follows the OS theme; track it reactively so the app flips live
+  // when the system theme changes.
+  const prefersDarkQuery =
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-color-scheme: dark)")
+      : null;
+  const systemPrefersDark = ref(prefersDarkQuery?.matches ?? true);
+  prefersDarkQuery?.addEventListener?.("change", (event) => {
+    systemPrefersDark.value = event.matches;
+  });
+
   watchEffect(() => {
     const theme = settings.value.theme;
     const root = document.documentElement;
-    if (theme === "light") root.setAttribute("data-theme", "light");
+    const light = theme === "light" || (theme === "auto" && !systemPrefersDark.value);
+    if (light) root.setAttribute("data-theme", "light");
     else root.removeAttribute("data-theme");
 
     document.documentElement.style.setProperty(

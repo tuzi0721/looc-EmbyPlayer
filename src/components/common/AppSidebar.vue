@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
 
@@ -7,6 +7,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useServerStore } from "@/stores/server";
 import { useSettingsStore } from "@/stores/settings";
 import LineStatusDot from "@/components/common/LineStatusDot.vue";
+import AddServerDialog from "@/components/login/AddServerDialog.vue";
 import { serverActiveLine, serverKindIcon, serverKindLabel } from "@/utils/serverVisuals";
 
 const router = useRouter();
@@ -32,6 +33,19 @@ const visibleServers = computed(() =>
 const activeServerId = computed(() => auth.activeAccount?.serverId ?? null);
 const isCollapsed = computed(() => props.collapsed === true);
 const isOverlay = computed(() => props.overlay === true);
+
+const showAdd = ref(false);
+
+async function onServerAdded(id: string, loggedIn = false) {
+  showAdd.value = false;
+  await Promise.all([
+    serverStore.refresh().catch(() => {}),
+    loggedIn ? auth.refresh().catch(() => {}) : Promise.resolve(),
+  ]);
+  if (!loggedIn && id) {
+    router.push({ name: "login", query: { server: id } }).catch(() => {});
+  }
+}
 
 function loggedInOn(serverId: string): boolean {
   return auth.accounts.some((a) => a.serverId === serverId);
@@ -83,9 +97,6 @@ function gotoAggregate() {
         @click="emit('toggle-collapsed')"
       >
         <Icon icon="lucide:menu" width="18" class="brand-btn__menu" />
-      </button>
-      <button class="brand-home" type="button" @click="gotoHome">
-        <span class="brand-btn__name">Hills Lite</span>
       </button>
     </header>
 
@@ -171,6 +182,16 @@ function gotoAggregate() {
           服务器已隐藏，可在设置中恢复显示。
         </li>
       </ul>
+
+      <button
+        class="nav-btn srv-add"
+        type="button"
+        :title="isCollapsed ? '添加服务器' : undefined"
+        @click="showAdd = true"
+      >
+        <Icon icon="lucide:plus" width="16" />
+        <span>添加服务器</span>
+      </button>
     </section>
 
     <div class="sb__flex" />
@@ -186,6 +207,8 @@ function gotoAggregate() {
         <span>设置</span>
       </button>
     </section>
+
+    <AddServerDialog v-if="showAdd" @created="onServerAdded" @close="showAdd = false" />
   </aside>
 </template>
 
@@ -224,9 +247,13 @@ function gotoAggregate() {
   display: flex;
   align-items: center;
   gap: 6px;
+  /* Top-left strip doubles as a window drag region (no native title bar). */
+  -webkit-app-region: drag;
 }
-.brand-menu,
-.brand-home {
+.sb__brand button {
+  -webkit-app-region: no-drag;
+}
+.brand-menu {
   appearance: none;
   border: none;
   background: transparent;
@@ -237,46 +264,13 @@ function gotoAggregate() {
   padding: 6px;
   border-radius: 10px;
   transition: background 180ms var(--easing-glide);
-}
-.brand-menu {
   width: 32px;
   height: 32px;
   justify-content: center;
   flex-shrink: 0;
 }
-.brand-home {
-  min-width: 0;
-  flex: 1;
-  justify-content: flex-start;
-}
-.brand-menu:hover,
-.brand-home:hover {
+.brand-menu:hover {
   background: rgba(255, 255, 255, 0.04);
-}
-.sb.is-collapsed .brand-home {
-  display: none;
-}
-.brand-btn__icon {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  background: linear-gradient(135deg, #0a84ff, #bf5aff);
-  display: grid;
-  place-items: center;
-  color: white;
-}
-.brand-btn__text {
-  text-align: left;
-  line-height: 1.15;
-}
-.brand-btn__name {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-}
-.brand-btn__ver {
-  font-size: 11px;
-  color: var(--fg-tertiary);
 }
 
 .sb__nav {

@@ -938,6 +938,9 @@ export class EmbyClient {
     const playMethod = localDecodePlayMethod(mediaSource);
     const playSessionId =
       stringFrom(info?.PlaySessionId) ?? stringFrom(mediaSource.PlaySessionId) ?? randomUUID();
+    // Play via the Emby server's /Videos/{id}/stream proxy (Static=true). This is
+    // the path that reliably played netdisk .strm sources; DirectPlaying the raw
+    // smartstrm Path crashed mpv on those sources.
     const streamUrl = joinUrl(line.baseUrl, `Videos/${itemId}/stream`);
     streamUrl.searchParams.set("MediaSourceId", mediaSourceId);
     streamUrl.searchParams.set("PlaySessionId", playSessionId);
@@ -1003,24 +1006,43 @@ export class EmbyClient {
 
     const settings = await this.settings();
     const line = this.pickLine(server, browserSource.lineId ?? options?.lineId ?? null);
-    const streamUrl = joinUrl(line.baseUrl, `Videos/${itemId}/stream`);
-    streamUrl.searchParams.set("MediaSourceId", browserSource.mediaSourceId);
-    streamUrl.searchParams.set("PlaySessionId", browserSource.playSessionId);
-    streamUrl.searchParams.set("Static", "true");
-    appendToken(streamUrl, account.accessToken, settings.appendAuthQuery === true);
+    // Remote/.strm sources (e.g. netdisk smartstrm) expose an absolute http(s)
+    // MediaSource.Path. DirectPlay that Path — like every other Emby client.
+    // Verified: the smartstrm Path 302-redirects to the real mp4 and mpv plays it
+    // (file-loaded + advancing time-pos), whereas this server's /Videos/{id}/stream
+    // returns a MANGLED redirect (/https%3A%2F%2F…) that never plays. That broken
+    // proxy is exactly why netdisk sources failed only in our app.
+    const rawSourcePath = stringFrom(browserSource?.diagnostics?.selectedMediaSource?.path) ?? "";
+    const isHttpSource = /^https?:\/\//i.test(rawSourcePath);
+    let streamUrl;
+    let directHeaders;
+    if (isHttpSource) {
+      streamUrl = new URL(rawSourcePath);
+      appendToken(streamUrl, account.accessToken, true);
+      // The Path is the netdisk endpoint, not the Emby server — don't push Emby auth
+      // headers onto it (the api_key in the URL is what it honors); keep only the UA.
+      directHeaders = [];
+    } else {
+      streamUrl = joinUrl(line.baseUrl, `Videos/${itemId}/stream`);
+      streamUrl.searchParams.set("MediaSourceId", browserSource.mediaSourceId);
+      streamUrl.searchParams.set("PlaySessionId", browserSource.playSessionId);
+      streamUrl.searchParams.set("Static", "true");
+      appendToken(streamUrl, account.accessToken, settings.appendAuthQuery === true);
+      directHeaders = [
+        ["X-Emby-Token", account.accessToken],
+        ["Authorization", `MediaBrowser Token="${account.accessToken}"`],
+      ];
+    }
 
     return {
       ...browserSource,
       streamUrl: streamUrl.toString(),
-      headers: [
-        ["X-Emby-Token", account.accessToken],
-        ["Authorization", `MediaBrowser Token="${account.accessToken}"`],
-      ],
+      headers: directHeaders,
       userAgent: defaultUserAgent(settings, server, line),
       diagnostics: {
         ...browserSource.diagnostics,
         sourceKind: browserSource.playMethod === "DirectPlay" ? "direct-play" : "direct-stream",
-        streamKind: "mpv-direct-static",
+        streamKind: isHttpSource ? "mpv-direct-path" : "mpv-direct-static",
         preferDirect: true,
         serverTranscodingAllowed: false,
         directStream: {

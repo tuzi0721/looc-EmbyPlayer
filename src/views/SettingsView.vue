@@ -19,6 +19,7 @@ import { useDownloadsStore } from "@/stores/downloads";
 import { useNotificationsStore } from "@/stores/notifications";
 import { useSettingsStore } from "@/stores/settings";
 import { useServerStore } from "@/stores/server";
+import { useCloudStore } from "@/stores/cloud";
 import type { Line, Server } from "@/types/models";
 import { headersToText, normalizeNullableText, parseHeaderText } from "@/utils/headerText";
 import { normalizeServerBaseUrl } from "@/utils/serverUrl";
@@ -32,6 +33,7 @@ type SectionId =
   | "danmaku"
   | "externalPlayer"
   | "downloads"
+  | "cloud"
   | "backup"
   | "sync"
   | "network"
@@ -78,6 +80,62 @@ const activeDownloadsLabel = computed(() =>
 const unreadNotificationsLabel = computed(() =>
   notifications.unread > 99 ? "99+" : `${notifications.unread}`,
 );
+
+// ---- 云账号 (问6 云同步 / 问7 账号+兑换码) ----
+const cloud = useCloudStore();
+const cloudUrlDraft = ref(cloud.baseUrl);
+const cloudAuthMode = ref<"login" | "register">("login");
+const cloudUsername = ref("");
+const cloudPassword = ref("");
+const cloudEmail = ref("");
+const cloudCode = ref("");
+const cloudMsg = ref("");
+const cloudBackupBusy = ref(false);
+const cloudSummary = computed(() => {
+  if (!cloud.configured) return "未配置";
+  if (!cloud.loggedIn) return "未登录";
+  return `${cloud.user?.username ?? ""}${cloud.isPro ? " · PRO" : ""}`;
+});
+function saveCloudUrl() {
+  cloud.setBaseUrl(cloudUrlDraft.value);
+}
+async function cloudSubmitAuth() {
+  cloudMsg.value = "";
+  try {
+    if (cloudAuthMode.value === "register") {
+      await cloud.register(cloudUsername.value.trim(), cloudPassword.value, cloudEmail.value.trim() || undefined);
+    } else {
+      await cloud.login(cloudUsername.value.trim(), cloudPassword.value);
+    }
+    cloudPassword.value = "";
+    cloudMsg.value = "已登录";
+  } catch {
+    cloudMsg.value = cloud.error ?? "操作失败";
+  }
+}
+async function cloudRedeem() {
+  cloudMsg.value = "";
+  try {
+    await cloud.redeem(cloudCode.value.trim());
+    cloudCode.value = "";
+    cloudMsg.value = "兑换成功，已升级 Pro";
+  } catch {
+    cloudMsg.value = cloud.error ?? "兑换失败";
+  }
+}
+async function cloudBackup() {
+  cloudMsg.value = "";
+  cloudBackupBusy.value = true;
+  try {
+    const n = await cloud.backupServers();
+    cloudMsg.value = `已备份 ${n} 个服务器到云端`;
+  } catch {
+    cloudMsg.value = cloud.error ?? "备份失败";
+  } finally {
+    cloudBackupBusy.value = false;
+  }
+}
+if (cloud.token) void cloud.refreshMe();
 
 type ServerLineDraft = {
   id?: string;
@@ -140,6 +198,7 @@ function sectionFromQuery(value: unknown): SectionId | null {
     case "danmaku":
     case "externalPlayer":
     case "downloads":
+    case "cloud":
     case "backup":
     case "sync":
     case "network":
@@ -658,7 +717,7 @@ async function importConfig(mode: "merge" | "replace" = "merge") {
 const themeLabel = computed(() => {
   const t = settings.settings.theme;
   if (t === "light") return "浅色";
-  if (t === "auto") return "Auto";
+  if (t === "auto") return "跟随系统";
   return "深色";
 });
 
@@ -903,7 +962,7 @@ const danmakuSummary = computed(() => {
               :class="{ active: settings.settings.theme === 'auto' }"
               @click="save('theme', 'auto')"
             >
-              Auto
+              跟随系统
             </button>
           </div>
         </SettingRow>
@@ -1635,12 +1694,25 @@ const danmakuSummary = computed(() => {
         :expanded="isExpanded('danmaku')"
         @toggle="toggleSection('danmaku')"
       >
-        <SettingRow label="开启弹幕" description="数据来源 DanDanPlay API">
+        <SettingRow label="开启弹幕" description="数据来源 DanDanPlay API（可自定义）">
           <input
             class="switch"
             type="checkbox"
             :checked="settings.settings.danmakuEnabledDefault"
             @change="(e: any) => save('danmakuEnabledDefault', e.target.checked)"
+          />
+        </SettingRow>
+        <SettingRow
+          label="弹幕 API 地址"
+          description="自定义 DanDanPlay 兼容 API 基址（留空使用官方 https://api.dandanplay.net）"
+          stacked
+        >
+          <input
+            class="plain-input"
+            type="url"
+            placeholder="https://api.dandanplay.net"
+            :value="settings.settings.danmakuApiBase ?? ''"
+            @change="(e: any) => save('danmakuApiBase', e.target.value.trim() || null)"
           />
         </SettingRow>
         <SettingRow label="字号" stacked>
@@ -1759,6 +1831,82 @@ const danmakuSummary = computed(() => {
             <strong>{{ settings.settings.danmakuBottomReservePct }}%</strong>
           </div>
         </SettingRow>
+      </SettingsSection>
+
+      <!-- 云账号 -->
+      <SettingsSection
+        title="云账号"
+        :summary="cloudSummary"
+        :expanded="isExpanded('cloud')"
+        @toggle="toggleSection('cloud')"
+      >
+        <SettingRow label="云端地址" description="Hills Lite Cloud 服务地址" stacked>
+          <input
+            class="plain-input"
+            type="url"
+            placeholder="http://203.88.119.237:8090"
+            v-model="cloudUrlDraft"
+            @change="saveCloudUrl"
+          />
+        </SettingRow>
+
+        <template v-if="cloud.configured && !cloud.loggedIn">
+          <SettingRow :label="cloudAuthMode === 'register' ? '注册' : '登录'" stacked>
+            <input class="plain-input" placeholder="用户名" v-model="cloudUsername" />
+            <input class="plain-input cloud-mt" type="password" placeholder="密码" v-model="cloudPassword" />
+            <input
+              v-if="cloudAuthMode === 'register'"
+              class="plain-input cloud-mt"
+              type="email"
+              placeholder="邮箱（可选）"
+              v-model="cloudEmail"
+            />
+            <div class="cloud-actions">
+              <button class="action-btn" :disabled="cloud.busy" @click="cloudSubmitAuth">
+                {{ cloudAuthMode === "register" ? "注册" : "登录" }}
+              </button>
+              <button
+                class="link"
+                type="button"
+                @click="cloudAuthMode = cloudAuthMode === 'register' ? 'login' : 'register'"
+              >
+                {{ cloudAuthMode === "register" ? "已有账号？去登录" : "没有账号？去注册" }}
+              </button>
+            </div>
+          </SettingRow>
+        </template>
+
+        <template v-else-if="cloud.loggedIn">
+          <SettingRow label="当前账号" :description="cloud.user?.username ?? ''">
+            <span :style="cloud.isPro ? 'color:#37d27a;font-weight:700' : 'color:var(--fg-secondary)'">
+              {{ cloud.isPro ? "PRO" : "普通" }}
+            </span>
+          </SettingRow>
+          <SettingRow
+            v-if="cloud.user?.proExpiresAt"
+            label="Pro 到期"
+            :description="cloud.user.proExpiresAt.slice(0, 10)"
+          />
+          <SettingRow label="兑换码" description="输入兑换码升级 / 续期 Pro" stacked>
+            <input class="plain-input" placeholder="XXXX-XXXX-XXXX-XX" v-model="cloudCode" />
+            <div class="cloud-actions">
+              <button class="action-btn" :disabled="cloud.busy || !cloudCode.trim()" @click="cloudRedeem">
+                兑换
+              </button>
+            </div>
+          </SettingRow>
+          <SettingRow label="备份到云端" description="把本地服务器/账号加密同步到云端（需 Pro）">
+            <button class="action-btn" :disabled="cloudBackupBusy" @click="cloudBackup">
+              <Icon icon="lucide:cloud-upload" width="15" />
+              <span>{{ cloudBackupBusy ? "备份中…" : "立即备份" }}</span>
+            </button>
+          </SettingRow>
+          <SettingRow label="退出登录">
+            <button class="action-btn" @click="cloud.logout()">退出</button>
+          </SettingRow>
+        </template>
+
+        <p v-if="cloudMsg" class="cloud-msg">{{ cloudMsg }}</p>
       </SettingsSection>
 
       <!-- 7. 外部播放器 -->
@@ -2137,8 +2285,26 @@ const danmakuSummary = computed(() => {
 .settings__list {
   flex: 1;
   overflow-y: auto;
-  padding: 8px var(--content-pad) 32px;
-  max-width: 720px;
+  /* Left-aligned, width-adaptive content. The scroll container stays full width so
+     the scrollbar sits at the far-right edge; content flows from the left up to a
+     generous cap (right gutter only) instead of a narrow centered column with big
+     empty gutters on both sides. */
+  padding: 8px max(var(--content-pad), calc(100% - 1180px)) 32px var(--content-pad);
+}
+.cloud-mt {
+  margin-top: 8px;
+}
+.cloud-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.cloud-msg {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--fg-secondary);
 }
 .row-value {
   color: var(--fg-secondary);

@@ -298,6 +298,24 @@ function onHeroBackdropError() {
   }
 }
 
+// Art title logo (same behaviour as the home hero): when a logo is expected the
+// text title is visually hidden immediately so it never flashes before the
+// image, and it comes back if the logo fails to load.
+const titleLogoLoaded = ref(false);
+const titleLogoFailed = ref(false);
+const titleLogoUrl = computed(() =>
+  item.value
+    ? mediaItemImageUrl(activeServer.value, item.value, "Logo", 900, {
+        accountId: routeAccount.value?.id,
+        accessToken: routeAccount.value?.accessToken,
+      })
+    : null,
+);
+watch(titleLogoUrl, () => {
+  titleLogoLoaded.value = false;
+  titleLogoFailed.value = false;
+});
+
 // Immersive ambient: tint the page with the backdrop's dominant color (falls
 // back to the theme accent when extraction is blocked, e.g. no CORS).
 const ambientColor = ref<string | null>(null);
@@ -594,18 +612,11 @@ const mediaInfoRows = computed<MediaInfoRow[]>(() => {
     value: formatBytes(source.Size),
   });
 
-  pushMediaInfoRow(rows, {
-    key: "capabilities",
-    icon: "lucide:radio",
-    label: "播放能力",
-    value: mediaCapabilityText(source),
-  });
-
   return rows;
 });
 
 const heroMediaInfoRows = computed(() =>
-  mediaInfoRows.value.filter((row) => ["video", "audio", "subtitles", "capabilities"].includes(row.key)).slice(0, 4),
+  mediaInfoRows.value.filter((row) => ["video", "audio", "subtitles"].includes(row.key)).slice(0, 4),
 );
 
 const audioStreamOptions = computed<HeroSelectOption[]>(() =>
@@ -799,7 +810,7 @@ const genreEntries = computed<GenreEntry[]>(() => {
   const entries: GenreEntry[] = [];
 
   for (const genre of i.GenreItems ?? []) {
-    const name = genre.Name?.trim();
+    const name = genre.Name == null ? "" : String(genre.Name).trim();
     if (!name) continue;
     const nameKey = name.toLowerCase();
     const id = trimId(genre.Id);
@@ -811,7 +822,9 @@ const genreEntries = computed<GenreEntry[]>(() => {
   }
 
   for (const rawName of i.Genres ?? []) {
-    const name = rawName.trim();
+    // Same defensive coercion as trimId: some servers emit non-string values
+    // here and a bare .trim() would crash the whole detail page render.
+    const name = rawName == null ? "" : String(rawName).trim();
     const key = `name:${name.toLowerCase()}`;
     const nameKey = name.toLowerCase();
     if (!name || seen.has(key) || seenNames.has(nameKey)) continue;
@@ -824,7 +837,7 @@ const genreEntries = computed<GenreEntry[]>(() => {
 });
 
 function normalizeStudio(studio: NameIdPair): StudioEntry | null {
-  const name = studio.Name?.trim();
+  const name = studio.Name == null ? "" : String(studio.Name).trim();
   if (!name) return null;
   const id = trimId(studio.Id);
   return {
@@ -1559,8 +1572,28 @@ async function togglePlayed() {
           <Icon icon="lucide:chevron-left" width="22" />
         </button>
 
+        <!-- Frameless window has no title bar; give the detail hero a top drag
+             strip so the window can be moved. Back button + window controls stay
+             clickable (they sit outside this strip). Fixes 问1. -->
+        <div class="hero__drag" aria-hidden="true" />
+
         <div class="hero__body">
           <div class="hero__main">
+            <img
+              v-if="titleLogoUrl && !titleLogoFailed"
+              class="hero__logo"
+              :class="{ loaded: titleLogoLoaded }"
+              :src="titleLogoUrl"
+              :alt="item.SeriesName ?? item.Name"
+              decoding="async"
+              @load="titleLogoLoaded = true"
+              @error="titleLogoFailed = true"
+            />
+            <h1 class="hero__title" :class="{ 'hero__title--with-logo': titleLogoUrl && !titleLogoFailed }">
+              {{ item.SeriesName ?? item.Name }}
+            </h1>
+            <p v-if="episodeSubtitle" class="hero__ep">{{ episodeSubtitle }}</p>
+
             <div v-if="typeBadge || playStateBadge" class="hero__badges">
               <span
                 v-if="typeBadge"
@@ -1579,67 +1612,6 @@ async function togglePlayed() {
                 {{ playStateBadge.label }}
               </span>
             </div>
-
-            <div class="hero__actions">
-              <button class="hero__play" :disabled="playNavigating" @click="continuePlay">
-                <Icon
-                  :icon="playNavigating ? 'lucide:loader' : 'lucide:play'"
-                  width="20"
-                  :class="{ spin: playNavigating }"
-                />
-                {{ resumeMs > 0 ? "继续播放" : "播放" }}
-              </button>
-              <div class="hero__circles">
-                <button
-                  v-if="desktopDownloadAvailable"
-                  class="circle-btn"
-                  :disabled="!canStartDownload || downloadStarting"
-                  :title="downloadStarting ? '创建下载中' : canStartDownload ? '下载' : '当前条目不可下载'"
-                  :aria-label="downloadStarting ? '创建下载中' : canStartDownload ? '下载' : '当前条目不可下载'"
-                  @click="startDownload"
-                >
-                  <Icon
-                    :icon="downloadStarting ? 'lucide:loader' : 'lucide:download'"
-                    width="18"
-                    :class="{ spin: downloadStarting }"
-                  />
-                </button>
-                <button class="circle-btn" :title="shareStatus ?? '复制分享链接'" :aria-label="shareStatus ?? '复制分享链接'" @click="shareItem">
-                  <Icon icon="lucide:share-2" width="18" />
-                </button>
-                <button
-                  class="circle-btn"
-                  :class="{ active: item.UserData?.IsFavorite }"
-                  :disabled="userDataUpdating === 'favorite'"
-                  :title="item.UserData?.IsFavorite ? '取消收藏' : '收藏'"
-                  :aria-label="item.UserData?.IsFavorite ? '取消收藏' : '收藏'"
-                  @click="toggleFavorite"
-                >
-                  <Icon
-                    :icon="userDataUpdating === 'favorite' ? 'lucide:loader' : 'lucide:heart'"
-                    width="18"
-                    :class="{ spin: userDataUpdating === 'favorite' }"
-                  />
-                </button>
-                <button
-                  class="circle-btn"
-                  :class="{ active: item.UserData?.Played }"
-                  :disabled="userDataUpdating === 'played'"
-                  :title="item.UserData?.Played ? '取消已看' : '标记已看'"
-                  :aria-label="item.UserData?.Played ? '取消已看' : '标记已看'"
-                  @click="togglePlayed"
-                >
-                  <Icon
-                    :icon="userDataUpdating === 'played' ? 'lucide:loader' : 'lucide:check'"
-                    width="18"
-                    :class="{ spin: userDataUpdating === 'played' }"
-                  />
-                </button>
-              </div>
-            </div>
-
-            <h1 class="hero__title">{{ item.SeriesName ?? item.Name }}</h1>
-            <p v-if="episodeSubtitle" class="hero__ep">{{ episodeSubtitle }}</p>
 
             <div v-if="genreEntries.length" class="hero__tags">
               <button
@@ -1704,6 +1676,64 @@ async function togglePlayed() {
             </div>
             <p v-if="actionError" class="hero__action-error">{{ actionError }}</p>
             <p v-if="shareStatus" class="hero__action-status">{{ shareStatus }}</p>
+
+            <div class="hero__actions">
+              <button class="hero__play" :disabled="playNavigating" @click="continuePlay">
+                <Icon
+                  :icon="playNavigating ? 'lucide:loader' : 'lucide:play'"
+                  width="20"
+                  :class="{ spin: playNavigating }"
+                />
+                {{ resumeMs > 0 ? "继续播放" : "播放" }}
+              </button>
+              <div class="hero__circles">
+                <button
+                  v-if="desktopDownloadAvailable"
+                  class="circle-btn"
+                  :disabled="!canStartDownload || downloadStarting"
+                  :title="downloadStarting ? '创建下载中' : canStartDownload ? '下载' : '当前条目不可下载'"
+                  :aria-label="downloadStarting ? '创建下载中' : canStartDownload ? '下载' : '当前条目不可下载'"
+                  @click="startDownload"
+                >
+                  <Icon
+                    :icon="downloadStarting ? 'lucide:loader' : 'lucide:download'"
+                    width="18"
+                    :class="{ spin: downloadStarting }"
+                  />
+                </button>
+                <button class="circle-btn" :title="shareStatus ?? '复制分享链接'" :aria-label="shareStatus ?? '复制分享链接'" @click="shareItem">
+                  <Icon icon="lucide:share-2" width="18" />
+                </button>
+                <button
+                  class="circle-btn"
+                  :class="{ active: item.UserData?.IsFavorite }"
+                  :disabled="userDataUpdating === 'favorite'"
+                  :title="item.UserData?.IsFavorite ? '取消收藏' : '收藏'"
+                  :aria-label="item.UserData?.IsFavorite ? '取消收藏' : '收藏'"
+                  @click="toggleFavorite"
+                >
+                  <Icon
+                    :icon="userDataUpdating === 'favorite' ? 'lucide:loader' : 'lucide:heart'"
+                    width="18"
+                    :class="{ spin: userDataUpdating === 'favorite' }"
+                  />
+                </button>
+                <button
+                  class="circle-btn"
+                  :class="{ active: item.UserData?.Played }"
+                  :disabled="userDataUpdating === 'played'"
+                  :title="item.UserData?.Played ? '取消已看' : '标记已看'"
+                  :aria-label="item.UserData?.Played ? '取消已看' : '标记已看'"
+                  @click="togglePlayed"
+                >
+                  <Icon
+                    :icon="userDataUpdating === 'played' ? 'lucide:loader' : 'lucide:check'"
+                    width="18"
+                    :class="{ spin: userDataUpdating === 'played' }"
+                  />
+                </button>
+              </div>
+            </div>
           </div>
 
           <aside
@@ -2120,11 +2150,21 @@ async function togglePlayed() {
     animation: none;
   }
 }
+.hero__drag {
+  position: absolute;
+  top: 0;
+  left: 64px;
+  right: 160px;
+  height: 44px;
+  z-index: 3;
+  -webkit-app-region: drag;
+}
 .hero__back {
   position: absolute;
   top: 16px;
   left: 16px;
-  z-index: 2;
+  z-index: 4;
+  -webkit-app-region: no-drag;
   pointer-events: auto;
   appearance: none;
   border: none;
@@ -2263,20 +2303,19 @@ async function togglePlayed() {
 }
 .hero__playback-panel {
   width: 100%;
-  display: grid;
-  gap: 10px;
-  padding: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 8px;
-  background: rgba(20, 20, 24, 0.42);
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.26);
-  backdrop-filter: blur(18px);
+  /* Horizontal, frameless: 版本/音频/字幕 sit side by side with no boxed border
+     (the previous boxed panel looked abrupt over the artwork). */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 18px;
 }
 .hero-select {
-  display: grid;
-  grid-template-columns: 46px minmax(0, 1fr);
-  align-items: center;
-  gap: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 180px;
+  min-width: 150px;
 }
 .hero-select label {
   color: rgba(255, 255, 255, 0.74);
@@ -2293,6 +2332,13 @@ async function togglePlayed() {
   color: white;
   padding: 0 34px 0 10px;
   outline: none;
+  /* The hero panel is always dark regardless of app theme; without this the
+     native dropdown popup renders light-themed (white-on-white) in light mode. */
+  color-scheme: dark;
+}
+.hero-select select option {
+  background: #232327;
+  color: rgba(255, 255, 255, 0.92);
 }
 .hero-select select:focus {
   border-color: rgba(168, 85, 247, 0.72);
@@ -2340,6 +2386,28 @@ async function togglePlayed() {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+/* Keep the text in the DOM for accessibility while the art logo replaces it. */
+.hero__title--with-logo {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.hero__logo {
+  display: block;
+  max-width: min(520px, 56vw);
+  max-height: 148px;
+  object-fit: contain;
+  object-position: left center;
+  margin: 0 0 6px;
+  opacity: 0;
+  filter: drop-shadow(0 12px 34px rgba(0, 0, 0, 0.5));
+  transition: opacity 220ms var(--easing-glide);
+}
+.hero__logo.loaded {
+  opacity: 1;
 }
 .hero__ep {
   margin: 6px 0 0;

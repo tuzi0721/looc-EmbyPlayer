@@ -10,7 +10,7 @@ import DanmakuOverlay from "@/components/player/DanmakuOverlay.vue";
 import SubtitlePanel from "@/components/player/SubtitlePanel.vue";
 import { api, type PlaybackLineOption, type PlaybackMediaSource } from "@/api";
 import { useKeyboard } from "@/composables/useKeyboard";
-import { hasNativeRuntime, hasTauriRuntime, openFileDialog } from "@/platform";
+import { hasNativeRuntime, hasTauriRuntime, invoke, openFileDialog } from "@/platform";
 import { useAuthStore } from "@/stores/auth";
 import { useLibraryStore } from "@/stores/library";
 import { useDownloadsStore } from "@/stores/downloads";
@@ -58,8 +58,14 @@ const useHtmlVideo = !embedVideo;
 // the in-DOM controls.
 const overlayActive = embedVideo && hasTauriRuntime();
 
+// True when the self-developed Qt hills_player.exe is handling playback.
+// In this mode, hills_player has its own native UI (controls, progress bar, etc.)
+// so the Electron DOM controls are hidden and the stage shows a black background.
+const hillsPlayerMode = ref(false);
+
 const errorText = ref<string | null>(null);
 const errorCopyStatus = ref<string | null>(null);
+// When hillsPlayerMode is active, keep controls hidden (hills_player manages its own).
 const showControls = ref(true);
 // True while the embedded native mpv host is attached + visible (drives whether
 // the controls overlay window should be shown).
@@ -512,7 +518,7 @@ const playbackHasFrame = computed(() => {
   return hasMedia && s.idleActive !== true;
 });
 const showLoadingOverlay = computed(
-  () => !errorText.value && !cachingActive.value && !playbackHasFrame.value,
+  () => !errorText.value && !cachingActive.value && !playbackHasFrame.value && !hillsPlayerMode.value,
 );
 const danmakuMergedAway = computed(() =>
   Math.max(0, danmakuRawCount.value - danmakuComments.value.length),
@@ -1242,6 +1248,30 @@ function onVideoEnded() {
   }
 }
 
+// Embedded-mpv counterpart of the HTML watchdog: mpv has no terminal error
+// event surfaced to the UI, so a stalled stream (server stops sending data
+// mid-open) would otherwise leave the spinner up forever.
+let embedLoadWatchdog: number | null = null;
+function clearEmbedLoadWatchdog() {
+  if (embedLoadWatchdog != null) {
+    window.clearTimeout(embedLoadWatchdog);
+    embedLoadWatchdog = null;
+  }
+}
+function armEmbedLoadWatchdog() {
+  if (useHtmlVideo) return;
+  clearEmbedLoadWatchdog();
+  embedLoadWatchdog = window.setTimeout(() => {
+    embedLoadWatchdog = null;
+    if (playbackHasFrame.value || errorText.value || cachingActive.value) return;
+    errorText.value = "加载超时：播放器长时间未收到视频数据，可能是当前线路不稳定或源站限速。可重试，或回详情页切换版本/线路。";
+    showControls.value = true;
+  }, 45000);
+}
+watch(playbackHasFrame, (has) => {
+  if (has) clearEmbedLoadWatchdog();
+});
+
 function queueTitle(entry: PlayerQueueEntry): string {
   if (isLocalQueue.value) return fileNameFromPath(entry.id);
   if (entry.direct) return entry.direct.title || fileNameFromPath(entry.direct.url);
@@ -1916,7 +1946,23 @@ async function prepareScreenshotFrame() {
 async function setupEmbeddedVideoHost() {
   if (!embedVideo) return true;
   try {
-    await withTimeout(api.embedAttach(), embedAttachTimeoutMs, "embedded mpv host attach timed out");
+    const attachResult = await withTimeout(api.embedAttach(), embedAttachTimeoutMs, "embedded mpv host attach timed out");
+    if (attachResult?.mode === "hills_player") {
+      // hills_player.exe mode: it has its own Qt native UI. Just sync the rect
+      // so it knows where to position its window; skip pointer-poll and DOM controls.
+      hillsPlayerMode.value = true;
+      showControls.value = false;
+      if (typeof ResizeObserver !== "undefined" && stageEl.value) {
+        embedResizeObserver = new ResizeObserver(scheduleEmbedRectSync);
+        embedResizeObserver.observe(stageEl.value);
+      }
+      window.addEventListener("resize", scheduleEmbedRectSync, { passive: true });
+      scheduleEmbedRectSync();
+      await syncEmbedRect();
+      embeddedHostActive.value = true;
+      return true;
+    }
+    hillsPlayerMode.value = false;
     if (typeof ResizeObserver !== "undefined" && stageEl.value) {
       embedResizeObserver = new ResizeObserver(scheduleEmbedRectSync);
       embedResizeObserver.observe(stageEl.value);
@@ -2554,6 +2600,7 @@ async function startCurrentPlayback() {
     if (player.playbackSource?.prefetching) {
       await waitForPrefetchAndPlayLocal(start);
     }
+    armEmbedLoadWatchdog();
   }
   await applyPictureMode();
   bumpControls();
@@ -2598,6 +2645,10 @@ async function takeScreenshot() {
 
 onMounted(async () => {
   playerUnmounted = false;
+  // Switch the Electron titlebar overlay to dark to match the player's black background.
+  if (!hasTauriRuntime() && hasNativeRuntime()) {
+    invoke("set_player_titlebar_theme").catch(() => {});
+  }
   document.addEventListener("fullscreenchange", onFullscreenChange);
   document.addEventListener("webkitfullscreenchange", onFullscreenChange);
   try {
@@ -2624,11 +2675,17 @@ onMounted(async () => {
 
 onBeforeUnmount(async () => {
   playerUnmounted = true;
+  // Restore the Electron titlebar overlay to the app theme color when leaving the player.
+  if (!hasTauriRuntime() && hasNativeRuntime()) {
+    invoke("restore_app_titlebar_theme").catch(() => {});
+  }
+  hillsPlayerMode.value = false;
   document.removeEventListener("fullscreenchange", onFullscreenChange);
   document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
   blackoutSyncSeq += 1;
   clearControlsHideTimer();
   clearLongPressSpeedTimer();
+  clearEmbedLoadWatchdog();
   if (screenshotMessageTimer != null) window.clearTimeout(screenshotMessageTimer);
   clearErrorCopyStatus();
   if (useHtmlVideo) {
@@ -4093,10 +4150,10 @@ onBeforeUnmount(async () => {
 }
 .popup-menu .popup-option.active {
   background: var(--accent-soft);
-  color: var(--accent-hover);
+  color: #f0e6ff;
 }
 .popup-menu .popup-option--blocked {
-  color: rgba(255, 255, 255, 0.42);
+  color: rgba(255, 255, 255, 0.55);
 }
 .popup-option__text {
   min-width: 0;
@@ -4115,7 +4172,7 @@ onBeforeUnmount(async () => {
   font-weight: 650;
 }
 .popup-option__text small {
-  color: rgba(255, 255, 255, 0.56);
+  color: rgba(255, 255, 255, 0.70);
   font-size: 11px;
 }
 .popup-option__check {

@@ -68,8 +68,8 @@ function pathCandidates() {
     process.resourcesPath ? path.join(process.resourcesPath, "mpv", "mpv.exe") : null,
     path.join(path.dirname(process.execPath), "resources", "mpv", "mpv.exe"),
     path.resolve("src-tauri", "resources", "mpv", "mpv.exe"),
+    // No target/debug fallback: it can shadow the canonical resources/mpv with a stale copy.
     path.resolve("src-tauri", "target", "release", "resources", "mpv", "mpv.exe"),
-    path.resolve("src-tauri", "target", "debug", "resources", "mpv", "mpv.exe"),
   ].filter(Boolean);
 }
 
@@ -330,6 +330,12 @@ export class MpvController {
       args.push("--cache=yes");
       args.push(`--demuxer-max-bytes=${settings.mpvCacheMb}MiB`);
     }
+    // Some servers stall the HTTP stream mid-read (observed: connection went
+    // silent after ~6 MiB and ffmpeg waited out its default 60 s timeout while
+    // the UI spun on "加载中"). Fail stalled reads fast and let ffmpeg resume
+    // with a ranged reconnect instead of hanging the open.
+    args.push("--network-timeout=12");
+    args.push("--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=4");
     // Reference parity (HillsLite「最大缓存时长」/「低质量视频解码」). The
     // Electron --vo is fixed by the d3d11 embedding path above, so the
     // videoOutputDriver setting only drives the Tauri/IPC backend.

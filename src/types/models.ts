@@ -123,6 +123,7 @@ export interface AppSettings {
   subtitleBold: boolean;
   subtitleSecondaryPositionPct: number;
   anime4kMode: Anime4kMode;
+  danmakuApiBase?: string | null;
 }
 
 export interface LineHealthReport {

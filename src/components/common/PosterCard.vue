@@ -24,7 +24,7 @@ const emit = defineEmits<{
 }>();
 
 const artEl = ref<HTMLDivElement | null>(null);
-const { visible } = useLazyVisible(artEl, { rootMargin: "300px 0px" });
+const { visible } = useLazyVisible(artEl, { rootMargin: "800px 0px" });
 const loaded = ref(false);
 const imageCandidateIndex = ref(0);
 
@@ -175,11 +175,14 @@ function activate() {
     @keydown.space.prevent="activate"
   >
     <div ref="artEl" class="poster__art">
+      <!-- Visibility is already gated by the IntersectionObserver above; native
+           loading="lazy" on top of it only adds Chromium's lazy-load queue cap
+           and slows bulk poster loading down. -->
       <img
         v-if="imageUrl && (eager || visible)"
         :src="imageUrl"
         :alt="item.Name"
-        loading="lazy"
+        loading="eager"
         decoding="async"
         :class="{ loaded }"
         @load="onImageLoad"

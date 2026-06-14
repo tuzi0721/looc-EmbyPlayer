@@ -45,6 +45,21 @@ function hasElectronImageCache(): boolean {
   return hostname !== "tauri.localhost" && protocol !== "tauri:";
 }
 
+// Chromium's resource scheduler throttles parallel requests per host (~6). All
+// media images share the synthetic "media" host of the hills-image protocol,
+// which serializes poster loading on first paint. Sharding the host name lets
+// many image fetches run concurrently while the main-process handler treats
+// every "mediaN" host identically (cache keys ignore the host).
+const IMAGE_HOST_SHARDS = 8;
+
+function imageHostShard(itemId: string): string {
+  let hash = 0;
+  for (let i = 0; i < itemId.length; i += 1) {
+    hash = (hash * 31 + itemId.charCodeAt(i)) | 0;
+  }
+  return `media${Math.abs(hash) % IMAGE_HOST_SHARDS}`;
+}
+
 export function mediaImageUrl(
   server: Server | null | undefined,
   itemId: string | null | undefined,
@@ -65,7 +80,7 @@ export function mediaImageUrl(
       encodeURIComponent(imageType),
     ].join("/");
     const query = params.toString();
-    return `hills-image://media/${route}${query ? `?${query}` : ""}`;
+    return `hills-image://${imageHostShard(itemId)}/${route}${query ? `?${query}` : ""}`;
   }
 
   const sep = line.baseUrl.endsWith("/") ? "" : "/";

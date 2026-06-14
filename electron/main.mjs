@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, globalShortcut, ipcMain, protocol, screen, session, shell } from "electron";
+import { app, BrowserWindow, Menu, dialog, globalShortcut, ipcMain, nativeTheme, protocol, screen, session, shell } from "electron";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -18,9 +18,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 const devServerUrl = process.env.HILLS_ELECTRON_DEV_SERVER_URL;
 const writableRootDir = app.isPackaged ? path.dirname(process.execPath) : rootDir;
+// Persist user data in the stable per-user appData dir (e.g. %APPDATA%/Hills Lite),
+// NOT next to the exe. Storing it inside win-unpacked meant every electron-builder
+// rebuild wiped it (lost servers/accounts) and re-triggered legacy migration, which
+// made deleted/"built-in" servers reappear. appData survives reinstalls & rebuilds.
 const userDataDir = process.env.HILLS_ELECTRON_USER_DATA_DIR
   ? path.resolve(process.env.HILLS_ELECTRON_USER_DATA_DIR)
-  : path.join(writableRootDir, ".electron-user-data");
+  : path.join(app.getPath("appData"), "Hills Lite");
 const imageCacheDir = path.join(userDataDir, "image-cache");
 const imageCacheInflight = new Map();
 const remoteFileImageRegistry = new Map();
@@ -106,6 +110,18 @@ const pendingProtocolUrls = [];
 let mainWindow = null;
 let secondaryBlackoutEnabled = false;
 let secondaryBlackoutWindows = [];
+
+// ----- HillsPlayer (self-developed Qt player) -----
+let hillsPlayer = null; // HillsPlayerController instance or null
+let hillsPlayerRect = null; // last rect from embed_set_rect
+let hillsPlayerDurationMs = 0; // duration reported by hills_player
+// When true, hills_player runs as a standalone fullscreen window and the Electron
+// shell is hidden during playback (restored on the player's exit). This is the
+// path-B "standalone native player" model and removes the old "two windows +
+// double controls + white titlebar" problem caused by overlaying the Qt window on
+// the Vue player area.
+let hillsPlayerStandalone = false;
+
 let embedHostRect = null;
 let embedHostParent = null;
 let embedHostWindow = null;
@@ -583,7 +599,10 @@ function parseImageProtocolUrl(value) {
     if (!spec) throw new Error("remote file image expired");
     return spec;
   }
-  if (url.hostname !== "media") {
+  // "media" plus sharded "mediaN" hosts (the renderer spreads image URLs over
+  // several host names so Chromium's per-host request throttle cannot
+  // serialize poster loading; every shard resolves identically here).
+  if (!/^media\d*$/.test(url.hostname)) {
     throw new Error("invalid image cache protocol");
   }
   const parts = url.pathname
@@ -1114,10 +1133,159 @@ function resolveEmbedHostHelperPath() {
   const name = process.platform === "win32" ? "electron_mpv_host.exe" : "electron_mpv_host";
   const candidates = [
     path.join(process.resourcesPath ?? "", name),
+    // No target/debug fallback: a stale debug helper here silently shadows the release build.
     path.join(rootDir, "src-tauri", "target", "release", name),
-    path.join(rootDir, "src-tauri", "target", "debug", name),
   ];
   return candidates.find((candidate) => candidate && fs.existsSync(candidate)) ?? null;
+}
+
+// Resolve the self-developed Qt player (hills_player.exe).
+// Packaged builds: resources/player/hills_player.exe (via extraResources).
+// Dev: src-tauri/resources/player/hills_player.exe.
+function resolveHillsPlayerPath() {
+  const name = process.platform === "win32" ? "hills_player.exe" : "hills_player";
+  const candidates = [
+    process.resourcesPath ? path.join(process.resourcesPath, "player", name) : null,
+    path.join(rootDir, "src-tauri", "resources", "player", name),
+  ];
+  return candidates.find((c) => c && fs.existsSync(c)) ?? null;
+}
+
+// Controller for the self-developed Qt hills_player process.
+// Communicates via argv (URL + flags) on start, stdin JSON commands, and
+// stdout HILLS_MPV_EVENT: <json> lines for state events.
+class HillsPlayerController {
+  constructor() {
+    this.process = null;
+    this._buf = "";
+    this._handlers = [];
+    this._state = {
+      paused: true,
+      positionMs: 0,
+      durationMs: 0,
+      speed: 1,
+      eof: false,
+    };
+  }
+
+  isRunning() {
+    return Boolean(this.process && this.process.exitCode == null && !this.process.killed);
+  }
+
+  get processId() {
+    return this.process?.pid ?? null;
+  }
+
+  get state() {
+    return { ...this._state };
+  }
+
+  onEvent(handler) {
+    this._handlers.push(handler);
+    return () => {
+      this._handlers = this._handlers.filter((h) => h !== handler);
+    };
+  }
+
+  _emit(event) {
+    for (const h of this._handlers) {
+      try { h(event); } catch { /* ignore */ }
+    }
+  }
+
+  start(playerPath, url, extraArgs = []) {
+    this.stop();
+    const args = [url, ...extraArgs, "--stdin-control"];
+    console.log(`[hills_player] starting: ${playerPath} ${args.join(" ")}`);
+    this.process = spawn(playerPath, args, {
+      windowsHide: false,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    this._buf = "";
+    this._state = { paused: false, positionMs: 0, durationMs: 0, speed: 1, eof: false };
+    this.process.stdout?.setEncoding("utf8");
+    this.process.stdout?.on("data", (chunk) => this._onData(chunk));
+    this.process.stderr?.on("data", (chunk) => {
+      console.warn(`[hills_player stderr] ${String(chunk).trim()}`);
+    });
+    this.process.once("exit", (code) => {
+      console.log(`[hills_player] exited with code ${code}`);
+      this.process = null;
+      this._state.eof = true;
+      this._emit({ type: "exit", code });
+    });
+    this.process.once("error", (error) => {
+      console.error(`[hills_player] process error: ${error.message}`);
+    });
+  }
+
+  _onData(chunk) {
+    this._buf += chunk;
+    let idx = this._buf.indexOf("\n");
+    while (idx >= 0) {
+      const line = this._buf.slice(0, idx).trim();
+      this._buf = this._buf.slice(idx + 1);
+      if (line) this._handleLine(line);
+      idx = this._buf.indexOf("\n");
+    }
+  }
+
+  _handleLine(line) {
+    const prefix = "HILLS_MPV_EVENT:";
+    if (!line.startsWith(prefix)) return;
+    let event;
+    try {
+      event = JSON.parse(line.slice(prefix.length).trim());
+    } catch {
+      return;
+    }
+    // The Qt reporter emits the event name under the "event" key (e.g.
+    // {"event":"file-loaded"}); normalize it to `type` so both the state machine
+    // below and onEvent() consumers match. Without this the standalone handoff's
+    // file-loaded never fired → the Electron shell stayed visible → two windows.
+    if (event && event.type == null && event.event != null) event.type = event.event;
+    switch (event.type) {
+      case "time-pos":
+        this._state.positionMs = Math.round(((event.time_pos ?? 0)) * 1000);
+        this._state.paused = false;
+        break;
+      case "pause":
+        this._state.paused = Boolean(event.paused);
+        break;
+      case "file-loaded":
+        this._state.paused = false;
+        this._state.eof = false;
+        if (event.time_pos != null) this._state.positionMs = Math.round(event.time_pos * 1000);
+        break;
+      case "end-file":
+        this._state.eof = true;
+        this._state.paused = true;
+        break;
+      case "speed":
+        this._state.speed = Number(event.speed) || 1;
+        break;
+    }
+    this._emit(event);
+  }
+
+  sendCommand(obj) {
+    if (!this.process?.stdin?.writable) return;
+    try {
+      this.process.stdin.write(`${JSON.stringify(obj)}\n`);
+    } catch { /* ignore */ }
+  }
+
+  stop() {
+    if (!this.process) return;
+    const child = this.process;
+    this.process = null;
+    try { child.stdin?.write(`${JSON.stringify({ action: "quit" })}\n`); } catch { /* ignore */ }
+    setTimeout(() => {
+      if (child.exitCode == null && !child.killed) {
+        try { child.kill(); } catch { /* ignore */ }
+      }
+    }, 1500);
+  }
 }
 
 function sendEmbedHostCommand(command) {
@@ -1464,6 +1632,15 @@ function refreshSecondaryDisplayBlackout() {
   if (secondaryBlackoutEnabled) setSecondaryDisplayBlackout(true);
 }
 
+function withTimeout(promise, ms, label = "operation") {
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms),
+    ),
+  ]);
+}
+
 function cleanupRuntime(reason = "quit") {
   if (runtimeCleanupPromise) return runtimeCleanupPromise;
   runtimeCleanupPromise = (async () => {
@@ -1482,14 +1659,23 @@ function cleanupRuntime(reason = "quit") {
       console.warn("failed to unregister global shortcuts", error);
     }
     try {
-      await mpv.shutdown();
+      if (hillsPlayer) {
+        try { hillsPlayer.stop(); } catch { /* ignore */ }
+        try { hillsPlayer.process?.kill(); } catch { /* ignore */ }
+        hillsPlayer = null;
+      }
     } catch (error) {
-      console.warn("failed to shutdown mpv", error);
+      console.warn("failed to stop hills_player", error);
     }
     try {
-      await destroyEmbedHostWindow();
+      await withTimeout(mpv.shutdown(), 3000, "mpv.shutdown");
     } catch (error) {
-      console.warn("failed to destroy embedded mpv host", error);
+      console.warn("failed to shutdown mpv (or timed out)", error);
+    }
+    try {
+      await withTimeout(destroyEmbedHostWindow(), 3000, "destroyEmbedHostWindow");
+    } catch (error) {
+      console.warn("failed to destroy embedded mpv host (or timed out)", error);
     }
     currentPlaySession = null;
   })().finally(() => {
@@ -2274,9 +2460,141 @@ async function openInExternalPlayer(payload) {
   child.unref();
 }
 
+// Bring the Electron shell back if it was hidden for a standalone player session.
+// NOT used during app quit (cleanupRuntime) — only on user-initiated stop/detach.
+function ensureShellVisible() {
+  hillsPlayerStandalone = false;
+  const w = getMainAppWindow();
+  if (w && !w.isDestroyed() && !w.isVisible()) {
+    w.show();
+    w.focus();
+  }
+}
+
+async function startHillsPlayerForSource(hillsPath, source, payload) {
+  const settings = await store.getSettings();
+  const mainBounds = getMainAppWindow()?.getBounds() ?? { x: 0, y: 0, width: 1280, height: 720 };
+  // Standalone player: size the Qt window to the full work area of the display the
+  // app is on, so that when the Electron shell is hidden it becomes the sole,
+  // properly-sized player window (instead of a small floating overlay rect).
+  const display = screen.getDisplayMatching(mainBounds);
+  const wa = display.workArea;
+
+  if (hillsPlayer?.isRunning()) {
+    hillsPlayer.stop();
+  }
+  hillsPlayer = new HillsPlayerController();
+  hillsPlayerStandalone = true;
+
+  const extraArgs = [
+    `--geometry=${wa.width}x${wa.height}+${wa.x}+${wa.y}`,
+    "--force-window=yes",
+    // Start fullscreen: immersive standalone playback, and the Qt window's custom
+    // title bar hides the min/maximize buttons in fullscreen (only Close remains,
+    // Esc exits) — this removes the "white window buttons" (问9c) without needing a
+    // Qt rebuild. Pairs with hiding the Electron shell during playback.
+    "--fullscreen",
+  ];
+
+  // hills_player has no HTTP-header argv, so Emby auth must travel another way.
+  // The embedded-mpv path sends source.headers; this path previously dropped them
+  // and the stream timed out unauthenticated (401 / no video data). Embed the
+  // token as api_key and also forward headers + user-agent via libmpv passthrough.
+  let streamUrl = source.streamUrl;
+  const headerPairs = Array.isArray(source.headers) ? source.headers : [];
+  const embyToken = headerPairs.find(
+    ([name]) => String(name).toLowerCase() === "x-emby-token",
+  )?.[1];
+  if (embyToken) {
+    try {
+      const u = new URL(streamUrl);
+      if (!u.searchParams.has("api_key") && !u.searchParams.has("X-Emby-Token")) {
+        u.searchParams.set("api_key", embyToken);
+        streamUrl = u.toString();
+      }
+    } catch { /* keep original url */ }
+  }
+  const headerFields = headerPairs
+    .filter(([name, value]) => name && value != null)
+    .map(([name, value]) => `${name}: ${value}`)
+    .join(",");
+  if (headerFields) extraArgs.push(`--http-header-fields=${headerFields}`);
+  if (source.userAgent) extraArgs.push(`--user-agent=${source.userAgent}`);
+
+  if (payload.startMs && Number(payload.startMs) > 0) {
+    extraArgs.push(`--start=${Number(payload.startMs) / 1000}`);
+  }
+  if (settings.networkProxyMode === "custom" && settings.httpProxyUrl?.trim()) {
+    extraArgs.push(`--http-proxy=${settings.httpProxyUrl.trim()}`);
+  }
+  if (settings.preferredAudioLanguage?.trim()) {
+    extraArgs.push(`--alang=${settings.preferredAudioLanguage.trim()}`);
+  }
+  if (settings.preferredSubtitleLanguage?.trim()) {
+    extraArgs.push(`--slang=${settings.preferredSubtitleLanguage.trim()}`);
+  }
+  if (settings.hardwareDecoding) {
+    const hwdecMap = { auto: "auto-safe", d3d11va: "d3d11va", vulkan: "vulkan", copy: "auto-copy" };
+    extraArgs.push(`--hwdec=${hwdecMap[settings.hwdecMode] ?? "auto-safe"}`);
+  }
+  if ((settings.volume ?? 80) !== 80) {
+    extraArgs.push(`--volume=${Math.round(settings.volume ?? 80)}`);
+  }
+
+  hillsPlayerDurationMs = source.durationMs ?? 0;
+  hillsPlayer.start(hillsPath, streamUrl, extraArgs);
+
+  let shellHidden = false;
+  const hideShell = () => {
+    if (shellHidden) return;
+    const w = getMainAppWindow();
+    if (w && !w.isDestroyed() && w.isVisible()) {
+      shellHidden = true;
+      w.hide();
+    }
+  };
+  const restoreShell = () => {
+    hillsPlayerStandalone = false;
+    if (!shellHidden) return;
+    shellHidden = false;
+    const w = getMainAppWindow();
+    if (w && !w.isDestroyed()) {
+      w.show();
+      w.focus();
+    }
+  };
+
+  hillsPlayer.onEvent((event) => {
+    // Hide the Electron shell as soon as the Qt player is up (start-file fires when
+    // mpv begins loading → its window already exists). file-loaded/time-pos are kept
+    // as faster confirmations. The player's back button always exits (restores the
+    // shell), so hiding before playback confirms never strands the user.
+    if (event.type === "start-file" || event.type === "file-loaded" || event.type === "time-pos") {
+      hideShell();
+    }
+    if (event.type === "end-file") {
+      emitAppEvent("player:eof", {});
+    }
+    // Process gone (user closed the Qt window): restore the shell and tell the
+    // renderer to leave the player route.
+    if (event.type === "exit") {
+      emitAppEvent("player:eof", {});
+      restoreShell();
+    }
+  });
+
+  // Fallback: even if no player event arrives (e.g. a source that never loads),
+  // hide the shell shortly after launch so we never show two windows at once. The
+  // Qt window is up by now; exit via its back button restores the shell.
+  setTimeout(() => {
+    if (hillsPlayer?.isRunning()) hideShell();
+  }, 1600);
+}
+
 async function runPlayRequest(payload) {
   const started = performance.now();
   const { server, account } = await requireActivePair();
+  const hillsPath = resolveHillsPlayerPath();
   writePlaybackLog("play_request_start", {
     itemId: payload.itemId,
     startMs: payload.startMs ?? 0,
@@ -2285,7 +2603,7 @@ async function runPlayRequest(payload) {
     mediaSourceId: payload.mediaSourceId ?? null,
     serverId: server.id,
     accountId: account.id,
-    mpvLogPath: path.join(userDataDir, "mpv.log"),
+    mode: hillsPath ? "hills_player" : "mpv",
   });
   try {
     const source = await emby.mpvPlaybackSource(
@@ -2309,6 +2627,25 @@ async function runPlayRequest(payload) {
       tracks: source.tracks,
       diagnostics: source.diagnostics,
     });
+
+    if (hillsPath) {
+      await startHillsPlayerForSource(hillsPath, source, payload);
+      currentPlaySession = {
+        serverId: server.id,
+        accountId: account.id,
+        itemId: source.itemId,
+        playSessionId: source.playSessionId,
+        mediaSourceId: source.mediaSourceId,
+        playMethod: source.playMethod ?? "DirectPlay",
+        lineId: source.lineId,
+      };
+      writePlaybackLog("hills_player_started", {
+        itemId: payload.itemId,
+        playSessionId: source.playSessionId,
+        elapsedMs: Math.round(performance.now() - started),
+      });
+      return source;
+    }
 
     await prepareMpvWindowForEmbeddedPlayback();
     const loadResult = await mpv.load({
@@ -2445,23 +2782,77 @@ async function handleInvoke(command, args = {}) {
   }
 
   if (command === "embed_attach") {
+    // When hills_player.exe is present, use it instead of the old mpv embed path.
+    if (resolveHillsPlayerPath()) {
+      return { mode: "hills_player" };
+    }
     return attachEmbeddedMpvHost();
   }
 
   if (command === "embed_set_rect") {
-    return setEmbeddedMpvRect(args.rect ?? {});
+    const rect = args.rect ?? {};
+    hillsPlayerRect = {
+      x: Math.round(Number(rect.x) || 0),
+      y: Math.round(Number(rect.y) || 0),
+      width: Math.max(1, Math.round(Number(rect.width) || 1)),
+      height: Math.max(1, Math.round(Number(rect.height) || 1)),
+      scale: Math.max(0.1, Number(rect.scale) || 1),
+    };
+    if (hillsPlayer?.isRunning()) {
+      // Standalone fullscreen player: ignore the Vue player-area rect so we never
+      // shrink the Qt window back to an overlay sub-rectangle.
+      if (hillsPlayerStandalone) return null;
+      const mainBounds = getMainAppWindow()?.getBounds() ?? { x: 0, y: 0 };
+      const absX = mainBounds.x + hillsPlayerRect.x;
+      const absY = mainBounds.y + hillsPlayerRect.y;
+      hillsPlayer.sendCommand({
+        action: "set-property",
+        name: "geometry",
+        value: `${hillsPlayerRect.width}x${hillsPlayerRect.height}+${absX}+${absY}`,
+      });
+      return null;
+    }
+    return setEmbeddedMpvRect(rect);
   }
 
   if (command === "embed_set_visible") {
+    if (hillsPlayer?.isRunning()) return null;
     return setEmbeddedMpvVisible(args.visible);
   }
 
   if (command === "embed_detach") {
+    if (hillsPlayer?.isRunning()) {
+      hillsPlayer.stop();
+      hillsPlayer = null;
+      hillsPlayerDurationMs = 0;
+      ensureShellVisible();
+      return null;
+    }
     return detachEmbeddedMpvHost();
   }
 
   if (command === "get_embed_state") {
+    if (resolveHillsPlayerPath()) {
+      return {
+        mode: "hills_player",
+        hillsPlayerRunning: Boolean(hillsPlayer?.isRunning()),
+        hillsPlayerPid: hillsPlayer?.processId ?? null,
+      };
+    }
     return getEmbeddedMpvState();
+  }
+
+  if (command === "set_player_titlebar_theme") {
+    const dark = { color: "#000000", symbolColor: "#e8e8e8", height: TITLEBAR_OVERLAY_HEIGHT };
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try { mainWindow.setTitleBarOverlay(dark); } catch { /* ignore */ }
+    }
+    return null;
+  }
+
+  if (command === "restore_app_titlebar_theme") {
+    applyWindowTheme(currentThemeSync());
+    return null;
   }
 
   if (command === "take_screenshot") {
@@ -2473,7 +2864,9 @@ async function handleInvoke(command, args = {}) {
   }
 
   if (command === "update_settings") {
-    return store.updateSettings(args.patch ?? {});
+    const saved = await store.updateSettings(args.patch ?? {});
+    if (args.patch && "theme" in args.patch) applyWindowTheme(saved.theme);
+    return saved;
   }
 
   if (command === "export_config") {
@@ -2777,6 +3170,17 @@ async function handleInvoke(command, args = {}) {
   }
 
   if (command === "get_state") {
+    if (hillsPlayer?.isRunning()) {
+      const st = hillsPlayer.state;
+      return {
+        ...defaultSnapshot(),
+        paused: st.paused,
+        positionMs: st.positionMs,
+        durationMs: st.durationMs || hillsPlayerDurationMs,
+        speed: st.speed,
+        eof: st.eof,
+      };
+    }
     if (!mpv.isRunning()) return defaultSnapshot();
     try {
       return await mpv.snapshot();
@@ -2786,14 +3190,30 @@ async function handleInvoke(command, args = {}) {
   }
 
   if (command === "pause") {
+    if (hillsPlayer?.isRunning()) {
+      hillsPlayer.sendCommand({ action: "pause" });
+      return null;
+    }
     return runMpvIfRunning(() => mpv.setProperty("pause", true));
   }
 
   if (command === "resume") {
+    if (hillsPlayer?.isRunning()) {
+      hillsPlayer.sendCommand({ action: "play" });
+      return null;
+    }
     return runMpvIfRunning(() => mpv.setProperty("pause", false));
   }
 
   if (command === "stop") {
+    if (hillsPlayer?.isRunning()) {
+      hillsPlayer.stop();
+      hillsPlayer = null;
+      hillsPlayerDurationMs = 0;
+      currentPlaySession = null;
+      ensureShellVisible();
+      return null;
+    }
     if (mpv.isRunning()) await mpv.command(["stop"]);
     currentPlaySession = null;
     return null;
@@ -2801,6 +3221,10 @@ async function handleInvoke(command, args = {}) {
 
   if (command === "seek") {
     const positionMs = Number(args.payload?.positionMs ?? 0);
+    if (hillsPlayer?.isRunning()) {
+      hillsPlayer.sendCommand({ action: "seek", value: Math.max(0, positionMs) / 1000, mode: "absolute" });
+      return null;
+    }
     return runMpvIfRunning(() =>
       mpv.command(["seek", Math.max(0, positionMs) / 1000, "absolute"]),
     );
@@ -2808,16 +3232,28 @@ async function handleInvoke(command, args = {}) {
 
   if (command === "seek_relative") {
     const deltaMs = Number(args.payload?.deltaMs ?? 0);
+    if (hillsPlayer?.isRunning()) {
+      hillsPlayer.sendCommand({ action: "seek", value: deltaMs / 1000, mode: "relative" });
+      return null;
+    }
     return runMpvIfRunning(() =>
       mpv.command(["seek", deltaMs / 1000, "relative+exact"]),
     );
   }
 
   if (command === "set_speed") {
+    if (hillsPlayer?.isRunning()) {
+      hillsPlayer.sendCommand({ action: "set-property", name: "speed", value: String(Number(args.payload?.speed ?? 1)) });
+      return null;
+    }
     return runMpvIfRunning(() => mpv.setProperty("speed", Number(args.payload?.speed ?? 1)));
   }
 
   if (command === "set_audio_track") {
+    if (hillsPlayer?.isRunning()) {
+      hillsPlayer.sendCommand({ action: "set-audio", id: Number(args.payload?.trackId) });
+      return null;
+    }
     return runMpvIfRunning(async () => {
       const preserveCache = await preserveTrackSwitchCache();
       await mpv.setProperty("aid", Number(args.payload?.trackId));
@@ -2827,6 +3263,10 @@ async function handleInvoke(command, args = {}) {
 
   if (command === "set_subtitle_track") {
     const trackId = args.payload?.trackId;
+    if (hillsPlayer?.isRunning()) {
+      hillsPlayer.sendCommand({ action: "set-sub", id: trackId == null ? 0 : Number(trackId) });
+      return null;
+    }
     return runMpvIfRunning(async () => {
       const preserveCache = await preserveTrackSwitchCache();
       await mpv.setProperty("sid", trackId == null ? "no" : Number(trackId));
@@ -2836,6 +3276,7 @@ async function handleInvoke(command, args = {}) {
 
   if (command === "set_secondary_subtitle_track") {
     const trackId = args.payload?.trackId;
+    if (hillsPlayer?.isRunning()) return null; // hills_player does not support secondary sub
     return runMpvIfRunning(async () => {
       await mpv.setProperty("secondary-sid", trackId == null ? "no" : Number(trackId));
       await mpv.setProperty("secondary-sub-visibility", trackId != null);
@@ -2843,18 +3284,28 @@ async function handleInvoke(command, args = {}) {
   }
 
   if (command === "set_volume") {
+    if (hillsPlayer?.isRunning()) {
+      hillsPlayer.sendCommand({ action: "set-property", name: "volume", value: String(Number(args.payload?.volume ?? 80)) });
+      return null;
+    }
     return runMpvIfRunning(() => mpv.setProperty("volume", Number(args.payload?.volume ?? 80)));
   }
 
   if (command === "set_muted") {
+    if (hillsPlayer?.isRunning()) {
+      hillsPlayer.sendCommand({ action: "set-property", name: "mute", value: args.payload?.muted ? "yes" : "no" });
+      return null;
+    }
     return runMpvIfRunning(() => mpv.setProperty("mute", Boolean(args.payload?.muted)));
   }
 
   if (command === "set_picture_mode") {
+    if (hillsPlayer?.isRunning()) return null;
     return runMpvIfRunning(() => applyPictureMode(args.payload?.mode));
   }
 
   if (command === "show_mpv_stats_osd") {
+    if (hillsPlayer?.isRunning()) return null;
     return runMpvIfRunning(() => showMpvStatsOsd(args.page ?? 1));
   }
 
@@ -3098,7 +3549,57 @@ async function handleInvoke(command, args = {}) {
   throw new Error(`Electron backend command not migrated yet: ${command}`);
 }
 
+// Matches --topbar-h in src/styles/theme.css so the window-controls overlay
+// lines up with the in-app top bar.
+const TITLEBAR_OVERLAY_HEIGHT = 44;
+
+function titleBarOverlayForTheme(theme) {
+  // Colors track --surface-1 / --fg-primary of the corresponding app theme.
+  return theme === "light"
+    ? { color: "#f8fafc", symbolColor: "#0d1320", height: TITLEBAR_OVERLAY_HEIGHT }
+    : { color: "#1b1b1d", symbolColor: "#f5f5f7", height: TITLEBAR_OVERLAY_HEIGHT };
+}
+
+function currentThemeSync() {
+  try {
+    const theme = store.getSettingsSync().theme;
+    return theme === "light" || theme === "auto" ? theme : "dark";
+  } catch {
+    return "dark";
+  }
+}
+
+// Keeps every native surface (window-controls overlay, select popups,
+// scrollbars) in sync with the app theme. "auto" hands the decision to the OS
+// so the renderer's prefers-color-scheme reflects the real system theme.
+function applyWindowTheme(theme) {
+  try {
+    nativeTheme.themeSource = theme === "light" ? "light" : theme === "auto" ? "system" : "dark";
+  } catch {
+    /* ignore */
+  }
+  const resolved = nativeTheme.shouldUseDarkColors ? "dark" : "light";
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      mainWindow.setTitleBarOverlay(titleBarOverlayForTheme(resolved));
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+// In "auto" the OS can flip the theme at any time; keep the overlay in sync.
+nativeTheme.on("updated", () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.setTitleBarOverlay(titleBarOverlayForTheme(nativeTheme.shouldUseDarkColors ? "dark" : "light"));
+  } catch {
+    /* ignore */
+  }
+});
+
 function createWindow() {
+  const initialTheme = currentThemeSync();
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -3108,6 +3609,10 @@ function createWindow() {
     backgroundColor: "#000000",
     autoHideMenuBar: true,
     show: false,
+    // Hide the native title bar (app icon + product name) and keep only the
+    // overlay window controls; the in-app TopBar provides the drag region.
+    titleBarStyle: "hidden",
+    titleBarOverlay: titleBarOverlayForTheme(initialTheme),
     webPreferences: {
       preload: path.join(__dirname, "preload.mjs"),
       contextIsolation: true,
@@ -3118,6 +3623,8 @@ function createWindow() {
     },
   });
   mainWindow = win;
+  applyWindowTheme(initialTheme);
+  void storeReady.then(() => applyWindowTheme(currentThemeSync()));
   win.setMenu(null);
   win.setMenuBarVisibility(false);
   win.setAutoHideMenuBar(true);
@@ -3145,7 +3652,13 @@ function createWindow() {
     event.preventDefault();
     if (mainWindowCloseRequested) return;
     mainWindowCloseRequested = true;
+    const forceClose = setTimeout(() => {
+      mainWindowCloseAllowed = true;
+      if (!win.isDestroyed()) win.destroy();
+      if (process.platform !== "darwin") app.quit();
+    }, 6000);
     void cleanupRuntime("window-close").finally(() => {
+      clearTimeout(forceClose);
       mainWindowCloseAllowed = true;
       if (!win.isDestroyed()) win.destroy();
       if (process.platform !== "darwin") app.quit();
@@ -3220,7 +3733,11 @@ app.on("window-all-closed", () => {
 app.on("before-quit", (event) => {
   if (runtimeCleanupFinished) return;
   event.preventDefault();
+  const forceExit = setTimeout(() => {
+    try { app.exit(0); } catch { /* ignore */ }
+  }, 6000);
   void cleanupRuntime("before-quit").finally(() => {
+    clearTimeout(forceExit);
     app.exit(0);
   });
 });

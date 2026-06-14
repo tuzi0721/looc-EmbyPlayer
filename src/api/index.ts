@@ -415,7 +415,8 @@ export const api = {
   getState: () => invoke<MpvSnapshot>("get_state"),
 
   // Embedded MPV native child window
-  embedAttach: () => invoke<void>("embed_attach"),
+  // Returns { mode: "hills_player" } when hills_player.exe is active, else null/void.
+  embedAttach: () => invoke<{ mode?: string } | null>("embed_attach"),
   embedSetRect: (rect: {
     x: number;
     y: number;

@@ -89,8 +89,8 @@ function back() {
     </div>
 
     <div class="topbar__right">
-      <!-- Window controls are provided by the OS title bar (decorations: true).
-           This empty slot reserves space so the drag region balances the layout. -->
+      <!-- Window controls render as a native overlay (Electron titleBarOverlay)
+           in this corner; the slot reserves space so content never sits under them. -->
     </div>
   </header>
 </template>
@@ -108,6 +108,14 @@ function back() {
   border-bottom: 1px solid var(--separator);
   position: relative;
   z-index: 8;
+  /* The Electron window hides its native title bar; the top bar doubles as the
+     drag region (interactive children opt out below). */
+  -webkit-app-region: drag;
+}
+.topbar button,
+.topbar input,
+.topbar .search {
+  -webkit-app-region: no-drag;
 }
 .topbar__left {
   display: inline-flex;
@@ -117,6 +125,8 @@ function back() {
 }
 .topbar__right {
   height: 100%;
+  /* Reserved for the overlay window controls (min/max/close). */
+  min-width: 140px;
 }
 .topbar__center {
   display: flex;

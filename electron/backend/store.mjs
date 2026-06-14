@@ -79,6 +79,7 @@ export const DEFAULT_SETTINGS = {
   subtitleBold: false,
   subtitleSecondaryPositionPct: 0,
   anime4kMode: "off",
+  danmakuApiBase: null,
 };
 
 export const DEFAULT_GLOBAL_SHORTCUTS = [
@@ -443,24 +444,11 @@ export class JsonStore {
       this.state = (await readLegacyTauriState()) ?? structuredClone(EMPTY_STATE);
       await this.save();
     }
-    if (this.state.servers.length === 0 && this.state.accounts.length === 0) {
-      const legacy = await readLegacyTauriState();
-      if (legacy && (legacy.servers.length > 0 || legacy.accounts.length > 0)) {
-        const notificationsClearedAt = this.state.notificationsClearedAt;
-        const clearedNotificationKeys = this.state.clearedNotificationKeys;
-        this.state = {
-          ...legacy,
-          notificationsClearedAt,
-          clearedNotificationKeys,
-          notifications: filterClearedNotifications(
-            legacy.notifications,
-            notificationsClearedAt,
-            clearedNotificationKeys,
-          ),
-        };
-        await this.save();
-      }
-    }
+    // NOTE: do NOT re-seed from the legacy Tauri config whenever the server
+    // list is empty. That caused deleted servers (and a stale "built-in" server)
+    // to reappear after every restart. First-run migration is handled once in the
+    // ENOENT catch branch above; after state.json exists, an empty server list is
+    // a deliberate user state and must be respected.
     this.loaded = true;
     return this.state;
   }

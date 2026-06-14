@@ -503,6 +503,10 @@ Window {
                         color: wcMa.containsMouse ? modelData.hover : "transparent"
                         Image {
                             anchors.centerIn: parent
+                            // Refined window-control glyphs: soft white at rest, full
+                            // on hover — avoids the harsh pure-white "block" look on
+                            // the dark title bar (问9c).
+                            opacity: wcMa.containsMouse ? 1.0 : 0.75
                             // btnMax tracks the real window state (maximize ↔ restore).
                             source: (modelData.name === "btnMax"
                                      && win.visibility === Window.Maximized)

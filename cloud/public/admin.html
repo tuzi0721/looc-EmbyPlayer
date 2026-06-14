@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Hills Lite Cloud · 管理后台</title>
+<style>
+  :root { color-scheme: dark; --bg:#0f1115; --panel:#171a21; --line:#262b36; --fg:#e6e9ef; --dim:#9aa3b2; --accent:#7c5cff; --ok:#37d27a; --warn:#ffb020; --err:#ff5d5d; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 system-ui,Segoe UI,Roboto,"Microsoft YaHei",sans-serif; }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; }
+  header h1 { font-size:16px; margin:0; font-weight:700; }
+  header .who { margin-left:auto; color:var(--dim); font-size:13px; }
+  main { max-width:1100px; margin:0 auto; padding:20px; display:grid; gap:18px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
+  .card h2 { font-size:14px; margin:0 0 12px; color:var(--dim); text-transform:uppercase; letter-spacing:.06em; }
+  label { display:block; font-size:12px; color:var(--dim); margin:8px 0 4px; }
+  input, select { width:100%; background:#0d0f14; border:1px solid var(--line); color:var(--fg); border-radius:8px; padding:9px 10px; outline:none; }
+  input:focus, select:focus { border-color:var(--accent); }
+  .row { display:flex; gap:10px; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:120px; }
+  button { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:9px 16px; font-weight:600; cursor:pointer; margin-top:12px; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--fg); margin-top:0; padding:5px 10px; font-weight:500; }
+  button:disabled { opacity:.5; cursor:default; }
+  table { width:100%; border-collapse:collapse; margin-top:10px; font-size:13px; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--dim); font-weight:600; }
+  code { background:#0d0f14; padding:2px 6px; border-radius:6px; font-family:ui-monospace,Consolas,monospace; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; }
+  .pill.ok { background:rgba(55,210,122,.16); color:var(--ok); }
+  .pill.dim { background:rgba(154,163,178,.16); color:var(--dim); }
+  .pill.err { background:rgba(255,93,93,.16); color:var(--err); }
+  .msg { margin-top:10px; font-size:13px; min-height:18px; }
+  .msg.err { color:var(--err); }
+  .msg.ok { color:var(--ok); }
+  .hidden { display:none; }
+  textarea { width:100%; background:#0d0f14; border:1px solid var(--line); color:var(--fg); border-radius:8px; padding:9px 10px; min-height:90px; font-family:ui-monospace,Consolas,monospace; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Hills Lite Cloud · 管理后台</h1>
+  <span class="who" id="who"></span>
+  <button class="ghost hidden" id="logout">退出</button>
+</header>
+<main>
+  <!-- Login -->
+  <section class="card" id="loginCard">
+    <h2>管理员登录</h2>
+    <div class="row">
+      <div><label>用户名</label><input id="lgUser" autocomplete="username" /></div>
+      <div><label>密码</label><input id="lgPass" type="password" autocomplete="current-password" /></div>
+    </div>
+    <button id="lgBtn">登录</button>
+    <div class="msg" id="lgMsg"></div>
+  </section>
+
+  <!-- Generate codes -->
+  <section class="card hidden app">
+    <h2>批量发码（问8）</h2>
+    <div class="row">
+      <div><label>数量</label><input id="genCount" type="number" value="10" min="1" max="1000" /></div>
+      <div><label>Pro 时长（天）</label><input id="genDays" type="number" value="30" min="1" max="3650" /></div>
+      <div><label>码有效期（天，可空）</label><input id="genExp" type="number" min="1" placeholder="留空=永久有效" /></div>
+      <div><label>备注（可空）</label><input id="genNote" placeholder="如：双十一活动" /></div>
+    </div>
+    <button id="genBtn">生成</button>
+    <div class="msg" id="genMsg"></div>
+    <textarea id="genOut" class="hidden" readonly></textarea>
+  </section>
+
+  <!-- Codes list -->
+  <section class="card hidden app">
+    <h2>兑换码查询</h2>
+    <div class="row">
+      <div><label>批次 ID（可空）</label><input id="qBatch" placeholder="batchId" /></div>
+      <div><label>状态</label><select id="qRedeemed"><option value="">全部</option><option value="false">未使用</option><option value="true">已使用</option></select></div>
+    </div>
+    <button id="qBtn">查询</button>
+    <div class="msg" id="qMsg"></div>
+    <table id="codesTbl" class="hidden"><thead><tr><th>码</th><th>Pro天</th><th>状态</th><th>归属</th><th>过期</th><th></th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <!-- Users -->
+  <section class="card hidden app">
+    <h2>用户管理</h2>
+    <div class="row"><div><label>搜索用户名/邮箱</label><input id="uQuery" placeholder="留空=最近用户" /></div></div>
+    <button id="uBtn">查询</button>
+    <div class="msg" id="uMsg"></div>
+    <table id="usersTbl" class="hidden"><thead><tr><th>用户名</th><th>等级</th><th>Pro到期</th><th>状态</th><th>操作</th></tr></thead><tbody></tbody></table>
+  </section>
+</main>
+
+<script>
+const API = location.origin;
+let token = localStorage.getItem("hl_admin_token") || "";
+
+function $(id){ return document.getElementById(id); }
+function setMsg(el, text, kind){ el.textContent = text || ""; el.className = "msg" + (kind ? " " + kind : ""); }
+
+async function api(path, opts){
+  const res = await fetch(API + path, {
+    ...opts,
+    headers: { "Content-Type":"application/json", ...(token?{Authorization:"Bearer "+token}:{}), ...(opts&&opts.headers||{}) },
+  });
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error || ("HTTP "+res.status));
+  return data;
+}
+
+function showApp(user){
+  $("loginCard").classList.add("hidden");
+  document.querySelectorAll(".app").forEach(e=>e.classList.remove("hidden"));
+  $("logout").classList.remove("hidden");
+  $("who").textContent = user ? (user.username + " · " + user.role) : "";
+}
+function showLogin(){
+  token=""; localStorage.removeItem("hl_admin_token");
+  $("loginCard").classList.remove("hidden");
+  document.querySelectorAll(".app").forEach(e=>e.classList.add("hidden"));
+  $("logout").classList.add("hidden"); $("who").textContent="";
+}
+
+$("lgBtn").onclick = async () => {
+  setMsg($("lgMsg"),"登录中…");
+  try{
+    const r = await api("/auth/login",{method:"POST",body:JSON.stringify({username:$("lgUser").value,password:$("lgPass").value})});
+    if(r.user.role!=="admin"){ setMsg($("lgMsg"),"该账号不是管理员","err"); return; }
+    token=r.token; localStorage.setItem("hl_admin_token",token); showApp(r.user); setMsg($("lgMsg"),"");
+  }catch(e){ setMsg($("lgMsg"), e.message, "err"); }
+};
+$("logout").onclick = showLogin;
+
+$("genBtn").onclick = async () => {
+  setMsg($("genMsg"),"生成中…");
+  try{
+    const body={ count:Number($("genCount").value), proDays:Number($("genDays").value) };
+    if($("genExp").value) body.expiresInDays=Number($("genExp").value);
+    if($("genNote").value) body.note=$("genNote").value;
+    const r = await api("/admin/codes",{method:"POST",body:JSON.stringify(body)});
+    $("genOut").classList.remove("hidden"); $("genOut").value = r.codes.join("\n");
+    setMsg($("genMsg"), "已生成 "+r.codes.length+" 个码（批次 "+r.batchId+"）", "ok");
+  }catch(e){ setMsg($("genMsg"), e.message, "err"); if(e.message==="unauthorized"||e.message==="forbidden") showLogin(); }
+};
+
+$("qBtn").onclick = async () => {
+  setMsg($("qMsg"),"查询中…");
+  try{
+    const p=new URLSearchParams(); if($("qBatch").value)p.set("batchId",$("qBatch").value); if($("qRedeemed").value)p.set("redeemed",$("qRedeemed").value);
+    const r = await api("/admin/codes?"+p.toString());
+    const tb=$("codesTbl").querySelector("tbody"); tb.innerHTML="";
+    for(const c of r.codes){
+      const used=c.redeemed_at, st = c.revoked?'<span class="pill err">已吊销</span>':used?'<span class="pill dim">已使用</span>':'<span class="pill ok">未使用</span>';
+      const tr=document.createElement("tr");
+      tr.innerHTML=`<td><code>${c.code}</code></td><td>${c.pro_days}</td><td>${st}</td><td>${c.redeemed_by_username||"-"}</td><td>${c.expires_at?c.expires_at.slice(0,10):"-"}</td><td>${(!used&&!c.revoked)?`<button class="ghost" data-rev="${c.code}">吊销</button>`:""}</td>`;
+      tb.appendChild(tr);
+    }
+    $("codesTbl").classList.remove("hidden"); setMsg($("qMsg"), r.codes.length+" 条", "ok");
+    tb.querySelectorAll("[data-rev]").forEach(b=>b.onclick=async()=>{ try{ await api("/admin/codes/"+b.dataset.rev+"/revoke",{method:"POST"}); $("qBtn").click(); }catch(e){ alert(e.message);} });
+  }catch(e){ setMsg($("qMsg"), e.message, "err"); if(e.message==="unauthorized"||e.message==="forbidden") showLogin(); }
+};
+
+$("uBtn").onclick = async () => {
+  setMsg($("uMsg"),"查询中…");
+  try{
+    const p=new URLSearchParams(); if($("uQuery").value)p.set("query",$("uQuery").value);
+    const r=await api("/admin/users?"+p.toString());
+    const tb=$("usersTbl").querySelector("tbody"); tb.innerHTML="";
+    for(const u of r.users){
+      const tier=u.proActive?'<span class="pill ok">PRO</span>':'<span class="pill dim">'+u.tier+'</span>';
+      const dis=u.disabled?'<span class="pill err">已禁用</span>':'<span class="pill ok">正常</span>';
+      const tr=document.createElement("tr");
+      tr.innerHTML=`<td>${u.username}</td><td>${tier}</td><td>${u.proExpiresAt?u.proExpiresAt.slice(0,10):"-"}</td><td>${dis}</td>
+        <td><button class="ghost" data-pro="${u.id}">收回Pro</button> <button class="ghost" data-dis="${u.id}" data-cur="${u.disabled}">${u.disabled?"解禁":"禁用"}</button></td>`;
+      tb.appendChild(tr);
+    }
+    $("usersTbl").classList.remove("hidden"); setMsg($("uMsg"), r.users.length+" 人", "ok");
+    tb.querySelectorAll("[data-pro]").forEach(b=>b.onclick=async()=>{ if(!confirm("收回该用户 Pro？"))return; try{ await api("/admin/users/"+b.dataset.pro+"/revoke-pro",{method:"POST"}); $("uBtn").click(); }catch(e){alert(e.message);} });
+    tb.querySelectorAll("[data-dis]").forEach(b=>b.onclick=async()=>{ const next=b.dataset.cur!=="true"; try{ await api("/admin/users/"+b.dataset.dis+"/disable",{method:"POST",body:JSON.stringify({disabled:next})}); $("uBtn").click(); }catch(e){alert(e.message);} });
+  }catch(e){ setMsg($("uMsg"), e.message, "err"); if(e.message==="unauthorized"||e.message==="forbidden") showLogin(); }
+};
+
+// auto-resume session
+(async()=>{ if(token){ try{ const r=await api("/me"); if(r.user.role==="admin"){ showApp(r.user); return; } }catch{} } showLogin(); })();
+</script>
+</body>
+</html>

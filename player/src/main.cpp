@@ -3,6 +3,7 @@
 #include <QQmlContext>
 #include <QQuickWindow>
 #include <QQuickItem>
+#include <QScreen>
 #include <QtQuickControls2/QQuickStyle>
 #include <QSGRendererInterface>
 #include <QFile>
@@ -108,6 +109,22 @@ void applyWindow(QQuickWindow *win, const ArgvOptions &opt) {
     }
 #endif
     if (opt.fullscreen) {
+        // Multi-monitor: place the window on the target monitor (from --geometry's
+        // origin = the host app's monitor) BEFORE going fullscreen, so we fullscreen
+        // on the same screen as the host instead of the default/primary one. Without
+        // this the player fullscreened on another monitor → host stayed visible on
+        // its own monitor = "two windows".
+        if (opt.geometry) {
+            static const QRegularExpression geo(
+                QStringLiteral("\\+(-?\\d+)\\+(-?\\d+)$"));
+            const QRegularExpressionMatch gm = geo.match(*opt.geometry);
+            if (gm.hasMatch()) {
+                const QPoint pos(gm.captured(1).toInt(), gm.captured(2).toInt());
+                if (QScreen *scr = QGuiApplication::screenAt(pos))
+                    win->setScreen(scr);
+                win->setPosition(pos);
+            }
+        }
         win->showFullScreen();
         return;
     }

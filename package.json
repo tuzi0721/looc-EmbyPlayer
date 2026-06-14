@@ -63,6 +63,10 @@
         "to": "mpv"
       },
       {
+        "from": "src-tauri/resources/player",
+        "to": "player"
+      },
+      {
         "from": "src-tauri/target/release/electron_mpv_host.exe",
         "to": "electron_mpv_host.exe"
       }

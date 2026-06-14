@@ -111,12 +111,14 @@ const preloadedImages = ref<HTMLImageElement[]>([]);
 function preloadHeroBackgrounds() {
   const loaded: HTMLImageElement[] = [];
   for (const item of items.value) {
-    const url = firstBackgroundUrl(item);
-    if (!url) continue;
-    const img = new Image();
-    img.decoding = "async";
-    img.src = url;
-    loaded.push(img);
+    const urls = [firstBackgroundUrl(item), firstImageUrl(titleLogoCandidates(item), { maxWidth: "900" })];
+    for (const url of urls) {
+      if (!url) continue;
+      const img = new Image();
+      img.decoding = "async";
+      img.src = url;
+      loaded.push(img);
+    }
   }
   preloadedImages.value = loaded;
 }
@@ -294,7 +296,9 @@ onUnmounted(() => {
         @load="logoLoaded = true"
         @error="logoFailed = true"
       />
-      <h2 class="hero__title" :class="{ 'hero__title--with-logo': titleLogoUrl && logoLoaded && !logoFailed }">
+      <!-- Hide the text title as soon as an art logo is expected (not only after it
+           loads), so the title never flashes first and then gets covered. -->
+      <h2 class="hero__title" :class="{ 'hero__title--with-logo': titleLogoUrl && !logoFailed }">
         {{ displayTitle(current) }}
       </h2>
       <p v-if="episodeSubtitle(current)" class="hero__episode">{{ episodeSubtitle(current) }}</p>
