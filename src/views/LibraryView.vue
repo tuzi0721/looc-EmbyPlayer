@@ -13,14 +13,14 @@ import GlassNavBar from "@/components/common/GlassNavBar.vue";
 import PosterCard from "@/components/common/PosterCard.vue";
 
 import { useLibraryStore } from "@/stores/library";
-
-
+import { useNotificationsStore } from "@/stores/notifications";
 
 const props = defineProps<{ id: string }>();
 
 const router = useRouter();
 
 const lib = useLibraryStore();
+const notifications = useNotificationsStore();
 
 
 
@@ -89,6 +89,12 @@ async function load() {
       lib.views.length === 0 ? lib.refreshHome().catch(() => {}) : Promise.resolve(),
     ]);
 
+  } catch (e) {
+    notifications.addToast({
+      kind: "error",
+      title: "加载媒体库失败",
+      body: String(e),
+    });
   } finally {
 
     loading.value = false;
@@ -109,6 +115,12 @@ async function loadMore() {
 
     await lib.loadMore(props.id, baseParams());
 
+  } catch (e) {
+    notifications.addToast({
+      kind: "error",
+      title: "加载更多失败",
+      body: String(e),
+    });
   } finally {
 
     loadingMore.value = false;

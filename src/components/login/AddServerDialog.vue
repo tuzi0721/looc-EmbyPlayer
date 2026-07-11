@@ -179,7 +179,6 @@ async function submit() {
         <header class="modal__head">
           <div>
             <h3>添加服务器</h3>
-            <p>自动识别 Emby / Jellyfin，保存后追加到现有服务器列表。</p>
           </div>
           <button class="iconbtn" type="button" @click="emit('close')" aria-label="关闭">
             <Icon icon="lucide:x" width="18" />
@@ -190,7 +189,7 @@ async function submit() {
           <section class="section">
             <header class="section-head">
               <h4>账号</h4>
-              <span>可留空，只保存服务器</span>
+              <span>可留空</span>
             </header>
             <div class="account-grid">
               <GlassInput
@@ -230,7 +229,7 @@ async function submit() {
                       placeholder="https://example.com 或 192.168.1.2"
                       icon="lucide:globe-2"
                     />
-                    <GlassInput v-model="line.port" placeholder="端口：443 / 8096 / 任意" />
+                    <GlassInput v-model="line.port" placeholder="端口（可选）" />
                   </div>
 
                   <details class="line-advanced">

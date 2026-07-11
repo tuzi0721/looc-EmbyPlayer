@@ -80,9 +80,6 @@ function gotoFavorites() {
 function gotoHistory() {
   router.push("/history").catch(() => {});
 }
-function gotoAggregate() {
-  router.push("/aggregate").catch(() => {});
-}
 </script>
 
 <template>
@@ -127,15 +124,6 @@ function gotoAggregate() {
       >
         <Icon icon="lucide:history" width="16" />
         <span>历史</span>
-      </button>
-      <button
-        class="nav-btn"
-        :class="{ active: route.name === 'aggregate' }"
-        :title="isCollapsed ? '聚合视界' : undefined"
-        @click="gotoAggregate"
-      >
-        <Icon icon="lucide:infinity" width="16" />
-        <span>聚合视界</span>
       </button>
     </nav>
 

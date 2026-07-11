@@ -198,7 +198,9 @@ function close() {
   flex-direction: column;
   border-left: 1px solid var(--glass-border);
   border-radius: 22px 0 0 22px;
-  padding: 14px 14px 0;
+  /* Top padding clears the frameless-window controls (min/max/close, --topbar-h tall,
+     fixed top-right) so the drawer's 已读/清空/关闭 row no longer collides with them. */
+  padding: calc(var(--topbar-h, 44px) + 12px) 14px 0;
   background: var(--glass-bg-strong);
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);

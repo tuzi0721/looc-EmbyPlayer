@@ -4,6 +4,9 @@
 #include <QQuickWindow>
 #include <QQuickItem>
 #include <QScreen>
+#include <QTimer>
+#include <QDebug>
+#include <utility>
 #include <QtQuickControls2/QQuickStyle>
 #include <QSGRendererInterface>
 #include <QFile>
@@ -15,10 +18,48 @@
 
 #include <algorithm>
 #include <clocale>
+#include <cstdio>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "argv_options.h"
 #include "mpv_object.h"
 #include "control_channel.h"
+
+#ifdef _WIN32
+namespace {
+// Crash diagnostics: on an access violation, write the FAULTING MODULE (DLL) + address
+// to stderr so the host captures it in playback.log. This tells us which layer crashes
+// (nvoglv64/atio6axx = GPU GL driver, d3d11, Qt6Quick, QWindowKit, libmpv-2, ...) — the
+// resize 0xC0000005 otherwise leaves only an exit code. Diagnostic only; it logs then
+// lets the process crash normally.
+LONG WINAPI hillsCrashHandler(EXCEPTION_POINTERS *info) {
+    if (info && info->ExceptionRecord &&
+        info->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
+        void *addr = info->ExceptionRecord->ExceptionAddress;
+        HMODULE mod = nullptr;
+        char name[MAX_PATH] = {0};
+        if (GetModuleHandleExA(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                    GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCSTR>(addr), &mod) &&
+            mod) {
+            GetModuleFileNameA(mod, name, MAX_PATH);
+        }
+        const uintptr_t base = reinterpret_cast<uintptr_t>(mod);
+        const uintptr_t off = reinterpret_cast<uintptr_t>(addr) - base;
+        std::fprintf(stderr,
+                     "[crash] ACCESS_VIOLATION at %p in module '%s' (base+0x%llx)\n",
+                     addr, name[0] ? name : "<unknown>",
+                     static_cast<unsigned long long>(off));
+        std::fflush(stderr);
+    }
+    return EXCEPTION_CONTINUE_SEARCH; // let it crash as usual
+}
+} // namespace
+#endif
 
 #ifdef HILLS_HAVE_QWINDOWKIT
 #include <QWKQuick/quickwindowagent.h>
@@ -101,34 +142,54 @@ void applyWindow(QQuickWindow *win, const ArgvOptions &opt) {
     // also covers the back and pin buttons on the left/right of the title bar.
     if (auto *tb = win->findChild<QQuickItem *>(QStringLiteral("titleBar")))
         agent->setTitleBar(tb);
-    for (const QString &n : {QStringLiteral("btnBack"), QStringLiteral("btnPin"),
-                             QStringLiteral("btnMin"), QStringLiteral("btnMax"),
-                             QStringLiteral("btnClose")}) {
-        if (auto *b = win->findChild<QQuickItem *>(n))
-            agent->setHitTestVisible(b, true);
-    }
-#endif
-    if (opt.fullscreen) {
-        // Multi-monitor: place the window on the target monitor (from --geometry's
-        // origin = the host app's monitor) BEFORE going fullscreen, so we fullscreen
-        // on the same screen as the host instead of the default/primary one. Without
-        // this the player fullscreened on another monitor → host stayed visible on
-        // its own monitor = "two windows".
-        if (opt.geometry) {
-            static const QRegularExpression geo(
-                QStringLiteral("\\+(-?\\d+)\\+(-?\\d+)$"));
-            const QRegularExpressionMatch gm = geo.match(*opt.geometry);
-            if (gm.hasMatch()) {
-                const QPoint pos(gm.captured(1).toInt(), gm.captured(2).toInt());
-                if (QScreen *scr = QGuiApplication::screenAt(pos))
-                    win->setScreen(scr);
-                win->setPosition(pos);
-            }
+    // Register the title-bar buttons as hit-test-visible AFTER the event loop starts.
+    // min/max/close live in a Repeater whose delegates don't exist yet when
+    // applyWindow runs, so findChild returned null and QWK treated clicks on them as
+    // title-bar drags (buttons visible but "unclickable" — only btnBack, a direct
+    // child, worked). A 0ms timer defers registration until the delegates exist.
+    QTimer::singleShot(0, win, [win, agent]() {
+        // back/pin are app buttons (hit-test only); min/max/close are real window
+        // system buttons — registering them via setSystemButton gives QWK proper
+        // native hit-testing (setHitTestVisible alone left them unclickable).
+        for (const QString &n : {QStringLiteral("btnBack"), QStringLiteral("btnPin")}) {
+            if (auto *b = win->findChild<QQuickItem *>(n))
+                agent->setHitTestVisible(b, true);
         }
+        const std::pair<const char *, QWK::WindowAgentBase::SystemButton> sys[] = {
+            {"btnMin", QWK::WindowAgentBase::Minimize},
+            {"btnMax", QWK::WindowAgentBase::Maximize},
+            {"btnClose", QWK::WindowAgentBase::Close},
+        };
+        for (const auto &entry : sys) {
+            if (auto *b = win->findChild<QQuickItem *>(QString::fromUtf8(entry.first)))
+                agent->setSystemButton(entry.second, b);
+        }
+    });
+#endif
+    // Place the window on the target monitor (from --geometry's origin = the host
+    // app's monitor) before maximizing/fullscreening, so it lands on the same screen
+    // as the host, not the default/primary one (multi-monitor → otherwise the host
+    // stayed visible on its own monitor = "two windows").
+    auto placeOnTargetScreen = [&]() {
+        if (!opt.geometry)
+            return;
+        static const QRegularExpression geo(
+            QStringLiteral("\\+(-?\\d+)\\+(-?\\d+)$"));
+        const QRegularExpressionMatch gm = geo.match(*opt.geometry);
+        if (gm.hasMatch()) {
+            const QPoint pos(gm.captured(1).toInt(), gm.captured(2).toInt());
+            if (QScreen *scr = QGuiApplication::screenAt(pos))
+                win->setScreen(scr);
+            win->setPosition(pos);
+        }
+    };
+    if (opt.fullscreen) {
+        placeOnTargetScreen();
         win->showFullScreen();
         return;
     }
     if (opt.maximize) {
+        placeOnTargetScreen();
         win->showMaximized();
         return;
     }
@@ -191,6 +252,10 @@ void dispatchControl(MpvObject *mpv, QGuiApplication *app, const QString &line) 
             args << v.toString();
         if (!args.isEmpty())
             mpv->command(args);
+    } else if (action == QLatin1String("show-panel")) {
+        // Host pushed a selection panel (episodes / versions / quality). Forward
+        // the whole panel object to QML via MpvObject's hostPanelRequested signal.
+        mpv->showHostPanel(o.value(QStringLiteral("panel")).toObject().toVariantMap());
     } else if (action == QLatin1String("quit")) {
         app->quit();
     }
@@ -200,6 +265,9 @@ void dispatchControl(MpvObject *mpv, QGuiApplication *app, const QString &line) 
 
 int main(int argc, char *argv[]) {
     std::setlocale(LC_NUMERIC, "C");
+#ifdef _WIN32
+    AddVectoredExceptionHandler(1, hillsCrashHandler);
+#endif
     // mpv render API integration uses a Qt Quick FBO → force the OpenGL RHI.
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
 

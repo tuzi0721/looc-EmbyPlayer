@@ -93,6 +93,8 @@ pub struct SettingsPatch {
     pub danmaku_bottom_max_rows: Option<u32>,
     pub danmaku_bold: Option<bool>,
     pub danmaku_remember_selection: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_nullable_field")]
+    pub danmaku_api_base: Option<Option<String>>,
     pub subtitle_scale: Option<f64>,
     pub subtitle_text_color: Option<String>,
     pub subtitle_outline_color: Option<String>,
@@ -395,6 +397,16 @@ pub async fn update_settings(
         }
         if let Some(v) = patch.danmaku_remember_selection {
             s.danmaku_remember_selection = v;
+        }
+        if let Some(v) = patch.danmaku_api_base {
+            s.danmaku_api_base = v.and_then(|base| {
+                let base = base.trim().to_string();
+                if base.is_empty() {
+                    None
+                } else {
+                    Some(base)
+                }
+            });
         }
         if let Some(v) = patch.subtitle_scale {
             s.subtitle_scale = v.clamp(0.5, 2.5);

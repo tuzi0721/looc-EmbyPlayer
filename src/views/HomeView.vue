@@ -13,6 +13,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useLibraryStore } from "@/stores/library";
 import { useServerStore } from "@/stores/server";
 import { useSettingsStore } from "@/stores/settings";
+import { useNotificationsStore } from "@/stores/notifications";
 import type { MediaItem } from "@/types/models";
 import { serverActiveLine, serverKindIcon } from "@/utils/serverVisuals";
 import { mediaItemKey, openMediaItemFromSource } from "@/utils/sourceContext";
@@ -22,6 +23,7 @@ const auth = useAuthStore();
 const lib = useLibraryStore();
 const serverStore = useServerStore();
 const settings = useSettingsStore();
+const notifications = useNotificationsStore();
 
 const searchTerm = ref("");
 const searching = ref(false);
@@ -53,7 +55,15 @@ const visibleServers = computed(() => {
 
 async function tryLoadHome() {
   if (hasAccount.value) {
-    await lib.refreshHome().catch(() => {});
+    try {
+      await lib.refreshHome();
+    } catch (e) {
+      notifications.addToast({
+        kind: "error",
+        title: "主页加载失败",
+        body: String(e),
+      });
+    }
   }
 }
 
@@ -70,10 +80,28 @@ function onSearchInput() {
   searchTimer = window.setTimeout(async () => {
     try {
       await lib.search(searchTerm.value.trim());
+    } catch (e) {
+      notifications.addToast({
+        kind: "error",
+        title: "搜索失败",
+        body: String(e),
+      });
     } finally {
       searching.value = false;
     }
   }, 280);
+}
+
+// Two-column search results: series/films first, single episodes below.
+const searchSeriesItems = computed(() =>
+  lib.searchResults.filter((it) => it.Type !== "Episode"),
+);
+const searchEpisodeItems = computed(() =>
+  lib.searchResults.filter((it) => it.Type === "Episode"),
+);
+function exitSearch() {
+  searchTerm.value = "";
+  lib.clearSearch();
 }
 
 function openItem(item: MediaItem) {
@@ -97,9 +125,6 @@ function gotoAddServer() {
 <template>
   <section class="home">
     <div v-if="!hasServer" class="empty-state">
-      <div class="empty-state__art">
-        <Icon icon="lucide:server-cog" width="44" />
-      </div>
       <h2>添加一台媒体服务器</h2>
       <p>从设置里的服务器面板开始，或点击下方按钮。</p>
       <div class="empty-state__actions">
@@ -144,14 +169,34 @@ function gotoAddServer() {
             <h2>搜索结果</h2>
             <span v-if="searching" class="dim">搜索中…</span>
           </header>
-          <div class="grid">
-            <PosterCard
-              v-for="item in lib.searchResults"
-              :key="mediaItemKey(item)"
-              :item="item"
-              :activate-handler="openItem"
-            />
-          </div>
+
+          <template v-if="searchSeriesItems.length > 0">
+            <header class="row-head row-head--sub">
+              <h3>剧集 / 影片</h3>
+            </header>
+            <div class="grid">
+              <PosterCard
+                v-for="item in searchSeriesItems"
+                :key="mediaItemKey(item)"
+                :item="item"
+                :activate-handler="openItem"
+              />
+            </div>
+          </template>
+
+          <template v-if="searchEpisodeItems.length > 0">
+            <header class="row-head row-head--sub">
+              <h3>单集</h3>
+            </header>
+            <div class="grid">
+              <PosterCard
+                v-for="item in searchEpisodeItems"
+                :key="mediaItemKey(item)"
+                :item="item"
+                :activate-handler="openItem"
+              />
+            </div>
+          </template>
         </section>
       </template>
 
@@ -499,6 +544,16 @@ function gotoAddServer() {
   font-size: 12px;
 }
 
+.row-head--sub {
+  margin-top: 18px;
+  margin-bottom: 8px;
+}
+.row-head--sub h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg-secondary);
+}
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));

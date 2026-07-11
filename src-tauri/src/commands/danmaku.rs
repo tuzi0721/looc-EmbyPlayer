@@ -41,6 +41,14 @@ pub async fn fetch_danmaku(
     let provider = by_id(&provider_id)
         .ok_or_else(|| AppError::NotFound(format!("danmaku provider {provider_id}")))?;
 
+    // The danmaku server is user-configured. With no base set, danmaku is
+    // disabled — return `None` (not an error) so the UI can show a hint.
+    let Some(api_base) =
+        crate::danmaku::normalize_danmaku_base(state.config.settings().danmaku_api_base.as_deref())
+    else {
+        return Ok(None);
+    };
+
     let account = state
         .config
         .active_account()
@@ -52,10 +60,10 @@ pub async fn fetch_danmaku(
     let item = state.emby.get_item(&server, &account, &item_id).await?;
 
     let client = state.emby.http().clone();
-    let Some(ep_id) = provider.match_item(&client, &item).await? else {
+    let Some(ep_id) = provider.match_item(&client, &item, &api_base).await? else {
         return Ok(None);
     };
-    let result = provider.fetch(&client, &ep_id).await?;
+    let result = provider.fetch(&client, &ep_id, &api_base).await?;
     Ok(Some(result))
 }
 

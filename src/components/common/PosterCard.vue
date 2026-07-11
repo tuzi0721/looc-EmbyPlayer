@@ -229,7 +229,8 @@ function activate() {
 .poster:hover .poster__art,
 .poster:focus-visible .poster__art {
   transform: translateY(-4px) scale(1.04);
-  box-shadow: var(--shadow-pop);
+  /* Softer than the global --shadow-pop, which was too heavy on posters in dark mode. */
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.34);
   border-color: var(--glass-border-strong);
 }
 .poster:focus-visible {
@@ -320,7 +321,7 @@ function activate() {
 .poster__progress span {
   display: block;
   height: 100%;
-  background: var(--accent);
+  background: var(--progress-color, var(--accent));
 }
 .poster__meta h4 {
   margin: 0;

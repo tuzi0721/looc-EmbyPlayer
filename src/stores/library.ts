@@ -210,10 +210,13 @@ export const useLibraryStore = defineStore("library", () => {
     );
   }
 
+  // Search only the CURRENT server/account (not every saved account). The old
+  // searchAllAccounts mixed results from all servers, which is not what the in-server
+  // search box should do.
   async function search(term: string) {
     searching.value = true;
     try {
-      const r = await api.searchAllAccounts(term);
+      const r = await api.search(term);
       const filteredItems = filterJavItems(r.Items, settings.settings.hideJavCodes);
       searchResults.value = filteredItems;
       return filteredItems;

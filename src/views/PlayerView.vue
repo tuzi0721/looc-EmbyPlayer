@@ -10,7 +10,7 @@ import DanmakuOverlay from "@/components/player/DanmakuOverlay.vue";
 import SubtitlePanel from "@/components/player/SubtitlePanel.vue";
 import { api, type PlaybackLineOption, type PlaybackMediaSource } from "@/api";
 import { useKeyboard } from "@/composables/useKeyboard";
-import { hasNativeRuntime, hasTauriRuntime, invoke, openFileDialog } from "@/platform";
+import { hasNativeRuntime, hasTauriRuntime, invoke, listen, openFileDialog } from "@/platform";
 import { useAuthStore } from "@/stores/auth";
 import { useLibraryStore } from "@/stores/library";
 import { useDownloadsStore } from "@/stores/downloads";
@@ -61,12 +61,17 @@ const overlayActive = embedVideo && hasTauriRuntime();
 // True when the self-developed Qt hills_player.exe is handling playback.
 // In this mode, hills_player has its own native UI (controls, progress bar, etc.)
 // so the Electron DOM controls are hidden and the stage shows a black background.
-const hillsPlayerMode = ref(false);
+// Default to true under the native runtime so we never flash the in-DOM player UI
+// before embed_attach confirms hills_player mode (it always does when the exe is
+// present); embedAttach() flips it back to false only on the embedded-mpv path.
+const hillsPlayerMode = ref(embedVideo);
 
 const errorText = ref<string | null>(null);
 const errorCopyStatus = ref<string | null>(null);
 // When hillsPlayerMode is active, keep controls hidden (hills_player manages its own).
-const showControls = ref(true);
+// Start hidden under the native runtime (hills_player) so the DOM control bar never
+// flashes on the stage while the Qt window is spawning (问: 开启时残留界面).
+const showControls = ref(!embedVideo);
 // True while the embedded native mpv host is attached + visible (drives whether
 // the controls overlay window should be shown).
 const embeddedHostActive = ref(false);
@@ -123,11 +128,16 @@ const danmakuLoading = ref(false);
 const danmakuComments = ref<DanmakuComment[]>([]);
 const danmakuRawCount = ref(0);
 const danmakuProvider = ref<string | null>(null);
+const danmakuHint = ref<string | null>(null);
 const danmakuOpacity = computed(() => settings.settings.danmakuOpacity);
 const danmakuSpeed = computed(() => settings.settings.danmakuSpeed);
 const danmakuFontSize = computed(() => settings.settings.danmakuFontSize);
 const danmakuAvoidSubtitles = computed(() => settings.settings.danmakuAvoidSubtitles);
 const danmakuBottomReservePct = computed(() => settings.settings.danmakuBottomReservePct);
+// Online danmaku requires a user-configured DanDanPlay-compatible server. With
+// none set, online fetch is disabled (XML import still works) and the menu
+// surfaces a hint instead of silently fetching nothing.
+const danmakuApiConfigured = computed(() => !!settings.settings.danmakuApiBase?.trim());
 const queueLoading = ref(false);
 const videoEl = ref<HTMLVideoElement | null>(null);
 const htmlHasFrame = ref(false);
@@ -221,8 +231,16 @@ function openPlayerPanel(panel: PlayerPanel) {
 
 async function toggleDanmaku() {
   if (!danmakuEnabled.value) {
-    danmakuEnabled.value = true;
     if (danmakuComments.value.length === 0) {
+      if (!danmakuApiConfigured.value) {
+        // No server configured: keep danmaku off and surface a hint instead of
+        // fetching nothing. Manual XML import remains available.
+        danmakuEnabled.value = false;
+        danmakuHint.value = "未配置弹幕 API 地址，在线弹幕已关闭。请在「设置 · 弹幕」中填写，或导入 XML。";
+        return;
+      }
+      danmakuEnabled.value = true;
+      danmakuHint.value = null;
       danmakuLoading.value = true;
       try {
         const r = await api.fetchDanmaku(currentItemId.value);
@@ -230,13 +248,19 @@ async function toggleDanmaku() {
         danmakuRawCount.value = comments.reduce((total, c) => total + (c.count ?? 1), 0);
         danmakuProvider.value = r?.provider ?? null;
         danmakuComments.value = mergeDanmakuComments(comments);
+        if (danmakuComments.value.length === 0) {
+          danmakuHint.value = "未找到该内容的在线弹幕。";
+        }
       } catch {
         danmakuRawCount.value = 0;
         danmakuProvider.value = null;
         danmakuComments.value = [];
+        danmakuHint.value = "弹幕获取失败，请检查弹幕 API 地址是否可用。";
       } finally {
         danmakuLoading.value = false;
       }
+    } else {
+      danmakuEnabled.value = true;
     }
   } else {
     danmakuEnabled.value = false;
@@ -248,6 +272,7 @@ function resetDanmakuState() {
   danmakuComments.value = [];
   danmakuRawCount.value = 0;
   danmakuProvider.value = null;
+  danmakuHint.value = null;
 }
 
 // Reference parity (HillsLite 弹幕设置「开启弹幕」「记忆手动选择的弹幕」):
@@ -275,6 +300,9 @@ async function autoStartDanmaku(id: string) {
       }
     }
   }
+  // Only auto-fetch online danmaku when a server is configured; otherwise stay
+  // gracefully off (the menu shows a hint when the user opens it).
+  if (!danmakuApiConfigured.value) return;
   await toggleDanmaku().catch(() => {});
 }
 
@@ -284,6 +312,7 @@ function applyDanmakuResult(result: DanmakuResult) {
   danmakuProvider.value = result.provider;
   danmakuComments.value = mergeDanmakuComments(comments);
   danmakuEnabled.value = danmakuComments.value.length > 0;
+  danmakuHint.value = null;
 }
 
 async function importDanmakuXml() {
@@ -518,7 +547,11 @@ const playbackHasFrame = computed(() => {
   return hasMedia && s.idleActive !== true;
 });
 const showLoadingOverlay = computed(
-  () => !errorText.value && !cachingActive.value && !playbackHasFrame.value && !hillsPlayerMode.value,
+  // Also show the spinner in hills_player mode: while PlaybackInfo resolves (slow
+  // netdisk sources take several seconds) the Qt window isn't up yet, and a blank
+  // black stage looked like a stuck/error screen. The Electron shell is hidden once
+  // the Qt window takes over, so this only covers the pre-launch wait.
+  () => !errorText.value && !cachingActive.value && !playbackHasFrame.value,
 );
 const danmakuMergedAway = computed(() =>
   Math.max(0, danmakuRawCount.value - danmakuComments.value.length),
@@ -1260,6 +1293,11 @@ function clearEmbedLoadWatchdog() {
 }
 function armEmbedLoadWatchdog() {
   if (useHtmlVideo) return;
+  // In hills_player mode the Qt window renders the video, so the Electron stage
+  // never reports a frame — the watchdog would always fire a false "加载超时" error
+  // that persisted (the error dialog stayed on the stage after the player closed).
+  // The Qt player surfaces its own load errors, so skip the Electron watchdog here.
+  if (hillsPlayerMode.value) return;
   clearEmbedLoadWatchdog();
   embedLoadWatchdog = window.setTimeout(() => {
     embedLoadWatchdog = null;
@@ -2643,6 +2681,9 @@ async function takeScreenshot() {
   }
 }
 
+let unlistenPlayerEof: (() => void) | null = null;
+let unlistenStandaloneClosed: (() => void) | null = null;
+
 onMounted(async () => {
   playerUnmounted = false;
   // Switch the Electron titlebar overlay to dark to match the player's black background.
@@ -2651,6 +2692,29 @@ onMounted(async () => {
   }
   document.addEventListener("fullscreenchange", onFullscreenChange);
   document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+  // Standalone (hills_player) playback: the Qt window owns the UI. When it ends or
+  // the user closes it, the main process emits player:eof — leave the now-empty
+  // player route so the Electron stage doesn't linger behind the closed window.
+  listen("player:eof", () => {
+    if (hillsPlayerMode.value && !playerUnmounted) void back();
+  })
+    .then((un) => {
+      if (playerUnmounted) un();
+      else unlistenPlayerEof = un;
+    })
+    .catch(() => {});
+  // Manually closing the Qt window (user clicks its X) emits
+  // player:standalone_closed, NOT player:eof. Without leaving the route here the
+  // Electron stage lingered on /player showing the "加载中…" overlay with no way
+  // out (问: 关闭自研播放器后出现关不掉的加载界面).
+  listen("player:standalone_closed", () => {
+    if (hillsPlayerMode.value && !playerUnmounted) void back();
+  })
+    .then((un) => {
+      if (playerUnmounted) un();
+      else unlistenStandaloneClosed = un;
+    })
+    .catch(() => {});
   try {
     const hostReady = await setupEmbeddedVideoHost();
     if (embedVideo && !hostReady) return;
@@ -2675,6 +2739,10 @@ onMounted(async () => {
 
 onBeforeUnmount(async () => {
   playerUnmounted = true;
+  unlistenPlayerEof?.();
+  unlistenPlayerEof = null;
+  unlistenStandaloneClosed?.();
+  unlistenStandaloneClosed = null;
   // Restore the Electron titlebar overlay to the app theme color when leaving the player.
   if (!hasTauriRuntime() && hasNativeRuntime()) {
     invoke("restore_app_titlebar_theme").catch(() => {});
@@ -2728,11 +2796,11 @@ onBeforeUnmount(async () => {
   >
     <div ref="stageEl" class="player__stage">
       <div
-        v-if="backdropUrl && !htmlHasFrame"
+        v-if="backdropUrl && !htmlHasFrame && !hillsPlayerMode"
         class="player__poster-bg"
         :style="{ backgroundImage: `url(${backdropUrl})` }"
       />
-      <div v-if="(backdropUrl || primaryPosterUrl) && !htmlHasFrame" class="player__poster-shade" />
+      <div v-if="(backdropUrl || primaryPosterUrl) && !htmlHasFrame && !hillsPlayerMode" class="player__poster-shade" />
       <div v-if="useHtmlVideo" class="player__video-wrap">
         <video
           ref="videoEl"
@@ -3203,6 +3271,10 @@ onBeforeUnmount(async () => {
                   <span>数量</span>
                   <strong>{{ danmakuCountLabel }}</strong>
                 </div>
+                <p v-if="!danmakuApiConfigured" class="popup-hint">
+                  未配置弹幕 API 地址，在线弹幕已关闭。请在「设置 · 弹幕」中填写，或导入 XML。
+                </p>
+                <p v-else-if="danmakuHint" class="popup-hint">{{ danmakuHint }}</p>
                 <button @click="toggleDanmaku">
                   {{ danmakuEnabled ? "关闭弹幕" : "开启弹幕" }}
                 </button>
@@ -4193,6 +4265,16 @@ onBeforeUnmount(async () => {
   font-weight: 650;
   text-align: right;
   white-space: nowrap;
+}
+.popup-hint {
+  margin: 2px 10px 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
 }
 .pill-select {
   appearance: none;

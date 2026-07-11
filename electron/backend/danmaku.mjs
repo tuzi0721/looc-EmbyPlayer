@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 const DANMAKU_USER_AGENT = "Hills Lite/0.1.0 (danmaku)";
-const DANDANPLAY_API_BASE_DEFAULT = "https://api.dandanplay.net";
 
 const PROVIDERS = [
   {
@@ -182,7 +181,11 @@ export class DanmakuClient {
     const settings = await this.store.getSettings();
 
     if (provider.id === "dandanplay") {
-      const apiBase = normalizeDanmakuBase(settings.danmakuApiBase) ?? DANDANPLAY_API_BASE_DEFAULT;
+      // The danmaku server is user-configured. With no base set, danmaku is
+      // disabled — return null (not an error) so the UI can show a hint. We
+      // never fall back to a hardcoded server.
+      const apiBase = normalizeDanmakuBase(settings.danmakuApiBase);
+      if (!apiBase) return null;
       return this.fetchDanDanPlay(item, settings.requestTimeoutMs, apiBase);
     }
     return null;
@@ -227,7 +230,7 @@ export class DanmakuClient {
     return parseDanmakuXml(await response.text(), path.basename(url.pathname) || "webdav-xml");
   }
 
-  async fetchDanDanPlay(item, timeoutMs, apiBase = DANDANPLAY_API_BASE_DEFAULT) {
+  async fetchDanDanPlay(item, timeoutMs, apiBase) {
     const episodeId = await this.matchDanDanPlay(item, timeoutMs, apiBase);
     if (!episodeId) return null;
 
@@ -254,7 +257,7 @@ export class DanmakuClient {
     };
   }
 
-  async matchDanDanPlay(item, timeoutMs, apiBase = DANDANPLAY_API_BASE_DEFAULT) {
+  async matchDanDanPlay(item, timeoutMs, apiBase) {
     const fileName = buildFileName(item);
     if (!fileName) return null;
 

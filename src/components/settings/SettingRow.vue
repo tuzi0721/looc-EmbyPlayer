@@ -45,8 +45,6 @@ defineEmits<{ (e: "click"): void }>();
       <div class="setting-row__text">
         <span class="setting-row__label">
           {{ label }}
-          <span v-if="advanced" class="setting-row__badge" title="高级选项">高级</span>
-          <span v-if="isNew" class="setting-row__badge setting-row__badge--new" title="新增设置">新</span>
         </span>
         <span v-if="description" class="setting-row__desc">{{ description }}</span>
       </div>

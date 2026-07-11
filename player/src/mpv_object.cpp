@@ -1,15 +1,20 @@
 #include "mpv_object.h"
 
+#include <QtGui/QGuiApplication>
 #include <QtGui/QOpenGLContext>
+#include <QtGui/QScreen>
 #include <QtOpenGL/QOpenGLFramebufferObject>
 #include <QtOpenGL/QOpenGLFramebufferObjectFormat>
 #include <QtQuick/QQuickWindow>
 #include <QtCore/QByteArray>
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDateTime>
+#include <QtCore/QJsonObject>
+#include <QtCore/QVariantMap>
 #include <QtCore/QVector>
 
 #include <clocale>
+#include <cstdio>
 
 namespace {
 
@@ -86,7 +91,8 @@ QVariant nodeToVariant(const mpv_node *node) {
 // ── Render thread side ──────────────────────────────────────────────────────
 class MpvRenderer : public QQuickFramebufferObject::Renderer {
 public:
-    explicit MpvRenderer(MpvObject *obj) : m_obj(obj) {}
+    explicit MpvRenderer(MpvObject *obj, const QSize &fixedSize)
+        : m_obj(obj), m_fixedSize(fixedSize) {}
 
     ~MpvRenderer() override {
         if (m_mpvGl) {
@@ -109,16 +115,29 @@ public:
                     m_mpvGl, &MpvRenderer::onMpvRenderUpdate, m_obj);
             }
         }
+        // Guard against a 0-dimension FBO during a transient drag-resize size.
+        const QSize safe(qMax(2, size.width()), qMax(2, size.height()));
         QOpenGLFramebufferObjectFormat fmt;
         fmt.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
-        return new QOpenGLFramebufferObject(size, fmt);
+        return new QOpenGLFramebufferObject(safe, fmt);
     }
 
     void render() override {
+        // Skip rendering while the window is actively resizing: calling
+        // mpv_render_context_render mid-resize faulted in the GPU driver's
+        // shader JIT (0xC0000005). The settle timer resumes us after 180ms.
+        if (m_obj->m_resizing.load()) {
+            return;
+        }
         if (!m_mpvGl) {
             return;
         }
         QOpenGLFramebufferObject *fbo = framebufferObject();
+        // Guard against a missing/invalid FBO mid-resize: rendering into a null or
+        // zero-size target is what faulted (0xC0000005) when the window was resized.
+        if (!fbo || !fbo->isValid() || fbo->width() <= 0 || fbo->height() <= 0) {
+            return;
+        }
         mpv_opengl_fbo mpfbo{static_cast<int>(fbo->handle()), fbo->width(),
                              fbo->height(), 0};
         int flip_y = 0;
@@ -140,6 +159,7 @@ public:
 private:
     MpvObject *m_obj = nullptr;
     mpv_render_context *m_mpvGl = nullptr;
+    QSize m_fixedSize;
 };
 
 // ── GUI thread side ─────────────────────────────────────────────────────────
@@ -161,6 +181,27 @@ MpvObject::MpvObject(QQuickItem *parent)
     initMpv();
     connect(this, &MpvObject::onUpdate, this, &MpvObject::doUpdate,
             Qt::QueuedConnection);
+
+    // When the window stops changing size for 180ms, clear the resize flag and
+    // request a repaint so the video resumes rendering at the final size.
+    m_resizeSettleTimer = new QTimer(this);
+    m_resizeSettleTimer->setSingleShot(true);
+    m_resizeSettleTimer->setInterval(180);
+    connect(m_resizeSettleTimer, &QTimer::timeout, this, [this]() {
+        m_resizing.store(false);
+        update();
+    });
+}
+
+void MpvObject::geometryChange(const QRectF &newGeometry,
+                               const QRectF &oldGeometry) {
+    QQuickFramebufferObject::geometryChange(newGeometry, oldGeometry);
+    if (newGeometry.size() != oldGeometry.size()) {
+        m_resizing.store(true);
+        if (m_resizeSettleTimer) {
+            m_resizeSettleTimer->start(); // (re)arm the 180ms settle window
+        }
+    }
 }
 
 MpvObject::~MpvObject() {
@@ -187,8 +228,21 @@ void MpvObject::initMpv() {
     mpv_set_option_string(m_mpv, "keep-open", "yes");
     mpv_set_option_string(m_mpv, "force-window", "no");
     mpv_set_option_string(m_mpv, "vo", "libmpv");
-    mpv_set_option_string(m_mpv, "hwdec", "auto-safe");
+    // Software decode by default (see below for the GPU-path history). 1080p SW decode
+    // is light on this hardware; users can re-enable hardware decode in settings.
+    mpv_set_option_string(m_mpv, "hwdec", "no");
     mpv_set_option_string(m_mpv, "gpu-api", "auto");
+    // profile=fast → simplest libplacebo shader pipeline (bilinear scalers, no dither/
+    // deband/sigmoid/peak-detect). Evidence (playback.log): the resize crash is an
+    // ACCESS_VIOLATION in module '<unknown>' (the GPU driver's JIT-compiled shader
+    // code), at the SAME function offset every run, during render — i.e. libplacebo
+    // (gpu-next) recompiling GLSL on size change tripped a driver shader-compiler bug.
+    // It crashed even with software decode, so it's the render path, not hwdec. Fast
+    // profile minimizes shader JIT to dodge the faulty path. Set BEFORE initialize.
+    mpv_set_option_string(m_mpv, "profile", "fast");
+    // Keep capturing libmpv warnings/errors (teed into playback.log) for diagnosis,
+    // but at "warn" level — "v" (verbose) flooded the log and slowed the player.
+    mpv_request_log_messages(m_mpv, "warn");
     mpv_set_option_string(m_mpv, "sub-auto", "fuzzy");
     // HDR passthrough hint (ignored by older libmpv builds).
     mpv_set_option_string(m_mpv, "target-colorspace-hint", "yes");
@@ -213,7 +267,7 @@ void MpvObject::initMpv() {
 QQuickFramebufferObject::Renderer *MpvObject::createRenderer() const {
     window()->setPersistentGraphics(true);
     window()->setPersistentSceneGraph(true);
-    return new MpvRenderer(const_cast<MpvObject *>(this));
+    return new MpvRenderer(const_cast<MpvObject *>(this), QSize());
 }
 
 void MpvObject::doUpdate() { update(); }
@@ -247,6 +301,14 @@ void MpvObject::onMpvEvents() {
         case MPV_EVENT_PROPERTY_CHANGE:
             handlePropertyChange(static_cast<mpv_event_property *>(event->data));
             break;
+        case MPV_EVENT_LOG_MESSAGE: {
+            auto *msg = static_cast<mpv_event_log_message *>(event->data);
+            // Forward libmpv warnings/errors to stderr; the host tees stderr into
+            // playback.log so a crash's preceding error is captured.
+            std::fprintf(stderr, "[mpv:%s] %s: %s", msg->level, msg->prefix, msg->text);
+            std::fflush(stderr);
+            break;
+        }
         case MPV_EVENT_SHUTDOWN:
             return;
         default:
@@ -339,8 +401,15 @@ QVariant MpvObject::getProperty(const QString &name) const {
     return out;
 }
 
-void MpvObject::uiAction(const QString &action) {
-    m_reporter.uiAction(action);
+void MpvObject::uiAction(const QString &action, const QVariant &data) {
+    QJsonObject payload;
+    if (data.isValid() && data.canConvert<QVariantMap>())
+        payload = QJsonObject::fromVariantMap(data.toMap());
+    m_reporter.uiAction(action, payload);
+}
+
+void MpvObject::showHostPanel(const QVariant &panel) {
+    emit hostPanelRequested(panel);
 }
 
 void MpvObject::loadFile(const QString &url) {

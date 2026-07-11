@@ -6,6 +6,7 @@ import { listen, type UnlistenFn } from "@/platform";
 import type {
   AppNotification,
   NotificationCategory,
+  NotificationKind,
 } from "@/types/models";
 
 /// Soft cap mirroring the backend ring buffer so we never grow unbounded.
@@ -135,6 +136,28 @@ export const useNotificationsStore = defineStore("notifications", () => {
     toastQueue.value = toastQueue.value.filter((t) => t.id !== id);
   }
 
+  /// Show a transient, client-only toast (not persisted to the backend ring).
+  /// Used for one-off UI errors like a failed page load.
+  function addToast(input: {
+    kind: NotificationKind;
+    title: string;
+    body?: string | null;
+    category?: NotificationCategory;
+  }) {
+    toastQueue.value.push({
+      id: `toast-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      kind: input.kind,
+      category: input.category ?? "system",
+      title: input.title,
+      body: input.body ?? null,
+      action: null,
+      createdAt: new Date().toISOString(),
+      read: true,
+      sticky: false,
+      spawnedAt: Date.now(),
+    });
+  }
+
   function openCenter() {
     centerOpen.value = true;
   }
@@ -186,6 +209,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
     markRead,
     markAllRead,
     removeToast,
+    addToast,
     openCenter,
     closeCenter,
     toggleCenter,

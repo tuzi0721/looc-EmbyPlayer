@@ -417,7 +417,7 @@ onUnmounted(() => {
 }
 .hero__title {
   margin: 0 0 8px;
-  font-size: 38px;
+  font-size: 30px;
   font-weight: 700;
   color: white;
   text-shadow: 0 2px 18px rgba(0, 0, 0, 0.55);
@@ -432,13 +432,15 @@ onUnmounted(() => {
   clip-path: inset(50%);
 }
 .hero--cinema .hero__title {
-  font-size: clamp(42px, 5.2vw, 74px);
+  /* Keep the fullscreen cap (52px) and vw scaling the user is happy with; only
+     raise the floor so a narrow / windowed window doesn't shrink the title too far. */
+  font-size: clamp(44px, 3.6vw, 52px);
   max-width: 12em;
 }
 .hero__logo {
   display: block;
-  max-width: min(520px, 58vw);
-  max-height: 132px;
+  max-width: min(400px, 48vw);
+  max-height: 92px;
   object-fit: contain;
   object-position: left center;
   margin: 0 0 14px;
@@ -450,9 +452,11 @@ onUnmounted(() => {
   opacity: 1;
 }
 .hero--cinema .hero__logo {
-  max-width: min(640px, 62vw);
-  max-height: clamp(100px, 16vh, 184px);
-  margin-bottom: 16px;
+  max-width: min(520px, 56vw);
+  /* Keep the fullscreen cap (112px) and vh scaling; only raise the floor so the
+     art-text logo stays sizeable in a windowed (short) window. */
+  max-height: clamp(80px, 9vh, 112px);
+  margin-bottom: 14px;
 }
 .hero__episode {
   margin: 0 0 8px;
@@ -526,8 +530,8 @@ onUnmounted(() => {
 }
 .hero__desc {
   margin: 0;
-  font-size: 14px;
-  line-height: 1.58;
+  font-size: 13px;
+  line-height: 1.5;
   color: rgba(255, 255, 255, 0.68);
   text-shadow: 0 1px 12px rgba(0, 0, 0, 0.5);
   display: -webkit-box;

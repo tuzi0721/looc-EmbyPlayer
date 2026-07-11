@@ -414,6 +414,19 @@ export const api = {
     invoke<ScreenshotResult>("take_screenshot", { payload }),
   getState: () => invoke<MpvSnapshot>("get_state"),
 
+  // Whether the standalone Qt player (hills_player.exe) is available — when true the
+  // detail page plays via that window directly instead of the Electron player route.
+  standalonePlayerAvailable: () => invoke<{ available: boolean }>("standalone_player_available"),
+
+  // Push a selection panel (episodes / versions / quality) to the standalone Qt
+  // player in response to a player:request_panel event. The player renders it and
+  // reports the pick back via a player:panel_select event.
+  setPlayerPanel: (panel: {
+    kind: "episodes" | "versions" | "quality";
+    title: string;
+    entries: { key: string; label: string; sublabel?: string; checked?: boolean }[];
+  }) => invoke<void>("hills_player_set_panel", { panel }),
+
   // Embedded MPV native child window
   // Returns { mode: "hills_player" } when hills_player.exe is active, else null/void.
   embedAttach: () => invoke<{ mode?: string } | null>("embed_attach"),

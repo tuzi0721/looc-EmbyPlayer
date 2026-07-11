@@ -47,12 +47,38 @@ Window {
         return h > 0 ? (h + ":" + p(m) + ":" + p(s)) : (p(m) + ":" + p(s));
     }
     function reveal() { controlsVisible = true; hideTimer.restart(); }
+    // Single-click on the video toggles the chrome: show it (and arm auto-hide) when
+    // hidden, hide it immediately when already shown.
+    function toggleControls() {
+        if (controlsVisible) {
+            controlsVisible = false;
+            hideTimer.stop();
+        } else {
+            reveal();
+        }
+    }
+    // The top-left title shows mpv's media-title. When the host doesn't pass a
+    // real title, media-title falls back to the raw stream URL (…/Videos/stream?
+    // MediaSourceId=…) — which must NOT be shown. Hide anything that looks like a
+    // URL/stream id and keep only a clean human title.
+    function displayTitle() {
+        var t = String(win.mediaTitle || "");
+        if (t.length === 0) return "";
+        if (/^[a-z]+:\/\//i.test(t)) return "";          // http(s)://, file://…
+        if (/\/Videos\/|MediaSourceId|PlaySessionId|stream\?|api_key=/i.test(t)) return "";
+        return t;
+    }
     function toggleFullScreen() {
         win.visibility = (win.visibility === Window.FullScreen)
             ? Window.Windowed : Window.FullScreen;
     }
     function toggleMaximize() {
-        win.visibility = (win.visibility === Window.Maximized)
+        // From either Maximized OR FullScreen, restore straight to Windowed in one
+        // click. Standalone playback now launches FullScreen, and the old toggle
+        // (Maximized?Windowed:Maximized) needed two clicks from fullscreen
+        // (fullscreen→maximized→windowed).
+        win.visibility = (win.visibility === Window.Maximized
+                          || win.visibility === Window.FullScreen)
             ? Window.Windowed : Window.Maximized;
     }
     function togglePinned() {
@@ -63,6 +89,31 @@ Window {
     function hostAction(action, label) {
         mpv.uiAction(action);
         toast.show(label + qsTr(" 已交由宿主处理"));
+    }
+    // Render a host-pushed selection panel (episodes / versions / quality). The
+    // host gathers the list over IPC (it owns the Emby session) and sends it via
+    // MpvObject.hostPanelRequested; we map it into the shared hostMenu and pop it
+    // above the matching button. Picking a row reports the selection back so the
+    // host reloads playback with the chosen episode / media source.
+    function showHostPanel(panel) {
+        if (!panel)
+            return;
+        var kind = panel.kind || "";
+        var entries = (panel.entries || []).map(function (e) {
+            return {
+                label: (e.sublabel && String(e.sublabel).length > 0)
+                       ? (e.label + "   ·   " + e.sublabel) : e.label,
+                checked: e.checked === true,
+                trigger: function () { mpv.uiAction("panel-select", { kind: kind, key: e.key }); }
+            };
+        });
+        if (entries.length === 0)
+            entries = [{ label: qsTr("无可选项"), checked: false, trigger: function () {} }];
+        hostMenu.entries = entries;
+        var anchor = kind === "versions" ? versionBtn
+                   : kind === "quality" ? qualityBtn : episodesBtn;
+        win.reveal();
+        win.popupAbove(hostMenu, anchor);
     }
     function applyZoomMode(mode) {
         // 适应 / 填充 / 拉伸 / 原始 (mpv keepaspect / panscan / video-unscaled)
@@ -111,8 +162,18 @@ Window {
             if (vol !== undefined && vol !== null && !isNaN(vol))
                 win.volumeValue = Math.round(vol);
         }
+        onHostPanelRequested: (panel) => win.showHostPanel(panel)
     }
 
+    // Single click toggles the controls (show/hide); double click toggles
+    // fullscreen. The single-click action is deferred so a double-click doesn't also
+    // fire the single-click toggle first (which would flash the chrome). Click no
+    // longer pauses playback — pause is on Space / the bottom transport button.
+    Timer {
+        id: clickToggleTimer
+        interval: 200
+        onTriggered: win.toggleControls()
+    }
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton
@@ -120,8 +181,12 @@ Window {
         // Hide the pointer together with the chrome during playback; any move
         // calls reveal() which restores both.
         cursorShape: win.controlsVisible ? Qt.ArrowCursor : Qt.BlankCursor
-        onClicked: mpv.togglePause()
-        onDoubleClicked: win.toggleFullScreen()
+        onClicked: clickToggleTimer.restart()
+        onDoubleClicked: {
+            clickToggleTimer.stop();
+            win.toggleFullScreen();
+        }
+        // Moving the mouse reveals the chrome (and re-arms auto-hide).
         onPositionChanged: win.reveal()
     }
 
@@ -315,27 +380,6 @@ Window {
                                 font.pixelSize: 13
                             }
                         }
-                        // PRO badge for premium-tier entries (reference parity
-                        // with HillsLite; cosmetic label, gating is a separate
-                        // IAP feature). Shown only when entry.pro === true.
-                        Rectangle {
-                            visible: modelData.pro === true
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.right: parent.right
-                            anchors.rightMargin: 12
-                            width: proBadge.implicitWidth + 12
-                            height: 16
-                            radius: 8
-                            color: win.accent
-                            Text {
-                                id: proBadge
-                                anchors.centerIn: parent
-                                text: "PRO"
-                                color: "white"
-                                font.pixelSize: 9
-                                font.bold: true
-                            }
-                        }
                         MouseArea {
                             id: rowMa
                             anchors.fill: parent
@@ -403,10 +447,8 @@ Window {
             // alone keeps buttons clickable. Moving the mouse re-reveals it.
             enabled: win.controlsVisible
             Behavior on opacity { NumberAnimation { duration: 180 } }
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: "#cc000000" }
-                GradientStop { position: 1.0; color: "#00000000" }
-            }
+            // Spec: drop the top shadow scrim entirely (transparent top bar).
+            color: "transparent"
 
             Row {
                 anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
@@ -422,7 +464,8 @@ Window {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 2
                     Text {
-                        text: win.mediaTitle
+                        text: win.displayTitle()
+                        visible: text.length > 0
                         color: "white"
                         font.pixelSize: 16
                         font.bold: true
@@ -436,43 +479,18 @@ Window {
                 anchors { right: parent.right; top: parent.top; bottom: parent.bottom }
                 spacing: 0
 
-                // net speed (toggle in settings; spec: off by default)
+                // net speed (toggle in settings; spec: off by default).
+                // Spec: show ONLY the speed number — no sparkline/underline.
                 Item {
                     visible: win.netSpeedVisible
-                    width: 120
+                    width: 96
                     height: topBar.height
-                    Column {
+                    Text {
+                        id: netSpeedText
                         anchors.centerIn: parent
-                        spacing: 2
-                        Text {
-                            id: netSpeedText
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            color: "white"
-                            font.pixelSize: 11
-                            text: "0.0 MB/s"
-                        }
-                        Canvas {
-                            id: spark
-                            width: 96; height: 16
-                            property var samples: []
-                            onPaint: {
-                                var ctx = getContext("2d");
-                                ctx.clearRect(0, 0, width, height);
-                                if (samples.length < 2) return;
-                                var max = 1;
-                                for (var i = 0; i < samples.length; ++i)
-                                    if (samples[i] > max) max = samples[i];
-                                ctx.strokeStyle = win.accent;
-                                ctx.lineWidth = 1.5;
-                                ctx.beginPath();
-                                for (var j = 0; j < samples.length; ++j) {
-                                    var x = j / (samples.length - 1) * width;
-                                    var y = height - (samples[j] / max) * (height - 2) - 1;
-                                    if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-                                }
-                                ctx.stroke();
-                            }
-                        }
+                        color: "white"
+                        font.pixelSize: 12
+                        text: "0.0 MB/s"
                     }
                 }
 
@@ -485,46 +503,70 @@ Window {
                     onClicked: win.togglePinned()
                 }
 
-                Repeater {
-                    model: [
-                        { name: "btnMin", icon: "icons/minimize.svg", hover: "#33ffffff" },
-                        { name: "btnMax", icon: "icons/maximize.svg", hover: "#33ffffff" },
-                        { name: "btnClose", icon: "icons/close.svg", hover: "#e81123" }
-                    ]
-                    delegate: Rectangle {
-                        required property var modelData
-                        objectName: modelData.name
-                        // Minimize/maximize are meaningless in fullscreen — keep
-                        // only Close there (Esc also exits fullscreen).
-                        visible: !(win.visibility === Window.FullScreen
-                                   && modelData.name !== "btnClose")
-                        width: visible ? 46 : 0
-                        height: topBar.height
-                        color: wcMa.containsMouse ? modelData.hover : "transparent"
-                        Image {
-                            anchors.centerIn: parent
-                            // Refined window-control glyphs: soft white at rest, full
-                            // on hover — avoids the harsh pure-white "block" look on
-                            // the dark title bar (问9c).
-                            opacity: wcMa.containsMouse ? 1.0 : 0.75
-                            // btnMax tracks the real window state (maximize ↔ restore).
-                            source: (modelData.name === "btnMax"
-                                     && win.visibility === Window.Maximized)
-                                    ? "icons/restore.svg" : modelData.icon
-                            sourceSize.width: 18
-                            sourceSize.height: 18
-                            smooth: true
-                        }
-                        MouseArea {
-                            id: wcMa
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onClicked: {
-                                if (modelData.name === "btnMin") win.showMinimized();
-                                else if (modelData.name === "btnMax") win.toggleMaximize();
-                                else win.close();
-                            }
-                        }
+                // Explicit instances (NOT a Repeater): Repeater delegates are
+                // invisible to QQuickWindow::findChild on the C++ side, so they were
+                // never registered as QWK system buttons → unclickable. Direct
+                // children (like btnBack) are found and register correctly.
+                Rectangle {
+                    objectName: "btnMin"
+                    width: 46
+                    height: topBar.height
+                    color: minMa.containsMouse ? "#33ffffff" : "transparent"
+                    Image {
+                        anchors.centerIn: parent
+                        opacity: minMa.containsMouse ? 1.0 : 0.75
+                        source: "icons/minimize.svg"
+                        sourceSize.width: 18
+                        sourceSize.height: 18
+                        smooth: true
+                    }
+                    MouseArea {
+                        id: minMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: win.showMinimized()
+                    }
+                }
+                Rectangle {
+                    objectName: "btnMax"
+                    width: 46
+                    height: topBar.height
+                    color: maxMa.containsMouse ? "#33ffffff" : "transparent"
+                    Image {
+                        anchors.centerIn: parent
+                        opacity: maxMa.containsMouse ? 1.0 : 0.75
+                        // Track the real window state (maximize ↔ restore glyph).
+                        source: win.visibility === Window.Maximized
+                                ? "icons/restore.svg" : "icons/maximize.svg"
+                        sourceSize.width: 18
+                        sourceSize.height: 18
+                        smooth: true
+                    }
+                    MouseArea {
+                        id: maxMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: win.toggleMaximize()
+                    }
+                }
+                Rectangle {
+                    objectName: "btnClose"
+                    width: 46
+                    height: topBar.height
+                    color: closeMa.containsMouse ? "#e81123" : "transparent"
+                    Image {
+                        anchors.centerIn: parent
+                        opacity: closeMa.containsMouse ? 1.0 : 0.75
+                        source: "icons/close.svg"
+                        sourceSize.width: 18
+                        sourceSize.height: 18
+                        smooth: true
+                    }
+                    MouseArea {
+                        id: closeMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: win.close()
                     }
                 }
             }
@@ -534,13 +576,14 @@ Window {
         Rectangle {
             id: bottomBar
             anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-            height: 110
+            height: 124
             opacity: win.controlsVisible ? 1 : 0
             enabled: win.controlsVisible
             Behavior on opacity { NumberAnimation { duration: 180 } }
+            // Spec: lighten the bottom scrim (was #e6 ≈ 90% black).
             gradient: Gradient {
                 GradientStop { position: 0.0; color: "#00000000" }
-                GradientStop { position: 1.0; color: "#e6000000" }
+                GradientStop { position: 1.0; color: "#99000000" }
             }
 
             ColumnLayout {
@@ -561,6 +604,11 @@ Window {
                     Slider {
                         id: seekbar
                         Layout.fillWidth: true
+                        // Taller interactive area so grabbing/dragging the bar is
+                        // forgiving and never falls through to the video tap (which
+                        // would pause). The visual bar stays thin & centered.
+                        implicitHeight: 30
+                        padding: 0
                         // Don't take key focus, else its built-in arrow handling
                         // fires alongside the global Left/Right seek shortcuts.
                         focusPolicy: Qt.NoFocus
@@ -577,13 +625,13 @@ Window {
                             x: seekbar.leftPadding
                             y: seekbar.topPadding + seekbar.availableHeight / 2 - height / 2
                             width: seekbar.availableWidth
-                            height: 4
-                            radius: 2
+                            height: 6
+                            radius: 3
                             color: "#59ffffff"
                             Rectangle {
                                 width: seekbar.visualPosition * parent.width
                                 height: parent.height
-                                radius: 2
+                                radius: 3
                                 color: win.accent
                             }
                         }
@@ -591,7 +639,7 @@ Window {
                             x: seekbar.leftPadding + seekbar.visualPosition
                                * (seekbar.availableWidth - width)
                             y: seekbar.topPadding + seekbar.availableHeight / 2 - height / 2
-                            width: 14; height: 14; radius: 7
+                            width: 20; height: 20; radius: 10
                             color: seekbar.pressed ? win.accentHover : "white"
                             border.color: win.accent
                             border.width: 2
@@ -667,8 +715,16 @@ Window {
                         onClicked: speedMenu.popup(speedBtn)
                     }
                     CtrlButton {
+                        id: versionBtn
                         iconSource: "icons/version.svg"; label: qsTr("版本")
-                        onClicked: win.hostAction("versions", qsTr("版本切换"))
+                        // Ask the host (it owns the Emby session) to push the
+                        // version list; QML renders it in hostMenu on arrival.
+                        onClicked: mpv.uiAction("versions")
+                    }
+                    CtrlButton {
+                        id: qualityBtn
+                        iconSource: "icons/quality.svg"; label: qsTr("清晰度")
+                        onClicked: mpv.uiAction("quality")
                     }
                     CtrlButton {
                         id: audioBtn
@@ -695,8 +751,9 @@ Window {
                         onClicked: settingsMenu.popup(gearBtn)
                     }
                     CtrlButton {
+                        id: episodesBtn
                         iconSource: "icons/playlist.svg"; label: qsTr("选集")
-                        onClicked: win.hostAction("episodes", qsTr("选集"))
+                        onClicked: mpv.uiAction("episodes")
                     }
                     CtrlButton {
                         iconSource: "icons/fullscreen.svg"; label: qsTr("全屏")
@@ -710,11 +767,16 @@ Window {
     // ── popup menus ──────────────────────────────────────────────────────────
     function popupAbove(menu, anchorItem) {
         var p = anchorItem.mapToItem(controlsLayer, 0, 0);
-        var w = menu.width > 0 ? menu.width : menu.implicitWidth;
-        // Clamp to all four edges so a tall menu or a left-edge anchor never
-        // pushes the popup off-screen (was only clamped against the right edge).
+        // Compute the menu size deterministically from the entry count (each row is
+        // 36px tall + 2px spacing, plus 6px padding top & bottom). Measuring
+        // menu.height after open() was unreliable — the Popup content lays out over
+        // several frames, so a tall menu often opened at the bottom and got cut off
+        // (问题3). entryWidth is the known content width.
+        var n = (menu.entries && menu.entries.length) ? menu.entries.length : 1;
+        var w = (menu.entryWidth > 0 ? menu.entryWidth : 220) + 12;
+        var h = Math.min(n * 38 + 12, win.height - 32);
         menu.x = Math.max(8, Math.min(p.x, win.width - w - 8));
-        menu.y = Math.max(8, p.y - menu.implicitHeight - 8);
+        menu.y = Math.max(8, Math.min(p.y - h - 8, win.height - h - 8));
         menu.open();
     }
 
@@ -774,6 +836,15 @@ Window {
         entryWidth: 260
     }
 
+    // Host-driven selection panel (episodes / versions / quality). Its entries are
+    // filled by win.showHostPanel() when the host pushes a list; wider than the
+    // track menus so episode titles fit.
+    PlayerMenu {
+        id: hostMenu
+        parent: controlsLayer
+        entryWidth: 320
+    }
+
     PlayerMenu {
         id: settingsMenu
         parent: controlsLayer
@@ -784,9 +855,8 @@ Window {
                   trigger: function () { zoomMenu.popup(gearBtn); } },
                 { label: qsTr("Anime4K  ▸"), checked: mpv.anime4k.preset !== "Off"
                                                        && mpv.anime4k.preset !== "",
-                  pro: true,
                   trigger: function () { anime4kMenu.popup(gearBtn); } },
-                { label: qsTr("跳过片头/片尾"), checked: false, pro: true,
+                { label: qsTr("跳过片头/片尾"), checked: false,
                   trigger: function () { win.hostAction("skip-intro-settings", qsTr("跳过片头/片尾")); } },
                 { label: qsTr("字幕设置  ▸"), checked: false,
                   trigger: function () { subSettingsMenu.popup(gearBtn); } },
@@ -882,11 +952,6 @@ Window {
             var bps = mpv.getProperty("cache-speed");
             var mbs = (bps && !isNaN(bps)) ? bps / (1024 * 1024) : 0;
             netSpeedText.text = mbs.toFixed(mbs >= 10 ? 0 : 1) + " MB/s";
-            var s = spark.samples.slice();
-            s.push(mbs);
-            if (s.length > 30) s.shift();
-            spark.samples = s;
-            spark.requestPaint();
         }
     }
 

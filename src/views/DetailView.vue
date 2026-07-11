@@ -43,9 +43,13 @@ const actionError = ref<string | null>(null);
 const shareStatus = ref<string | null>(null);
 const userDataUpdating = ref<"favorite" | "played" | null>(null);
 const playNavigating = ref(false);
+// When the standalone Qt player is available, playback opens that window directly (it is
+// the player + loading surface) and we do NOT navigate to the Electron player route.
+const standalonePlayerAvailable = ref(false);
 const downloadStarting = ref(false);
 const showStudioPopover = ref(false);
 const heroBackdropIndex = ref(0);
+const heroBackdropLoaded = ref(false);
 let shareStatusTimer: number | null = null;
 
 const STUDIO_VISIBLE_LIMIT = 3;
@@ -281,7 +285,7 @@ function imageUrl(
 
 const backdropUrls = computed(() =>
   item.value
-    ? mediaItemImageUrls(activeServer.value, item.value, "Backdrop", 2200, {
+    ? mediaItemImageUrls(activeServer.value, item.value, "Backdrop", 1600, {
         accountId: routeAccount.value?.id,
         accessToken: routeAccount.value?.accessToken,
       })
@@ -293,10 +297,17 @@ const backdropUrl = computed(() => {
 });
 
 function onHeroBackdropError() {
+  heroBackdropLoaded.value = false;
   if (heroBackdropIndex.value < backdropUrls.value.length - 1) {
     heroBackdropIndex.value += 1;
   }
 }
+
+// Reset the fade-in whenever the chosen backdrop URL changes (new item, or a
+// fallback candidate after an error) so the next image fades in cleanly.
+watch(backdropUrl, () => {
+  heroBackdropLoaded.value = false;
+});
 
 // Art title logo (same behaviour as the home hero): when a logo is expected the
 // text title is visually hidden immediately so it never flashes before the
@@ -322,18 +333,25 @@ const ambientColor = ref<string | null>(null);
 const ambientStyle = computed(() => ({
   "--detail-ambient": ambientColor.value ?? "var(--ambient)",
 }));
-watch(
-  backdropUrl,
-  async (url) => {
-    ambientColor.value = null;
-    if (!url) return;
-    const rgb = await extractDominantColor(url);
-    if (rgb && backdropUrl.value === url) {
-      ambientColor.value = rgbToCss(rgb);
-    }
-  },
-  { immediate: true },
-);
+// Clear the tint the moment the backdrop target changes.
+watch(backdropUrl, () => {
+  ambientColor.value = null;
+});
+// Sample the dominant color only AFTER the visible backdrop has painted. The
+// extractor loads a CORS Image — a second request for the same URL — so firing
+// it up-front raced the visible <img> on first open (same inflight/cache entry),
+// and whichever lost the race got an empty body, leaving the hero black. Waiting
+// for the load event means the extractor reads from the now-warm cache and never
+// competes for the first paint.
+watch(heroBackdropLoaded, async (loaded) => {
+  if (!loaded) return;
+  const url = backdropUrl.value;
+  if (!url) return;
+  const rgb = await extractDominantColor(url);
+  if (rgb && backdropUrl.value === url && heroBackdropLoaded.value) {
+    ambientColor.value = rgbToCss(rgb);
+  }
+});
 
 const runtimeText = computed(() => {
   const ticks = item.value?.RunTimeTicks ?? 0;
@@ -918,7 +936,17 @@ const activeSeasonName = computed(() => {
   return s?.Name ?? "第 1 季";
 });
 
-onMounted(() => void loadDetail());
+onMounted(() => {
+  void loadDetail();
+  if (hasNativeRuntime()) {
+    api
+      .standalonePlayerAvailable()
+      .then((r) => {
+        standalonePlayerAvailable.value = Boolean(r?.available);
+      })
+      .catch(() => {});
+  }
+});
 onBeforeUnmount(() => {
   clearShareStatus();
   clearDetailOpenTimer();
@@ -1220,13 +1248,44 @@ function setSeriesPlaybackQueue(ep: MediaItem) {
 }
 
 async function pushPlayerRoute(id: string, startMs: number) {
+  const mediaSourceId =
+    id === props.id && selectedMediaSourcePlaybackId.value
+      ? selectedMediaSourcePlaybackId.value
+      : null;
+  // Standalone Qt player: it is the entire playback + loading surface. Start playback
+  // directly (the main process spawns the Qt window and hides the Electron shell) and do
+  // NOT navigate to the Electron player route (that route is what flashed as the unwanted
+  // intermediate page). We stay on the detail page; it is restored when the Qt window is
+  // closed. The player store still drives progress reporting / queue advance / cleanup.
+  // Resolve standalone availability AT CLICK TIME. The onMounted probe may not have
+  // resolved yet (or transiently failed); relying on the stale ref is what let the
+  // unwanted Electron player route flash through occasionally. If the standalone Qt
+  // player is truly available we ALWAYS use it and never navigate to the Electron route.
+  let useStandalone = standalonePlayerAvailable.value;
+  if (!useStandalone && hasNativeRuntime()) {
+    try {
+      const r = await api.standalonePlayerAvailable();
+      useStandalone = Boolean(r?.available);
+      standalonePlayerAvailable.value = useStandalone;
+    } catch {
+      /* fall through to navigation */
+    }
+  }
+  if (useStandalone) {
+    await playerStore.play({
+      itemId: id,
+      startMs,
+      preferDirect: true,
+      lineId: null,
+      mediaSourceId,
+    });
+    return;
+  }
   const query: Record<string, string> = { start: String(startMs), from: props.id };
   if (routeAccountId.value) query.account = routeAccountId.value;
   const routeServerId = typeof route.query.server === "string" ? route.query.server.trim() : "";
   if (routeServerId) query.server = routeServerId;
-  if (id === props.id && selectedMediaSourcePlaybackId.value) {
-    query.mediaSourceId = selectedMediaSourcePlaybackId.value;
-  }
+  if (mediaSourceId) query.mediaSourceId = mediaSourceId;
   await router.push({
     name: "player",
     params: { id },
@@ -1561,8 +1620,10 @@ async function togglePlayed() {
           <img
             :src="backdropUrl"
             :alt="item.Name"
+            :class="{ loaded: heroBackdropLoaded }"
             loading="eager"
             decoding="async"
+            @load="heroBackdropLoaded = true"
             @error="onHeroBackdropError"
           />
         </div>
@@ -2106,7 +2167,11 @@ async function togglePlayed() {
 .hero__bg {
   position: absolute;
   inset: 0;
-  background: #08080a;
+  /* Placeholder while the backdrop loads (first open = cache miss = slow server
+     scale/webp). A tinted gradient instead of a flat black rectangle, with the
+     image fading in over it once decoded — fixes "首次打开详情页背景图黑屏". */
+  background: radial-gradient(120% 120% at 72% 18%, rgba(124, 92, 200, 0.2), transparent 58%),
+    linear-gradient(135deg, #1b1b24 0%, #101015 100%);
   pointer-events: none;
 }
 .hero__bg img {
@@ -2115,6 +2180,11 @@ async function togglePlayed() {
   display: block;
   object-fit: cover;
   object-position: center;
+  opacity: 0;
+  transition: opacity 420ms var(--easing-glide, ease);
+}
+.hero__bg img.loaded {
+  opacity: 1;
 }
 .hero__shade {
   position: absolute;
@@ -2247,6 +2317,9 @@ async function togglePlayed() {
   display: flex;
   align-items: center;
   gap: 14px;
+  /* Separate the play/download/share row from the metadata/links above it (it was
+     stuck right up against the previous row). */
+  margin-top: 18px;
   margin-bottom: 14px;
   flex-wrap: wrap;
 }
@@ -2304,10 +2377,12 @@ async function togglePlayed() {
 .hero__playback-panel {
   width: 100%;
   /* Horizontal, frameless: 版本/音频/字幕 sit side by side with no boxed border
-     (the previous boxed panel looked abrupt over the artwork). */
+     (the previous boxed panel looked abrupt over the artwork). Top-align so the
+     select boxes line up even when one column has an extra sub-label (e.g. the
+     version's "STRM"); bottom-align used to push that select up and misalign it. */
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 10px 18px;
 }
 .hero-select {
@@ -2949,7 +3024,7 @@ async function togglePlayed() {
   display: block;
   height: 100%;
   border-radius: 999px;
-  background: var(--accent);
+  background: var(--progress-color, var(--accent));
 }
 .ep-card__progress--watched span {
   background: #6ee7b7;

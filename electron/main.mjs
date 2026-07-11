@@ -29,6 +29,12 @@ const imageCacheDir = path.join(userDataDir, "image-cache");
 const imageCacheInflight = new Map();
 const remoteFileImageRegistry = new Map();
 const maxRemoteFileImages = 2048;
+// Allow-list of local file paths that may be served over hills-image://local.
+// Only paths the app itself decided to expose (posters discovered by
+// list_local_folder) are registered here, so a crafted <img src> cannot read an
+// arbitrary local file just by base64-encoding its path.
+const allowedLocalImagePaths = new Set();
+const maxLocalImagePaths = 8192;
 const imageQueryKeys = new Set(["maxWidth", "maxHeight", "width", "height", "quality", "format", "tag"]);
 const noOpCommands = new Set([
   // Tauri-runtime-only commands. The Electron host has no equivalent yet, so
@@ -590,6 +596,9 @@ function parseImageProtocolUrl(value) {
     const encodedPath = url.pathname.split("/").filter(Boolean)[0];
     if (!encodedPath) throw new Error("invalid local image route");
     const filePath = Buffer.from(encodedPath, "base64url").toString("utf8");
+    if (!allowedLocalImagePaths.has(path.resolve(filePath))) {
+      throw new Error("local image not allowed");
+    }
     return { kind: "local", filePath };
   }
   if (url.hostname === "file") {
@@ -627,6 +636,13 @@ function parseImageProtocolUrl(value) {
 }
 
 function localImageProtocolUrl(filePath) {
+  // Register the path as allowed before minting a URL for it (bounded, FIFO).
+  const resolved = path.resolve(filePath);
+  allowedLocalImagePaths.add(resolved);
+  if (allowedLocalImagePaths.size > maxLocalImagePaths) {
+    const first = allowedLocalImagePaths.values().next().value;
+    if (first) allowedLocalImagePaths.delete(first);
+  }
   return `hills-image://local/${Buffer.from(filePath, "utf8").toString("base64url")}`;
 }
 
@@ -762,13 +778,37 @@ function buildRemoteImageUrl(line, spec) {
   return url;
 }
 
+// Cap concurrent UPSTREAM image fetches. The renderer shards image URLs over 8
+// hosts so Chromium fires up to ~48 requests at once; an image-heavy detail page
+// (backdrop + logo + episodes + cast + related) then stampedes a slow/flaky media
+// server, which drops or times out requests — the "海报经常无法加载" symptom. Cache
+// hits bypass this entirely (they never reach here); only cache-miss network
+// fetches queue, so posters load progressively instead of failing in a burst.
+const IMAGE_FETCH_CONCURRENCY = 6;
+let imageFetchActive = 0;
+const imageFetchWaiters = [];
+function acquireImageFetchSlot() {
+  if (imageFetchActive < IMAGE_FETCH_CONCURRENCY) {
+    imageFetchActive += 1;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => imageFetchWaiters.push(resolve));
+}
+function releaseImageFetchSlot() {
+  const next = imageFetchWaiters.shift();
+  if (next) next(); // hand the in-use slot straight to the next waiter
+  else imageFetchActive = Math.max(0, imageFetchActive - 1);
+}
+
 async function fetchImageWithTimeout(url, init, timeoutMs) {
+  await acquireImageFetchSlot();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timer);
+    releaseImageFetchSlot();
   }
 }
 
@@ -798,7 +838,7 @@ async function fetchAndCacheRemoteFileImage(cacheKey, spec) {
   const data = Buffer.from(await response.arrayBuffer());
   if (data.byteLength === 0) throw new Error("remote file image returned an empty body");
   await writeImageCacheEntry(cacheKey, data, contentType);
-  return cachedImageResponse(data, contentType, "miss");
+  return { data, contentType, state: "miss" };
 }
 
 async function readImageCacheEntry(cacheKey) {
@@ -809,19 +849,155 @@ async function readImageCacheEntry(cacheKey) {
     fs.promises.readFile(metaPath, "utf8"),
   ]);
   const meta = JSON.parse(rawMeta);
+  // Bump the entry's mtime on a cache HIT so LRU eviction reflects real access
+  // (last used), not just last written. Best-effort + async; ignore failures.
+  const now = new Date();
+  void fs.promises.utimes(dataPath, now, now).catch(() => {});
   return { data, contentType: meta.contentType || "application/octet-stream" };
 }
 
 async function writeImageCacheEntry(cacheKey, data, contentType) {
   await fs.promises.mkdir(imageCacheDir, { recursive: true });
-  await Promise.all([
-    fs.promises.writeFile(path.join(imageCacheDir, `${cacheKey}.bin`), data),
-    fs.promises.writeFile(
-      path.join(imageCacheDir, `${cacheKey}.json`),
-      `${JSON.stringify({ contentType, savedAt: new Date().toISOString() })}\n`,
-      "utf8",
-    ),
-  ]);
+  const binPath = path.join(imageCacheDir, `${cacheKey}.bin`);
+  const metaPath = path.join(imageCacheDir, `${cacheKey}.json`);
+  // Write to temp files then rename. A crash/abort mid-write previously left a
+  // truncated .bin that readImageCacheEntry still served as a "cache hit" — a
+  // broken poster that never re-fetched and left no failure log. Rename is atomic
+  // on the same volume, so a reader only ever sees a complete entry.
+  const binTmp = `${binPath}.${process.pid}.tmp`;
+  const metaTmp = `${metaPath}.${process.pid}.tmp`;
+  try {
+    await Promise.all([
+      fs.promises.writeFile(binTmp, data),
+      fs.promises.writeFile(
+        metaTmp,
+        `${JSON.stringify({ contentType, savedAt: new Date().toISOString() })}\n`,
+        "utf8",
+      ),
+    ]);
+    await Promise.all([
+      fs.promises.rename(binTmp, binPath),
+      fs.promises.rename(metaTmp, metaPath),
+    ]);
+  } catch (error) {
+    await Promise.allSettled([fs.promises.rm(binTmp, { force: true }), fs.promises.rm(metaTmp, { force: true })]);
+    throw error;
+  }
+  // A fresh entry was added → keep the on-disk cache under its size budget (LRU).
+  scheduleImageCacheEviction();
+}
+
+// ── poster/image cache LRU eviction (default 1GB, settings.imageCacheLimitMB) ──
+// The hills-image disk cache (image-cache/<key>.bin + .json) grew unbounded until
+// the user hit "清理缓存". Cap it at imageCacheLimitMB and evict the least-recently
+// -used entries (oldest mtime; bumped on read hit) down to ~90% of the cap. A flag
+// debounces the scan so a burst of poster writes triggers at most one pass.
+let imageCacheEvictScheduled = false;
+let imageCacheEvictBusy = false;
+
+function scheduleImageCacheEviction() {
+  if (imageCacheEvictScheduled || imageCacheEvictBusy) return;
+  imageCacheEvictScheduled = true;
+  const timer = setTimeout(() => {
+    imageCacheEvictScheduled = false;
+    void enforceImageCacheLimit();
+  }, 5000);
+  timer.unref?.();
+}
+
+async function enforceImageCacheLimit() {
+  if (imageCacheEvictBusy) return;
+  imageCacheEvictBusy = true;
+  try {
+    let limitMb = 1024;
+    try {
+      const settings = await store.getSettings();
+      const configured = Number(settings.imageCacheLimitMB);
+      if (Number.isFinite(configured) && configured >= 0) limitMb = configured;
+    } catch {
+      /* fall back to the 1GB default */
+    }
+    if (limitMb <= 0) return; // 0 = unlimited
+    const limitBytes = limitMb * 1024 * 1024;
+
+    let names;
+    try {
+      names = await fs.promises.readdir(imageCacheDir);
+    } catch {
+      return; // cache dir not created yet
+    }
+
+    const entries = [];
+    let total = 0;
+    for (const name of names) {
+      if (!name.endsWith(".bin")) continue;
+      const key = name.slice(0, -4);
+      const binPath = path.join(imageCacheDir, name);
+      const metaPath = path.join(imageCacheDir, `${key}.json`);
+      let binStat;
+      try {
+        binStat = await fs.promises.stat(binPath);
+      } catch {
+        continue;
+      }
+      let metaSize = 0;
+      try {
+        metaSize = (await fs.promises.stat(metaPath)).size;
+      } catch {
+        /* meta may be missing; count the bin alone */
+      }
+      const size = binStat.size + metaSize;
+      total += size;
+      entries.push({ binPath, metaPath, size, mtimeMs: binStat.mtimeMs });
+    }
+
+    if (total <= limitBytes) return;
+    // Hysteresis: evict down to 90% of the cap so we don't run a delete pass on
+    // every subsequent write while hovering exactly at the limit.
+    const target = Math.floor(limitBytes * 0.9);
+    entries.sort((a, b) => a.mtimeMs - b.mtimeMs);
+    let removed = 0;
+    for (const entry of entries) {
+      if (total <= target) break;
+      await Promise.allSettled([
+        fs.promises.rm(entry.binPath, { force: true }),
+        fs.promises.rm(entry.metaPath, { force: true }),
+      ]);
+      total -= entry.size;
+      removed += 1;
+    }
+    if (removed > 0) {
+      console.log(`[image-cache] evicted ${removed} entries, ~${Math.round(total / (1024 * 1024))}MB left (cap ${limitMb}MB)`);
+    }
+  } finally {
+    imageCacheEvictBusy = false;
+  }
+}
+
+async function imageCacheDirBytes() {
+  try {
+    const names = await fs.promises.readdir(imageCacheDir);
+    let total = 0;
+    for (const name of names) {
+      try {
+        total += (await fs.promises.stat(path.join(imageCacheDir, name))).size;
+      } catch {
+        /* ignore individual stat errors */
+      }
+    }
+    return total;
+  } catch {
+    return 0;
+  }
+}
+
+async function clearImageCacheDir() {
+  try {
+    await fs.promises.rm(imageCacheDir, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
+  imageCacheInflight.clear();
 }
 
 async function resolveImageSource(spec) {
@@ -852,24 +1028,60 @@ async function fetchAndCacheImage(cacheKey, spec) {
 
   const { server, line, account, settings } = await resolveImageSource(spec);
   const remoteUrl = buildRemoteImageUrl(line, spec);
-  const response = await fetchImageWithTimeout(
-    remoteUrl,
-    {
-      method: "GET",
-      headers: imageRequestHeaders(settings, server, line, account),
-    },
-    settings.requestTimeoutMs,
-  );
-
-  if (!response.ok) {
-    throw new Error(`image request failed: HTTP ${response.status} from ${redactUrl(remoteUrl.toString())}`);
+  const headers = imageRequestHeaders(settings, server, line, account);
+  // Large detail-page images (backdrop / logo that the server scales + re-encodes
+  // to webp on the fly) routinely need far longer than a normal API call. A 15s cap
+  // was a prime suspect for "详情页海报加载不出来", so give images at least 30s.
+  const timeoutMs = Math.max(Number(settings.requestTimeoutMs) || 15_000, 30_000);
+  // Retry transient failures (timeout / network blip / 5xx). Netdisk image servers
+  // are slow and flaky, and a single miss left posters blank ("海报经常无法加载").
+  // Up to 3 attempts with a short backoff; successful bytes are cached so the retry
+  // cost is paid only once per image.
+  const startedAt = performance.now();
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetchImageWithTimeout(remoteUrl, { method: "GET", headers }, timeoutMs);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} from ${redactUrl(remoteUrl.toString())}`);
+      }
+      const contentType = response.headers.get("content-type") || "application/octet-stream";
+      const data = Buffer.from(await response.arrayBuffer());
+      if (data.byteLength === 0) throw new Error("empty body");
+      await writeImageCacheEntry(cacheKey, data, contentType);
+      const elapsedMs = Math.round(performance.now() - startedAt);
+      // Surface slow-but-successful fetches so we can tell server-side scaling
+      // latency apart from outright failures when diagnosing poster loading.
+      if (elapsedMs > 6000) {
+        writePlaybackLog("image_fetch_slow", {
+          itemId: spec.itemId,
+          imageType: spec.imageType,
+          maxWidth: spec.query.get("maxWidth") ?? null,
+          format: spec.query.get("format") ?? null,
+          elapsedMs,
+          bytes: data.byteLength,
+        });
+      }
+      return { data, contentType, state: "miss" };
+    } catch (error) {
+      lastError = error;
+      // A 4xx is a content/auth error (missing image, bad token); retrying won't
+      // help, so fail fast rather than burning the whole backoff budget.
+      if (error instanceof Error && /HTTP 4\d\d/.test(error.message)) break;
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+    }
   }
-
-  const contentType = response.headers.get("content-type") || "application/octet-stream";
-  const data = Buffer.from(await response.arrayBuffer());
-  if (data.byteLength === 0) throw new Error("image request returned an empty body");
-  await writeImageCacheEntry(cacheKey, data, contentType);
-  return cachedImageResponse(data, contentType, "miss");
+  // Always log the real reason a poster never appeared (HTTP status / timeout /
+  // empty body) so "详情页海报加载不出来" can be diagnosed from playback.log.
+  writePlaybackLog("image_fetch_failed", {
+    itemId: spec.itemId,
+    imageType: spec.imageType,
+    maxWidth: spec.query.get("maxWidth") ?? null,
+    format: spec.query.get("format") ?? null,
+    error: String(lastError && lastError.message ? lastError.message : lastError),
+    elapsedMs: Math.round(performance.now() - startedAt),
+  });
+  throw lastError;
 }
 
 async function handleImageProtocolRequest(request) {
@@ -877,6 +1089,9 @@ async function handleImageProtocolRequest(request) {
   try {
     spec = parseImageProtocolUrl(request.url);
   } catch (error) {
+    // Log malformed image routes so a poster that never even reaches the fetch
+    // path (and thus leaves no image_fetch_failed entry) is still diagnosable.
+    writePlaybackLog("image_protocol_bad_route", { url: redactUrl(request.url), error: String(error) });
     return imageProtocolError(400, String(error));
   }
 
@@ -893,8 +1108,27 @@ async function handleImageProtocolRequest(request) {
   }
 
   const cacheKey = imageCacheKey(spec);
+  // Targeted diagnostics for the detail-page hero backdrop ("详情页海报加载不出来").
+  // Low volume (one per detail open). Tells us the backdrop request actually
+  // reached the protocol handler (URL was generated) and how it resolved.
+  const heroWidth = spec.kind === "remote" ? Number(spec.query.get("maxWidth") || 0) : 0;
+  // Capture the detail-page hero image regardless of type: it asks for a Backdrop
+  // but falls back to the item's Primary poster (a large maxWidth>=900 request) when
+  // the item has no backdrop, so logging only "Backdrop" missed it.
+  const isHeroImage = spec.kind === "remote" && (spec.imageType === "Backdrop" || heroWidth >= 900);
+  if (isHeroImage) {
+    writePlaybackLog("image_hero_request", {
+      itemId: spec.itemId,
+      imageType: spec.imageType,
+      maxWidth: spec.query.get("maxWidth") ?? null,
+      format: spec.query.get("format") ?? null,
+    });
+  }
   try {
     const cached = await readImageCacheEntry(cacheKey);
+    if (isHeroImage) {
+      writePlaybackLog("image_hero_hit", { itemId: spec.itemId, imageType: spec.imageType, bytes: cached.data.byteLength });
+    }
     return cachedImageResponse(cached.data, cached.contentType, "hit");
   } catch {
     // Cache misses are normal; fall through to the network path.
@@ -905,7 +1139,15 @@ async function handleImageProtocolRequest(request) {
   }
 
   try {
-    return await imageCacheInflight.get(cacheKey);
+    // The inflight map collapses concurrent requests for the same poster (hero
+    // <img> + dominant-color CORS Image + sibling cards sharing one itemId) onto
+    // a single promise. It must resolve to raw bytes, NOT a shared Response: a
+    // Response body is a one-shot stream, so the first consumer drained it and
+    // every other request got an empty/locked body → "first paint black + broken
+    // image" that fixed itself on reload (cache hit = fresh Response). Build a
+    // fresh Response per caller from the shared (immutable) buffer instead.
+    const payload = await imageCacheInflight.get(cacheKey);
+    return cachedImageResponse(payload.data, payload.contentType, payload.state ?? "miss");
   } catch (error) {
     console.warn("failed to resolve cached image", error);
     return imageProtocolError(502, "image request failed");
@@ -1195,8 +1437,10 @@ class HillsPlayerController {
 
   start(playerPath, url, extraArgs = []) {
     this.stop();
-    const args = [url, ...extraArgs, "--stdin-control"];
-    console.log(`[hills_player] starting: ${playerPath} ${args.join(" ")}`);
+    // Empty url → launch idle (the host loads the file later via a stdin loadfile).
+    const args = [...(url ? [url] : []), ...extraArgs, "--stdin-control"];
+    // The stream URL in argv can carry an api_key/token — redact before logging.
+    console.log(`[hills_player] starting: ${playerPath} ${args.map(redactUrl).join(" ")}`);
     this.process = spawn(playerPath, args, {
       windowsHide: false,
       stdio: ["pipe", "pipe", "pipe"],
@@ -1206,7 +1450,12 @@ class HillsPlayerController {
     this.process.stdout?.setEncoding("utf8");
     this.process.stdout?.on("data", (chunk) => this._onData(chunk));
     this.process.stderr?.on("data", (chunk) => {
-      console.warn(`[hills_player stderr] ${String(chunk).trim()}`);
+      const text = String(chunk).trim();
+      if (!text) return;
+      console.warn(`[hills_player stderr] ${text}`);
+      // Capture the Qt player's stderr to the playback log so issues that happen inside the
+      // player window (e.g. a freeze on track switch) leave a diagnosable trace.
+      writePlaybackLog("hills_stderr", { line: text.slice(0, 600) });
     });
     this.process.once("exit", (code) => {
       console.log(`[hills_player] exited with code ${code}`);
@@ -1258,7 +1507,12 @@ class HillsPlayerController {
         if (event.time_pos != null) this._state.positionMs = Math.round(event.time_pos * 1000);
         break;
       case "end-file":
-        this._state.eof = true;
+        // Only a natural end (reason "eof") counts as "finished" — that is what drives the
+        // store's poll-based auto-advance. A user-initiated close/stop reports reason
+        // "quit"/"stop"; treating those as eof made closing the window look like the video
+        // ended, which auto-played the next item in a loop. (reason ∈ eof/stop/quit/error/
+        // redirect/unknown — see player reporter.cpp.)
+        this._state.eof = event.reason === "eof";
         this._state.paused = true;
         break;
       case "speed":
@@ -2438,11 +2692,28 @@ async function openInExternalPlayer(payload) {
     : "";
 
   if (!playerPath) {
+    // Only http(s) stream URLs may be handed to the OS default handler.
+    const streamScheme = (() => {
+      try {
+        return new URL(source.streamUrl).protocol.toLowerCase();
+      } catch {
+        return "";
+      }
+    })();
+    if (streamScheme !== "http:" && streamScheme !== "https:") {
+      throw new Error("external play requires a configured player for this source");
+    }
     await shell.openExternal(source.streamUrl);
     return;
   }
-  if (!fs.existsSync(playerPath)) {
+  let playerStat;
+  try {
+    playerStat = fs.statSync(playerPath);
+  } catch {
     throw new Error(`external player not found: ${playerPath}`);
+  }
+  if (!playerStat.isFile()) {
+    throw new Error(`external player is not a file: ${playerPath}`);
   }
 
   const args = expandExternalPlayerArgs(
@@ -2457,6 +2728,12 @@ async function openInExternalPlayer(payload) {
     stdio: "ignore",
     windowsHide: false,
   });
+  // Surface spawn failures (bad path after a TOCTOU, permission denied) instead of
+  // failing silently.
+  child.on("error", (error) => {
+    console.error(`[external-player] spawn failed: ${error.message}`);
+    writePlaybackLog("external_player_spawn_error", { message: error.message });
+  });
   child.unref();
 }
 
@@ -2464,6 +2741,7 @@ async function openInExternalPlayer(payload) {
 // NOT used during app quit (cleanupRuntime) — only on user-initiated stop/detach.
 function ensureShellVisible() {
   hillsPlayerStandalone = false;
+  hillsShellHidden = false;
   const w = getMainAppWindow();
   if (w && !w.isDestroyed() && !w.isVisible()) {
     w.show();
@@ -2471,35 +2749,156 @@ function ensureShellVisible() {
   }
 }
 
-async function startHillsPlayerForSource(hillsPath, source, payload) {
-  const settings = await store.getSettings();
-  const mainBounds = getMainAppWindow()?.getBounds() ?? { x: 0, y: 0, width: 1280, height: 720 };
-  // Standalone player: size the Qt window to the full work area of the display the
-  // app is on, so that when the Electron shell is hidden it becomes the sole,
-  // properly-sized player window (instead of a small floating overlay rect).
-  const display = screen.getDisplayMatching(mainBounds);
-  const wa = display.workArea;
+// ── standalone Qt player: shell hide/show + fresh-spawn-per-play ──────────────
+// The Qt player is its own top-level window and IS the whole playback + loading surface.
+// Playback starts from the detail page WITHOUT navigating to the Electron player route, so
+// no intermediate Electron player page is shown. The shell is hidden while Qt plays and
+// restored when the user closes the Qt window.
+let hillsShellHidden = false;
+// Set true right before we intentionally stop the Qt process (respawn for the next queue
+// item / explicit stop / detach) so its "exit" is NOT treated as a user close.
+let hillsExitExpected = false;
+// Reason of the last end-file event for the running Qt process. "eof" = the file played
+// to its natural end (→ the queue should auto-advance); "quit"/"stop"/null = the user
+// closed the window (→ restore the shell + clean up). Used to keep auto-next from being
+// killed by the standalone-close cleanup.
+let hillsLastEndReason = null;
 
-  if (hillsPlayer?.isRunning()) {
-    hillsPlayer.stop();
+function hideHillsShell() {
+  const w = getMainAppWindow();
+  if (w && !w.isDestroyed() && w.isVisible()) {
+    hillsShellHidden = true;
+    w.hide();
+    writePlaybackLog("hills_shell_hidden", {});
   }
+}
+
+function restoreHillsShell() {
+  hillsPlayerStandalone = false;
+  hillsShellHidden = false;
+  const w = getMainAppWindow();
+  if (w && !w.isDestroyed() && !w.isVisible()) {
+    w.show();
+    w.focus();
+    writePlaybackLog("hills_shell_restored", {});
+  }
+}
+
+function attachHillsPlayerHandlers() {
+  if (!hillsPlayer) return;
+  const thisPlayer = hillsPlayer;
+  hillsPlayer.onEvent((event) => {
+    // UI intents the standalone player delegates to the host (it owns the Emby
+    // session): episode/version/quality panels + next/prev episode. The player
+    // requests a list → we ask the renderer to gather + push it back (it has the
+    // library/queue + API); a panel pick comes back as panel-select → the renderer
+    // reloads playback (playerStore.play) with the chosen episode / media source.
+    if (event.type === "ui-action") {
+      const action = event.action;
+      if (action === "next-episode") {
+        emitAppEvent("player:next_track", {});
+      } else if (action === "prev-episode") {
+        emitAppEvent("player:prev_track", {});
+      } else if (action === "episodes" || action === "versions" || action === "quality") {
+        emitAppEvent("player:request_panel", { kind: action });
+      } else if (action === "panel-select") {
+        emitAppEvent("player:panel_select", {
+          kind: event.data?.kind ?? null,
+          key: event.data?.key ?? null,
+        });
+      }
+      // Other ui-action intents (danmaku / danmaku-settings / skip-intro-settings /
+      // back) are handled elsewhere or intentionally ignored.
+      return;
+    }
+    if (event.type === "start-file") hillsLastEndReason = null;
+    if (event.type === "start-file" || event.type === "file-loaded" || event.type === "time-pos") {
+      hideHillsShell();
+    }
+    if (event.type === "file-loaded") writePlaybackLog("hills_file_loaded", {});
+    if (event.type === "end-file") {
+      hillsLastEndReason = event.reason ?? null;
+      writePlaybackLog("hills_end_file", { reason: hillsLastEndReason });
+      // Only a NATURAL end advances the queue. quit/stop = user-driven, no auto-next.
+      if (hillsLastEndReason === "eof") emitAppEvent("player:eof", {});
+    }
+    if (event.type === "exit") {
+      const naturalEnd = hillsLastEndReason === "eof";
+      writePlaybackLog("hills_exit", {
+        code: event.code ?? null,
+        expected: hillsExitExpected,
+        reason: hillsLastEndReason,
+      });
+      // Intentional stop (respawn / explicit stop / detach) — swallow.
+      if (hillsExitExpected) {
+        hillsExitExpected = false;
+        return;
+      }
+      if (naturalEnd) {
+        // Natural EOF: the renderer auto-advances (player:eof above → nextTrack →
+        // a fresh Qt spawn). Do NOT restore the shell or signal closed yet, or the
+        // cleanup would kill auto-next and flash the shell between episodes. Give the
+        // renderer a window to spawn the next item; only if NO new player came up do
+        // we treat this as end-of-playback and restore the shell.
+        setTimeout(() => {
+          if (hillsPlayer && hillsPlayer !== thisPlayer && hillsPlayer.isRunning()) return;
+          emitAppEvent("player:standalone_closed", {});
+          restoreHillsShell();
+        }, 1800);
+      } else {
+        // User closed the Qt window → clean up immediately.
+        emitAppEvent("player:standalone_closed", {});
+        restoreHillsShell();
+      }
+    }
+  });
+  // Hide the shell once the Qt window is up (force-window shows it ~0.4s after launch).
+  setTimeout(() => {
+    if (hillsPlayer?.isRunning()) hideHillsShell();
+  }, 500);
+}
+
+function hillsWorkAreaGeometry() {
+  const mainBounds = getMainAppWindow()?.getBounds() ?? { x: 0, y: 0, width: 1280, height: 720 };
+  const wa = screen.getDisplayMatching(mainBounds).workArea;
+  return `--geometry=${wa.width}x${wa.height}+${wa.x}+${wa.y}`;
+}
+
+// Match the Qt player window mode to the Electron shell's current state. Launching from a
+// fullscreen shell must go straight to a fullscreen Qt window (showFullScreen covers the
+// taskbar exactly like the Electron fullscreen did). --maximize is only a work-area window
+// (taskbar visible), so spawning maximized from a fullscreen shell flashed the taskbar —
+// the "全屏→窗口化闪一下→全屏" the user saw. Windowed shell keeps the maximized behavior.
+function hillsWindowModeArg() {
+  const w = getMainAppWindow();
+  return w && !w.isDestroyed() && w.isFullScreen() ? "--fullscreen=yes" : "--maximize";
+}
+
+// Pre-launch the Qt player IDLE (no file) the moment the player route is entered, so
+// it is the first window the user sees. PlaybackInfo then resolves and the file is
+// handed off via a stdin loadfile — this removes the intermediate Electron player
+// stage ("图1") that used to show for seconds while PlaybackInfo ran on slow sources.
+function ensureIdleHillsPlayer() {
+  const hillsPath = resolveHillsPlayerPath();
+  if (!hillsPath || hillsPlayer?.isRunning()) return;
+  hillsShellHidden = false;
   hillsPlayer = new HillsPlayerController();
   hillsPlayerStandalone = true;
-
-  const extraArgs = [
-    `--geometry=${wa.width}x${wa.height}+${wa.x}+${wa.y}`,
+  hillsPlayer.start(hillsPath, "", [
+    hillsWorkAreaGeometry(),
     "--force-window=yes",
-    // Start fullscreen: immersive standalone playback, and the Qt window's custom
-    // title bar hides the min/maximize buttons in fullscreen (only Close remains,
-    // Esc exits) — this removes the "white window buttons" (问9c) without needing a
-    // Qt rebuild. Pairs with hiding the Electron shell during playback.
-    "--fullscreen",
-  ];
+    "--idle=yes",
+    hillsWindowModeArg(),
+  ]);
+  attachHillsPlayerHandlers();
+}
 
-  // hills_player has no HTTP-header argv, so Emby auth must travel another way.
-  // The embedded-mpv path sends source.headers; this path previously dropped them
-  // and the stream timed out unauthenticated (401 / no video data). Embed the
-  // token as api_key and also forward headers + user-agent via libmpv passthrough.
+async function startHillsPlayerForSource(hillsPath, source, payload) {
+  const settings = await store.getSettings();
+
+  // Embed the Emby token as api_key (this is the primary auth and works for both the
+  // smartstrm direct path and /Videos/stream, so playback succeeds even if the header
+  // passthrough below is a no-op). Then collect header / user-agent / mpv options.
   let streamUrl = source.streamUrl;
   const headerPairs = Array.isArray(source.headers) ? source.headers : [];
   const embyToken = headerPairs.find(
@@ -2518,83 +2917,91 @@ async function startHillsPlayerForSource(hillsPath, source, payload) {
     .filter(([name, value]) => name && value != null)
     .map(([name, value]) => `${name}: ${value}`)
     .join(",");
-  if (headerFields) extraArgs.push(`--http-header-fields=${headerFields}`);
-  if (source.userAgent) extraArgs.push(`--user-agent=${source.userAgent}`);
 
+  // Unified option list: `prop` drives the stdin set-property path (idle handoff),
+  // `arg` drives the spawn fallback.
+  const opts = [];
+  if (headerFields) opts.push({ prop: "http-header-fields", value: headerFields, arg: `--http-header-fields=${headerFields}` });
+  if (source.userAgent) opts.push({ prop: "user-agent", value: source.userAgent, arg: `--user-agent=${source.userAgent}` });
   if (payload.startMs && Number(payload.startMs) > 0) {
-    extraArgs.push(`--start=${Number(payload.startMs) / 1000}`);
+    const startSec = Number(payload.startMs) / 1000;
+    opts.push({ prop: "start", value: String(startSec), arg: `--start=${startSec}` });
   }
   if (settings.networkProxyMode === "custom" && settings.httpProxyUrl?.trim()) {
-    extraArgs.push(`--http-proxy=${settings.httpProxyUrl.trim()}`);
+    const proxy = settings.httpProxyUrl.trim();
+    opts.push({ prop: "http-proxy", value: proxy, arg: `--http-proxy=${proxy}` });
   }
   if (settings.preferredAudioLanguage?.trim()) {
-    extraArgs.push(`--alang=${settings.preferredAudioLanguage.trim()}`);
+    const v = settings.preferredAudioLanguage.trim();
+    opts.push({ prop: "alang", value: v, arg: `--alang=${v}` });
   }
   if (settings.preferredSubtitleLanguage?.trim()) {
-    extraArgs.push(`--slang=${settings.preferredSubtitleLanguage.trim()}`);
+    const v = settings.preferredSubtitleLanguage.trim();
+    opts.push({ prop: "slang", value: v, arg: `--slang=${v}` });
   }
-  if (settings.hardwareDecoding) {
+  // Map the hardware-decoding choice to an mpv --hwdec value (player default is
+  // software, hwdec=no). "auto" now asks mpv to auto-probe a SAFE hardware decoder
+  // and fall back to software on its own — the resize crash that originally forced
+  // software-only is fixed, so auto-detection is safe again. A specific mode is
+  // honored as-is. auto-safe never hard-fails: if no safe HW decoder initializes
+  // (e.g. d3d11va device-create fails on this box) mpv silently uses software.
+  if (settings.hardwareDecoding && settings.hwdecMode) {
     const hwdecMap = { auto: "auto-safe", d3d11va: "d3d11va", vulkan: "vulkan", copy: "auto-copy" };
-    extraArgs.push(`--hwdec=${hwdecMap[settings.hwdecMode] ?? "auto-safe"}`);
+    const hwdec = hwdecMap[settings.hwdecMode];
+    if (hwdec) opts.push({ prop: "hwdec", value: hwdec, arg: `--hwdec=${hwdec}` });
   }
   if ((settings.volume ?? 80) !== 80) {
-    extraArgs.push(`--volume=${Math.round(settings.volume ?? 80)}`);
+    const vol = Math.round(settings.volume ?? 80);
+    opts.push({ prop: "volume", value: String(vol), arg: `--volume=${vol}` });
   }
 
   hillsPlayerDurationMs = source.durationMs ?? 0;
-  hillsPlayer.start(hillsPath, streamUrl, extraArgs);
 
-  let shellHidden = false;
-  const hideShell = () => {
-    if (shellHidden) return;
-    const w = getMainAppWindow();
-    if (w && !w.isDestroyed() && w.isVisible()) {
-      shellHidden = true;
-      w.hide();
+  // If a Qt player window is already up — the idle window pre-launched at play
+  // start, or one still playing during a queue/version switch — hand the new file
+  // off over stdin (set options first, then loadfile) instead of killing it and
+  // spawning a fresh process. Respawning left a visible gap where the Electron
+  // shell showed through (the "fullscreen start flashes the Electron page"
+  // symptom); a stdin handoff has no such gap and reuses the already-sized window.
+  if (hillsPlayer?.isRunning()) {
+    hillsExitExpected = false;
+    hillsPlayerStandalone = true;
+    for (const o of opts) {
+      if (o.prop) {
+        hillsPlayer.sendCommand({ action: "set-property", name: o.prop, value: o.value });
+      }
     }
-  };
-  const restoreShell = () => {
-    hillsPlayerStandalone = false;
-    if (!shellHidden) return;
-    shellHidden = false;
-    const w = getMainAppWindow();
-    if (w && !w.isDestroyed()) {
-      w.show();
-      w.focus();
-    }
-  };
+    hillsPlayer.sendCommand({ action: "loadfile", url: streamUrl });
+    hillsPlayer.sendCommand({ action: "play" });
+    hideHillsShell();
+    return;
+  }
 
-  hillsPlayer.onEvent((event) => {
-    // Hide the Electron shell as soon as the Qt player is up (start-file fires when
-    // mpv begins loading → its window already exists). file-loaded/time-pos are kept
-    // as faster confirmations. The player's back button always exits (restores the
-    // shell), so hiding before playback confirms never strands the user.
-    if (event.type === "start-file" || event.type === "file-loaded" || event.type === "time-pos") {
-      hideShell();
-    }
-    if (event.type === "end-file") {
-      emitAppEvent("player:eof", {});
-    }
-    // Process gone (user closed the Qt window): restore the shell and tell the
-    // renderer to leave the player route.
-    if (event.type === "exit") {
-      emitAppEvent("player:eof", {});
-      restoreShell();
-    }
-  });
-
-  // Fallback: even if no player event arrives (e.g. a source that never loads),
-  // hide the shell shortly after launch so we never show two windows at once. The
-  // Qt window is up by now; exit via its back button restores the shell.
-  setTimeout(() => {
-    if (hillsPlayer?.isRunning()) hideShell();
-  }, 1600);
+  // No window yet → spawn a fresh Qt process with the file + options as argv.
+  hillsPlayer = new HillsPlayerController();
+  hillsPlayerStandalone = true;
+  hillsPlayer.start(hillsPath, streamUrl, [
+    hillsWorkAreaGeometry(),
+    "--force-window=yes",
+    hillsWindowModeArg(),
+    ...opts.map((o) => o.arg),
+  ]);
+  attachHillsPlayerHandlers();
 }
 
 async function runPlayRequest(payload) {
   const started = performance.now();
   const { server, account } = await requireActivePair();
   const hillsPath = resolveHillsPlayerPath();
+  // Bring the Qt player window up immediately (idle, no file) so it covers the
+  // Electron shell right away. Without this the fullscreen detail page stays on
+  // screen during the PlaybackInfo round-trip and "flashes" before the player
+  // appears. ensureIdleHillsPlayer no-ops if a player window is already running
+  // (e.g. a queue switch), and the resolved file is handed off over stdin in
+  // startHillsPlayerForSource below once PlaybackInfo returns.
+  const hadPlayerBefore = Boolean(hillsPlayer?.isRunning());
+  if (hillsPath) ensureIdleHillsPlayer();
+  const prelaunchedIdle = hillsPath && !hadPlayerBefore && Boolean(hillsPlayer?.isRunning());
   writePlaybackLog("play_request_start", {
     itemId: payload.itemId,
     startMs: payload.startMs ?? 0,
@@ -2688,6 +3095,15 @@ async function runPlayRequest(payload) {
       elapsedMs: Math.round(performance.now() - started),
       error: error?.message ?? String(error),
     });
+    // If we opened an idle Qt window just for this request and never got to load a
+    // file (PlaybackInfo failed), tear it down and restore the shell so the user
+    // isn't stranded on an empty player window.
+    if (prelaunchedIdle && hillsPlayer?.isRunning()) {
+      hillsExitExpected = true;
+      hillsPlayer.stop();
+      hillsPlayer = null;
+      restoreHillsShell();
+    }
     throw error;
   }
 }
@@ -2748,6 +3164,17 @@ async function handleInvoke(command, args = {}) {
     if (typeof url !== "string" || url.length === 0) {
       throw new Error("open_external requires a url");
     }
+    // Only hand http(s) URLs to the OS. Without this, a compromised renderer could
+    // pass file:, or a command-like scheme (e.g. ms-settings:) to shell.openExternal.
+    let scheme;
+    try {
+      scheme = new URL(url).protocol.toLowerCase();
+    } catch {
+      throw new Error("open_external requires a valid url");
+    }
+    if (scheme !== "http:" && scheme !== "https:") {
+      throw new Error(`open_external refused scheme: ${scheme}`);
+    }
     await shell.openExternal(url);
     return null;
   }
@@ -2769,6 +3196,31 @@ async function handleInvoke(command, args = {}) {
     return null;
   }
 
+  // Custom (self-drawn) window controls. The OS title-bar overlay (WCO) is an opaque
+  // fixed-size box that can't blend into the detail-page hero artwork, so the app
+  // draws its own min/max/close and drives the window via these commands.
+  if (command === "window_minimize") {
+    getMainAppWindow()?.minimize();
+    return null;
+  }
+  if (command === "window_toggle_maximize") {
+    const w = getMainAppWindow();
+    if (w && !w.isDestroyed()) {
+      if (w.isMaximized()) w.unmaximize();
+      else w.maximize();
+      return w.isMaximized();
+    }
+    return false;
+  }
+  if (command === "window_close") {
+    getMainAppWindow()?.close();
+    return null;
+  }
+  if (command === "window_is_maximized") {
+    const w = getMainAppWindow();
+    return Boolean(w && !w.isDestroyed() && w.isMaximized());
+  }
+
   if (command === "set_fullscreen") {
     const target = BrowserWindow.getFocusedWindow() ?? getMainAppWindow();
     if (!target || target.isDestroyed()) return false;
@@ -2784,6 +3236,10 @@ async function handleInvoke(command, args = {}) {
   if (command === "embed_attach") {
     // When hills_player.exe is present, use it instead of the old mpv embed path.
     if (resolveHillsPlayerPath()) {
+      // Diagnostic: embed_attach is only called by the NAVIGATED player route. If this
+      // shows up around a play, the detail page fell back to navigation (standalone check
+      // failed) instead of the standalone Qt path — that would explain a visible player page.
+      writePlaybackLog("embed_attach", { mode: "hills_player" });
       return { mode: "hills_player" };
     }
     return attachEmbeddedMpvHost();
@@ -2822,6 +3278,7 @@ async function handleInvoke(command, args = {}) {
 
   if (command === "embed_detach") {
     if (hillsPlayer?.isRunning()) {
+      hillsExitExpected = true;
       hillsPlayer.stop();
       hillsPlayer = null;
       hillsPlayerDurationMs = 0;
@@ -3085,6 +3542,12 @@ async function handleInvoke(command, args = {}) {
     });
   }
 
+  if (command === "standalone_player_available") {
+    // The detail page uses this to decide whether to play via the standalone Qt window
+    // (no Electron player route) or fall back to the embedded-mpv player route.
+    return { available: Boolean(resolveHillsPlayerPath()) };
+  }
+
   if (command === "play") {
     const payload = args.payload ?? {};
     return enqueuePlayRequest(payload);
@@ -3147,10 +3610,14 @@ async function handleInvoke(command, args = {}) {
 
   if (command === "get_cache_usage") {
     const ses = mainWindow?.webContents?.session ?? session.defaultSession;
-    const bytes = ses ? await ses.getCacheSize().catch(() => 0) : 0;
+    const sessionBytes = ses ? await ses.getCacheSize().catch(() => 0) : 0;
+    const imageBytes = await imageCacheDirBytes();
     return {
-      totalBytes: bytes,
-      entries: [{ label: "页面/图片缓存", path: "", bytes }],
+      totalBytes: sessionBytes + imageBytes,
+      entries: [
+        { label: "页面缓存", path: "", bytes: sessionBytes },
+        { label: "海报/图片缓存", path: imageCacheDir, bytes: imageBytes },
+      ],
     };
   }
 
@@ -3162,10 +3629,18 @@ async function handleInvoke(command, args = {}) {
         .clearStorageData({ storages: ["cachestorage", "shadercache"] })
         .catch(() => {});
     }
-    const bytes = ses ? await ses.getCacheSize().catch(() => 0) : 0;
+    // Also wipe the on-disk poster/image cache (hills-image protocol). The old
+    // handler only cleared Chromium's session cache, so users saw "清除缓存" do
+    // nothing to the image cache.
+    await clearImageCacheDir();
+    const sessionBytes = ses ? await ses.getCacheSize().catch(() => 0) : 0;
+    const imageBytes = await imageCacheDirBytes();
     return {
-      totalBytes: bytes,
-      entries: [{ label: "页面/图片缓存", path: "", bytes }],
+      totalBytes: sessionBytes + imageBytes,
+      entries: [
+        { label: "页面缓存", path: "", bytes: sessionBytes },
+        { label: "海报/图片缓存", path: imageCacheDir, bytes: imageBytes },
+      ],
     };
   }
 
@@ -3207,6 +3682,7 @@ async function handleInvoke(command, args = {}) {
 
   if (command === "stop") {
     if (hillsPlayer?.isRunning()) {
+      hillsExitExpected = true;
       hillsPlayer.stop();
       hillsPlayer = null;
       hillsPlayerDurationMs = 0;
@@ -3302,6 +3778,16 @@ async function handleInvoke(command, args = {}) {
   if (command === "set_picture_mode") {
     if (hillsPlayer?.isRunning()) return null;
     return runMpvIfRunning(() => applyPictureMode(args.payload?.mode));
+  }
+
+  // Renderer → standalone Qt player: push a selection panel (episodes / versions /
+  // quality) that the renderer assembled in response to player:request_panel. The
+  // player renders it and reports the pick back via ui-action panel-select.
+  if (command === "hills_player_set_panel") {
+    if (hillsPlayer?.isRunning() && args.panel) {
+      hillsPlayer.sendCommand({ action: "show-panel", panel: args.panel });
+    }
+    return null;
   }
 
   if (command === "show_mpv_stats_osd") {
@@ -3554,7 +4040,9 @@ async function handleInvoke(command, args = {}) {
 const TITLEBAR_OVERLAY_HEIGHT = 44;
 
 function titleBarOverlayForTheme(theme) {
-  // Colors track --surface-1 / --fg-primary of the corresponding app theme.
+  // Colors track --surface-1 / --fg-primary of the corresponding app theme. (A
+  // fully transparent overlay made the controls vanish on bright hero artwork — the
+  // OS needs a solid background to render the window-control glyphs reliably.)
   return theme === "light"
     ? { color: "#f8fafc", symbolColor: "#0d1320", height: TITLEBAR_OVERLAY_HEIGHT }
     : { color: "#1b1b1d", symbolColor: "#f5f5f7", height: TITLEBAR_OVERLAY_HEIGHT };
@@ -3609,10 +4097,11 @@ function createWindow() {
     backgroundColor: "#000000",
     autoHideMenuBar: true,
     show: false,
-    // Hide the native title bar (app icon + product name) and keep only the
-    // overlay window controls; the in-app TopBar provides the drag region.
+    // Frameless title bar; the app draws its own window controls
+    // (WindowControls.vue) so they can blend into the hero artwork instead of a
+    // solid OS overlay box. The in-app TopBar / hero provide the drag region via
+    // -webkit-app-region.
     titleBarStyle: "hidden",
-    titleBarOverlay: titleBarOverlayForTheme(initialTheme),
     webPreferences: {
       preload: path.join(__dirname, "preload.mjs"),
       contextIsolation: true,
@@ -3620,6 +4109,13 @@ function createWindow() {
       sandbox: false,
       webSecurity: false,
       allowRunningInsecureContent: true,
+      // The shell window is HIDDEN while the standalone Qt player is on screen, but
+      // its renderer still does real work for that player: it answers the player's
+      // 选集/版本/清晰度 panel requests, reports playback progress, and advances the
+      // queue. Chromium throttles a hidden window's renderer (timers clamped, work
+      // deprioritized), which made clicking a player toolbar icon take several
+      // seconds to pop its panel. Keep the renderer at full speed while hidden.
+      backgroundThrottling: false,
     },
   });
   mainWindow = win;
@@ -3628,6 +4124,43 @@ function createWindow() {
   win.setMenu(null);
   win.setMenuBarVisibility(false);
   win.setAutoHideMenuBar(true);
+
+  // Navigation hardening: the renderer is an SPA and must never navigate the top
+  // frame to a remote origin, nor spawn new Electron windows. Allow only same-
+  // origin (dev) / file:// (packaged) navigation; route external http(s) links to
+  // the OS browser and deny everything else.
+  const appOrigin = devServerUrl ? new URL(devServerUrl).origin : null;
+  const isInternalUrl = (target) => {
+    try {
+      const parsed = new URL(target);
+      return appOrigin ? parsed.origin === appOrigin : parsed.protocol === "file:";
+    } catch {
+      return false;
+    }
+  };
+  const openExternalHttp = (target) => {
+    try {
+      const scheme = new URL(target).protocol.toLowerCase();
+      if (scheme === "http:" || scheme === "https:") void shell.openExternal(target);
+    } catch {
+      /* ignore */
+    }
+  };
+  win.webContents.on("will-navigate", (event, target) => {
+    if (isInternalUrl(target)) return;
+    event.preventDefault();
+    openExternalHttp(target);
+  });
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    openExternalHttp(url);
+    return { action: "deny" };
+  });
+
+  // Let the self-drawn window controls reflect the real maximize/restore state.
+  const emitMaximizedState = () =>
+    emitAppEvent("window:maximized", { maximized: win.isMaximized() });
+  win.on("maximize", emitMaximizedState);
+  win.on("unmaximize", emitMaximizedState);
 
   win.once("ready-to-show", () => win.show());
   win.on("close", (event) => {
@@ -3679,9 +4212,32 @@ function createWindow() {
   }
 }
 
-ipcMain.handle("hills:platform:type", () => platformType());
+// IPC is a trust boundary: only accept calls from the app's own renderer frame.
+// In dev the renderer is served from the Vite dev server origin; in a packaged
+// build it is loaded from the local dist bundle via file://. This rejects calls
+// coming from any other window/frame (e.g. a popup or an embedded child frame).
+function isTrustedSender(event) {
+  try {
+    const frame = event?.senderFrame;
+    const url = frame?.url;
+    if (!url) return false;
+    const parsed = new URL(url);
+    if (devServerUrl) {
+      return parsed.origin === new URL(devServerUrl).origin;
+    }
+    return parsed.protocol === "file:";
+  } catch {
+    return false;
+  }
+}
 
-ipcMain.handle("hills:dialog:open", async (_event, options = {}) => {
+ipcMain.handle("hills:platform:type", (event) => {
+  if (!isTrustedSender(event)) throw new Error("untrusted IPC sender");
+  return platformType();
+});
+
+ipcMain.handle("hills:dialog:open", async (event, options = {}) => {
+  if (!isTrustedSender(event)) throw new Error("untrusted IPC sender");
   const properties = [];
   if (options.directory) properties.push("openDirectory");
   else properties.push("openFile");
@@ -3697,7 +4253,8 @@ ipcMain.handle("hills:dialog:open", async (_event, options = {}) => {
   return options.multiple ? result.filePaths : result.filePaths[0];
 });
 
-ipcMain.handle("hills:invoke", async (_event, command, args = {}) => {
+ipcMain.handle("hills:invoke", async (event, command, args = {}) => {
+  if (!isTrustedSender(event)) throw new Error("untrusted IPC sender");
   return handleInvoke(command, args);
 });
 
@@ -3720,6 +4277,9 @@ app.whenReady().then(async () => {
   await downloads.resumePersisted().catch((error) => {
     console.warn("failed to resume persisted downloads", error);
   });
+  // Trim the poster/image disk cache to its size budget on launch (it may have
+  // grown past the cap while the app was closed, or the cap may have been lowered).
+  void enforceImageCacheLimit();
 
   app.on("activate", () => {
     if (!getMainAppWindow()) createWindow();

@@ -4,6 +4,7 @@ import { Icon } from "@iconify/vue";
 import { useRoute, useRouter } from "vue-router";
 
 import GlassInput from "@/components/common/GlassInput.vue";
+import GlassButton from "@/components/common/GlassButton.vue";
 import LineStatusDot from "@/components/common/LineStatusDot.vue";
 import SettingRow from "@/components/settings/SettingRow.vue";
 import SettingsSection from "@/components/settings/SettingsSection.vue";
@@ -531,10 +532,6 @@ function openDownloadsCenter() {
   router.push({ name: "downloads" }).catch(() => {});
 }
 
-function openRemoteControl() {
-  router.push({ name: "remote" }).catch(() => {});
-}
-
 function openNotificationsCenter() {
   notifications.toggleCenter();
 }
@@ -638,6 +635,15 @@ async function saveServerDraft(server: Server) {
 const cacheUsage = ref<CacheUsage | null>(null);
 const cacheBusy = ref(false);
 const cacheStatus = ref("");
+
+// Activation code / 卡密 entry. During the build phase there is no real PRO validation
+// (per spec); this just records the entered code locally and acknowledges it.
+const activationCode = ref("");
+const activationMsg = ref("");
+function verifyActivation() {
+  const code = activationCode.value.trim();
+  activationMsg.value = code ? "已提交，待激活" : "请输入激活码 / 卡密";
+}
 const cacheSummary = computed(() =>
   cacheUsage.value ? formatCacheBytes(cacheUsage.value.totalBytes) : "查看",
 );
@@ -743,6 +749,7 @@ const mpvBackendLabel = computed(() =>
 const preferredLanguageOptions = [
   { value: "", label: "默认" },
   { value: "zh,zho,chi", label: "中文" },
+  { value: "zh-Hant,zh-TW,zh-HK,cht,zho,chi", label: "中文繁体" },
   { value: "ja,jpn", label: "日语" },
   { value: "en,eng", label: "英语" },
   { value: "ko,kor", label: "韩语" },
@@ -978,18 +985,59 @@ const danmakuSummary = computed(() => {
             <strong>{{ settings.settings.blurStrength }}</strong>
           </div>
         </SettingRow>
-        <SettingRow
-          label="窗口亚克力效果"
-          description="窗口背景材质，重启后生效"
-          advanced
-          is-new
-        >
-          <input
-            class="switch"
-            type="checkbox"
-            :checked="settings.settings.enableWindowVibrancy"
-            @change="(e: any) => save('enableWindowVibrancy', e.target.checked)"
-          />
+        <SettingRow label="高亮色（深色模式）" description="自定义深色模式下的 UI 高亮色，留空用默认紫色">
+          <div class="color-row">
+            <input
+              type="color"
+              class="color-input"
+              :value="settings.settings.accentColorDark || '#a855f7'"
+              @input="(e: any) => save('accentColorDark', e.target.value)"
+            />
+            <button
+              v-if="settings.settings.accentColorDark"
+              type="button"
+              class="link"
+              @click="save('accentColorDark', null)"
+            >
+              重置
+            </button>
+          </div>
+        </SettingRow>
+        <SettingRow label="高亮色（浅色模式）" description="自定义浅色模式下的 UI 高亮色，留空用默认紫色">
+          <div class="color-row">
+            <input
+              type="color"
+              class="color-input"
+              :value="settings.settings.accentColorLight || '#7c3aed'"
+              @input="(e: any) => save('accentColorLight', e.target.value)"
+            />
+            <button
+              v-if="settings.settings.accentColorLight"
+              type="button"
+              class="link"
+              @click="save('accentColorLight', null)"
+            >
+              重置
+            </button>
+          </div>
+        </SettingRow>
+        <SettingRow label="进度条颜色" description="播放进度 / 封面进度条颜色，留空跟随高亮色">
+          <div class="color-row">
+            <input
+              type="color"
+              class="color-input"
+              :value="settings.settings.progressColor || '#a855f7'"
+              @input="(e: any) => save('progressColor', e.target.value)"
+            />
+            <button
+              v-if="settings.settings.progressColor"
+              type="button"
+              class="link"
+              @click="save('progressColor', null)"
+            >
+              重置
+            </button>
+          </div>
         </SettingRow>
         <SettingRow label="关闭时最小化到托盘" description="点关闭按钮隐藏到托盘而不退出应用">
           <input
@@ -1006,14 +1054,6 @@ const danmakuSummary = computed(() => {
           @click="openNotificationsCenter"
         >
           <span v-if="notifications.unread > 0" class="row-value">{{ unreadNotificationsLabel }} 未读</span>
-          <Icon icon="lucide:chevron-right" width="16" class="row-chev" />
-        </SettingRow>
-        <SettingRow
-          label="遥控器"
-          description="控制其他 Emby / Jellyfin 客户端"
-          clickable
-          @click="openRemoteControl"
-        >
           <Icon icon="lucide:chevron-right" width="16" class="row-chev" />
         </SettingRow>
       </SettingsSection>
@@ -1235,7 +1275,6 @@ const danmakuSummary = computed(() => {
           <summary>
             <Icon icon="lucide:sliders-horizontal" width="14" />
             连接器能力说明
-            <span class="cap-details__tag">高级</span>
           </summary>
           <ul class="cap-list">
             <li v-for="cap in fileServiceCapabilities" :key="cap.key" class="cap-row">
@@ -1704,13 +1743,13 @@ const danmakuSummary = computed(() => {
         </SettingRow>
         <SettingRow
           label="弹幕 API 地址"
-          description="自定义 DanDanPlay 兼容 API 基址（留空使用官方 https://api.dandanplay.net）"
+          description="填写 DanDanPlay 兼容 API 基址（含 token 路径，调用为 {基址}/api/v2/...）。留空则关闭在线弹幕；本地 / WebDAV 的 XML 弹幕不受影响。"
           stacked
         >
           <input
             class="plain-input"
             type="url"
-            placeholder="https://api.dandanplay.net"
+            placeholder="https://example.com/your-token"
             :value="settings.settings.danmakuApiBase ?? ''"
             @change="(e: any) => save('danmakuApiBase', e.target.value.trim() || null)"
           />
@@ -2154,12 +2193,6 @@ const danmakuSummary = computed(() => {
             @change="(e: any) => save('ignoreSslErrors', e.target.checked)"
           />
         </SettingRow>
-        <SettingRow label="心跳保号周期（秒）" description="默认 180" advanced stacked>
-          <GlassInput
-            :model-value="String(settings.settings.heartbeatIntervalSecs)"
-            @update:modelValue="(v) => save('heartbeatIntervalSecs', Number(v) || 180)"
-          />
-        </SettingRow>
         <SettingRow label="线路测活周期（秒）" description="默认 60" advanced stacked>
           <GlassInput
             :model-value="String(settings.settings.healthCheckIntervalSecs)"
@@ -2211,6 +2244,17 @@ const danmakuSummary = computed(() => {
             <span class="row-value-strong">{{ formatCacheBytes(entry.bytes) }}</span>
           </li>
         </ul>
+        <SettingRow
+          label="海报缓存上限（MB）"
+          description="超出后自动按最近最少使用淘汰，0 = 不限制，默认 1024"
+          stacked
+        >
+          <GlassInput
+            type="number"
+            :model-value="String(settings.settings.imageCacheLimitMB)"
+            @update:modelValue="(v) => save('imageCacheLimitMB', Math.max(0, Number(v) || 0))"
+          />
+        </SettingRow>
         <SettingRow label="刷新" description="重新统计缓存占用">
           <button class="action-btn" :disabled="cacheBusy" @click="refreshCacheUsage">
             <Icon icon="lucide:refresh-cw" width="15" />
@@ -2257,6 +2301,13 @@ const danmakuSummary = computed(() => {
         <SettingRow label="服务器" description="管理已保存的服务器与线路" clickable @click="openSection('servers')">
           <Icon icon="lucide:chevron-right" width="16" class="row-chev" />
         </SettingRow>
+        <SettingRow label="激活码 / 卡密" description="输入激活码解锁" stacked>
+          <div class="activation-row">
+            <GlassInput v-model="activationCode" placeholder="请输入激活码 / 卡密" />
+            <GlassButton size="sm" variant="primary" @click="verifyActivation">验证</GlassButton>
+          </div>
+          <p v-if="activationMsg" class="activation-msg">{{ activationMsg }}</p>
+        </SettingRow>
       </SettingsSection>
     </div>
 
@@ -2285,11 +2336,9 @@ const danmakuSummary = computed(() => {
 .settings__list {
   flex: 1;
   overflow-y: auto;
-  /* Left-aligned, width-adaptive content. The scroll container stays full width so
-     the scrollbar sits at the far-right edge; content flows from the left up to a
-     generous cap (right gutter only) instead of a narrow centered column with big
-     empty gutters on both sides. */
-  padding: 8px max(var(--content-pad), calc(100% - 1180px)) 32px var(--content-pad);
+  /* Full-width content: no max-width cap, just the standard content padding on
+     both sides, so settings rows use the whole width with no empty side gutters. */
+  padding: 8px var(--content-pad) 32px;
 }
 .cloud-mt {
   margin-top: 8px;
@@ -2314,6 +2363,20 @@ const danmakuSummary = computed(() => {
   color: var(--fg-primary);
   font-size: 13px;
   font-weight: 700;
+}
+.activation-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.activation-row :deep(.glass-input),
+.activation-row :deep(input) {
+  flex: 1;
+}
+.activation-msg {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--fg-secondary);
 }
 .row-chev {
   color: var(--fg-tertiary);
@@ -2701,6 +2764,27 @@ const danmakuSummary = computed(() => {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+.color-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.color-input {
+  width: 44px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+.color-input::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+.color-input::-webkit-color-swatch {
+  border: none;
+  border-radius: 5px;
 }
 .seg {
   display: inline-flex;

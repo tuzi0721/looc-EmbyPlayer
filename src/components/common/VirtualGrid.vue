@@ -326,6 +326,16 @@ function keyFor(item: T, index: number): string | number {
 
   overflow-y: auto;
 
+  /* Never scroll horizontally: the grid lays out exactly to the content width. The
+     bug ("横竖滚动条同时出现 + 超过 48 项无法下滚" in fullscreen) was a width-jump feedback
+     loop — when the vertical scrollbar appeared it shrank the content width, pushing the
+     last column into horizontal overflow. Reserving the scrollbar gutter keeps the width
+     stable so columns are measured once and vertical scrolling stays correct. */
+
+  overflow-x: hidden;
+
+  scrollbar-gutter: stable;
+
   position: relative;
 
 }

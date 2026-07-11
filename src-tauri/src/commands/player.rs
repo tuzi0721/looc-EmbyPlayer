@@ -2361,11 +2361,12 @@ async fn build_standalone_danmaku_file(
     client: &reqwest::Client,
     item: &MediaItem,
     session_id: &str,
+    api_base: Option<&str>,
 ) -> Option<String> {
     use crate::danmaku::types::DanmakuMode;
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(3),
-        crate::danmaku::fetch_item_danmaku(client, item),
+        crate::danmaku::fetch_item_danmaku(client, item, api_base),
     )
     .await
     .ok()
@@ -2470,7 +2471,13 @@ pub async fn play_standalone(
     // Reference parity (播放器内弹幕覆层): feed danmaku via --danmaku-file when
     // danmaku is enabled. Best-effort and time-bounded; never blocks start.
     let danmaku_file = if settings.danmaku_enabled_default {
-        build_standalone_danmaku_file(state.emby.http(), &item, &pb.play_session_id).await
+        build_standalone_danmaku_file(
+            state.emby.http(),
+            &item,
+            &pb.play_session_id,
+            settings.danmaku_api_base.as_deref(),
+        )
+        .await
     } else {
         None
     };

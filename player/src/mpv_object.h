@@ -4,6 +4,9 @@
 #include <QtQml/qqmlregistration.h>
 #include <QVariant>
 #include <QStringList>
+#include <QTimer>
+
+#include <atomic>
 
 #include <mpv/client.h>
 #include <mpv/render_gl.h>
@@ -59,10 +62,18 @@ public:
     // pattern; returns an invalid QVariant when unavailable.
     Q_INVOKABLE QVariant getProperty(const QString &name) const;
     // Forward a UI intent the standalone window cannot satisfy itself
-    // (versions / episodes / danmaku settings ...) to the host via the stdout
-    // reporter as {"event":"ui-action","action":...}. Unknown events are
-    // ignored by the host parser, so this is forward-compatible.
-    Q_INVOKABLE void uiAction(const QString &action);
+    // (versions / episodes / quality / danmaku settings ...) to the host via the
+    // stdout reporter as {"event":"ui-action","action":...,"data":{...}}. The
+    // optional `data` map carries a structured payload (e.g. a panel selection's
+    // kind + key). Unknown events are ignored by the host parser, so this is
+    // forward-compatible.
+    Q_INVOKABLE void uiAction(const QString &action,
+                              const QVariant &data = QVariant());
+    // Host → player: render a selection panel (episodes / versions / quality).
+    // The host gathers the list (it owns the Emby session) and pushes it over the
+    // stdin control channel; dispatchControl forwards it here and QML renders it.
+    // `panel` is a map {kind, title, entries:[{key,label,sublabel,checked}]}.
+    Q_INVOKABLE void showHostPanel(const QVariant &panel);
     Q_INVOKABLE void play();
     Q_INVOKABLE void pause();
     Q_INVOKABLE void togglePause();
@@ -76,6 +87,14 @@ public:
     Q_INVOKABLE void setVolume(int volume);
     Q_INVOKABLE void setAnime4kPreset(const QString &preset);
 
+protected:
+    // Pause mpv rendering while the window is actively resized. Rendering into
+    // the FBO mid-resize faulted (0xC0000005) inside the GPU driver's shader
+    // JIT; we flag the resize, let render() skip until the size settles, then
+    // resume. Cost: a brief freeze/black while dragging, restored on release.
+    void geometryChange(const QRectF &newGeometry,
+                        const QRectF &oldGeometry) override;
+
 signals:
     void durationChanged();
     void positionChanged();
@@ -85,6 +104,9 @@ signals:
     void bufferingChanged();
     void fileLoaded();
     void endFile(const QString &reason);
+    // Host pushed a selection panel (episodes / versions / quality) for QML to
+    // render. `panel` is a QVariantMap (see showHostPanel).
+    void hostPanelRequested(const QVariant &panel);
     void onUpdate(); // emitted from the mpv render thread; queued to update()
 
 private slots:
@@ -107,6 +129,10 @@ private:
     bool m_muted = false;
     bool m_buffering = false;
     qint64 m_lastTimePosEmitMs = 0;
+
+    // Read on the render thread, written on the GUI thread → atomic.
+    std::atomic<bool> m_resizing{false};
+    QTimer *m_resizeSettleTimer = nullptr;
 
     friend class MpvRenderer;
 };

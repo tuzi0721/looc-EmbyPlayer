@@ -48,6 +48,11 @@ export interface AppSettings {
   defaultUserAgent: string;
   theme: "dark" | "light" | "auto";
   blurStrength: number;
+  // User-customizable UI highlight (accent) colors. null → built-in theme default
+  // (purple). Applied as inline CSS custom properties at runtime.
+  accentColorDark: string | null;
+  accentColorLight: string | null;
+  progressColor: string | null;
   enableWindowVibrancy: boolean;
   closeToTray: boolean;
   ignoreSslErrors: boolean;
@@ -68,6 +73,7 @@ export interface AppSettings {
   externalPotplayerEnabled: boolean;
   externalPotplayerPath: string | null;
   markWatchedThresholdPct: number;
+  imageCacheLimitMB: number;
   preferredVersionStrategy:
     | "default"
     | "hdr-first"

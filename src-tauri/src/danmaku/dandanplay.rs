@@ -9,8 +9,6 @@ use crate::danmaku::{DanmakuProvider, DANMAKU_USER_AGENT};
 use crate::emby::models::MediaItem;
 use crate::error::{AppError, AppResult};
 
-const API_BASE: &str = "https://api.dandanplay.net";
-
 pub struct DanDanPlay;
 
 #[derive(Debug, Serialize)]
@@ -68,13 +66,18 @@ impl DanmakuProvider for DanDanPlay {
         "DanDanPlay"
     }
 
-    async fn match_item(&self, client: &Client, item: &MediaItem) -> AppResult<Option<String>> {
+    async fn match_item(
+        &self,
+        client: &Client,
+        item: &MediaItem,
+        api_base: &str,
+    ) -> AppResult<Option<String>> {
         let file_name = build_file_name(item);
         let body = MatchRequest {
             file_name,
             match_mode: Some("hashAndFileName".into()),
         };
-        let url = format!("{API_BASE}/api/v2/match");
+        let url = format!("{api_base}/api/v2/match");
         let resp = client
             .post(&url)
             .header(USER_AGENT, DANMAKU_USER_AGENT)
@@ -96,9 +99,14 @@ impl DanmakuProvider for DanDanPlay {
         Ok(id)
     }
 
-    async fn fetch(&self, client: &Client, provider_episode_id: &str) -> AppResult<DanmakuResult> {
+    async fn fetch(
+        &self,
+        client: &Client,
+        provider_episode_id: &str,
+        api_base: &str,
+    ) -> AppResult<DanmakuResult> {
         let url =
-            format!("{API_BASE}/api/v2/comment/{provider_episode_id}?withRelated=true&chConvert=0");
+            format!("{api_base}/api/v2/comment/{provider_episode_id}?withRelated=true&chConvert=0");
         let resp = client
             .get(&url)
             .header(USER_AGENT, DANMAKU_USER_AGENT)

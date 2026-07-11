@@ -12,6 +12,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultUserAgent: "Emby-Player/0.1 (Tauri; libmpv)",
   theme: "dark",
   blurStrength: 24,
+  accentColorDark: null,
+  accentColorLight: null,
+  progressColor: null,
   enableWindowVibrancy: true,
   closeToTray: false,
   ignoreSslErrors: false,
@@ -32,6 +35,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   externalPotplayerEnabled: false,
   externalPotplayerPath: null,
   markWatchedThresholdPct: 90,
+  imageCacheLimitMB: 1024,
   preferredVersionStrategy: "default",
   playerLogEnabled: false,
   mpvBackend: "embedded",
@@ -89,6 +93,59 @@ function mergeSavedSettings(
   patch: Partial<AppSettings> | null,
 ): AppSettings {
   return patch ? { ...saved, ...patch } : saved;
+}
+
+// ── Accent color customization ──────────────────────────────────────────────
+// A user-picked hex color overrides the built-in purple accent. We derive the
+// hover/pressed/soft/gradient variants from it so the whole UI stays cohesive,
+// and write them as inline CSS custom properties (which beat theme.css :root
+// rules). A null color clears the overrides so the theme default applies.
+const ACCENT_VARS = [
+  "--accent",
+  "--accent-hover",
+  "--accent-pressed",
+  "--accent-soft",
+  "--accent-grad",
+  "--ambient",
+] as const;
+
+function hexToRgb(hex: string): [number, number, number] | null {
+  const match = /^#?([0-9a-fA-F]{6})$/.exec(hex.trim());
+  if (!match) return null;
+  const int = parseInt(match[1], 16);
+  return [(int >> 16) & 255, (int >> 8) & 255, int & 255];
+}
+
+function toHex(r: number, g: number, b: number): string {
+  const part = (v: number) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0");
+  return `#${part(r)}${part(g)}${part(b)}`;
+}
+
+function mixToward([r, g, b]: [number, number, number], target: number, amount: number): string {
+  return toHex(r + (target - r) * amount, g + (target - g) * amount, b + (target - b) * amount);
+}
+
+function applyAccent(color: string | null) {
+  const style = document.documentElement.style;
+  const rgb = color ? hexToRgb(color) : null;
+  if (!rgb) {
+    for (const name of ACCENT_VARS) style.removeProperty(name);
+    return;
+  }
+  const [r, g, b] = rgb;
+  const base = toHex(r, g, b);
+  style.setProperty("--accent", base);
+  style.setProperty("--accent-hover", mixToward(rgb, 255, 0.18));
+  style.setProperty("--accent-pressed", mixToward(rgb, 0, 0.14));
+  style.setProperty("--accent-soft", `rgba(${r}, ${g}, ${b}, 0.18)`);
+  style.setProperty("--accent-grad", `linear-gradient(135deg, ${base} 0%, ${mixToward(rgb, 0, 0.2)} 100%)`);
+  style.setProperty("--ambient", base);
+}
+
+function applyProgressColor(color: string | null) {
+  const style = document.documentElement.style;
+  if (color && hexToRgb(color)) style.setProperty("--progress-color", color);
+  else style.removeProperty("--progress-color");
 }
 
 export const useSettingsStore = defineStore("settings", () => {
@@ -167,6 +224,9 @@ export const useSettingsStore = defineStore("settings", () => {
       "--glass-blur",
       `${settings.value.blurStrength}px`,
     );
+
+    applyAccent(light ? settings.value.accentColorLight : settings.value.accentColorDark);
+    applyProgressColor(settings.value.progressColor);
   });
 
   return { settings, loading, saving, refresh, update, isHidden, toggleHidden };

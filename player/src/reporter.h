@@ -24,8 +24,10 @@ public:
     void pause(bool paused, qint64 playlistPos = -1);
     void speed(double speed, qint64 playlistPos = -1);
     // UI intents the player window delegates to the host (versions, episodes,
-    // danmaku settings, ...). Hosts that don't understand the event ignore it.
-    void uiAction(const QString &action);
+    // danmaku settings, panel selections, ...). Optional `data` carries a
+    // structured payload (e.g. the selected episode id / media source id) under
+    // the event's "data" key. Hosts that don't understand the event ignore it.
+    void uiAction(const QString &action, const QJsonObject &data = QJsonObject());
 
 private:
     void emitEvent(const char *event, QJsonObject body);

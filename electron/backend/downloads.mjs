@@ -7,6 +7,11 @@ import { randomUUID } from "node:crypto";
 
 const TERMINAL_STATUS = new Set(["completed", "failed", "cancelled"]);
 
+// Abort a download if no response headers / no bytes arrive within this window.
+// This is a stall guard, not a total-duration cap — large healthy transfers keep
+// resetting it on every chunk.
+const STALL_TIMEOUT_MS = 60_000;
+
 function sanitizeFilename(name) {
   const safe = String(name || "download")
     .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "_")
@@ -210,8 +215,25 @@ export class DownloadManager {
     if (!task) return;
 
     const controller = new AbortController();
-    const active = { controller, nextStatus: "paused", removed: false };
+    const active = { controller, nextStatus: "paused", removed: false, stalled: false };
     this.active.set(id, active);
+
+    // Stall guard: abort if the response headers don't arrive, or no bytes flow,
+    // within STALL_TIMEOUT_MS. This does NOT cap total duration, so healthy large
+    // downloads are unaffected — only genuinely hung connections are dropped.
+    let stallTimer = null;
+    const armStall = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        active.stalled = true;
+        controller.abort();
+      }, STALL_TIMEOUT_MS);
+    };
+    const clearStall = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = null;
+    };
+    active.armStall = armStall;
 
     try {
       await fs.mkdir(path.dirname(task.filePath), { recursive: true });
@@ -225,10 +247,12 @@ export class DownloadManager {
         downloadedBytes: startBytes,
       });
 
+      armStall();
       const response = await fetch(task.streamUrl, {
         headers: headersForTask(task, startBytes),
         signal: controller.signal,
       });
+      armStall();
 
       if (response.status === 416) {
         await this.updateTask(task, { status: "completed", error: null });
@@ -253,7 +277,7 @@ export class DownloadManager {
     } catch (error) {
       if (active.removed) return;
       const status = active.nextStatus;
-      if (controller.signal.aborted && (status === "paused" || status === "cancelled")) {
+      if (!active.stalled && controller.signal.aborted && (status === "paused" || status === "cancelled")) {
         const latest = await this.store.getDownload(id);
         if (latest) await this.updateTask(latest, { status, error: null });
       } else {
@@ -261,11 +285,12 @@ export class DownloadManager {
         if (latest) {
           await this.updateTask(latest, {
             status: "failed",
-            error: error?.message ?? String(error),
+            error: active.stalled ? "download stalled (timeout)" : error?.message ?? String(error),
           });
         }
       }
     } finally {
+      clearStall();
       this.active.delete(id);
     }
   }
@@ -280,6 +305,7 @@ export class DownloadManager {
     try {
       for await (const chunk of response.body) {
         if (active.controller.signal.aborted) break;
+        active.armStall?.();
         const buffer = Buffer.from(chunk);
         downloadedBytes += buffer.length;
         if (!stream.write(buffer)) await once(stream, "drain");

@@ -143,7 +143,7 @@ onBeforeUnmount(stopRecord);
             @click="recording === action ? stopRecord() : startRecord(action)"
           >
             <Icon icon="lucide:keyboard" width="14" />
-            {{ recording === action ? "按下组合键…" : "录制" }}
+            {{ recording === action ? "按下组合键…" : "自定义" }}
           </GlassButton>
           <GlassButton
             v-if="byAction[action]"
@@ -216,9 +216,11 @@ kbd {
   grid-template-columns: 1fr auto auto;
   align-items: center;
   gap: 12px;
-  padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 12px;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--separator);
+}
+.global__row:last-child {
+  border-bottom: none;
 }
 .global__label {
   font-weight: 600;

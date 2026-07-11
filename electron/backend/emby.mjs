@@ -328,6 +328,29 @@ function appendToken(url, token, enabled) {
   return url;
 }
 
+function urlHost(value) {
+  try {
+    return new URL(value).host.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+// The account access token must only ever be attached to this Emby server's own
+// hosts. An absolute MediaSource.Path may point at a third-party / netdisk host;
+// appending our api_key there would leak the token to whatever host the media
+// server chose to return. Compare against every configured line baseUrl host.
+function isEmbyServerHost(url, server) {
+  const targetHost = url?.host?.toLowerCase?.() ?? null;
+  if (!targetHost) return false;
+  const lines = Array.isArray(server?.lines) ? server.lines : [];
+  for (const line of lines) {
+    const host = urlHost(stringFrom(line?.baseUrl) ?? "");
+    if (host && host === targetHost) return true;
+  }
+  return false;
+}
+
 function absoluteMediaUrl(baseUrl, value) {
   if (/^https?:\/\//i.test(value)) return new URL(value);
   return joinUrl(baseUrl, value);
@@ -449,6 +472,29 @@ function pickLocalDecodeMediaSource(mediaSources, requestedMediaSourceId) {
 
 function defaultUserAgent(settings, server, line) {
   return line.userAgent ?? server.defaultUserAgent ?? settings.defaultUserAgent;
+}
+
+// Probe whether an URL serves HTTP Range. Returns true (206 / Content-Range),
+// false (200 without Range), or null (probe failed/unknown). mpv needs Range to
+// seek to the MKV tail index; when a reverse proxy strips it on the bare
+// /Videos/{id}/stream path, mpv can't seek → endless "Corrupt file detected,
+// resync" → HEVC garbage / black screen.
+async function probeRangeSupport(url, headers, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { ...headers, Range: "bytes=0-1" },
+      signal: controller.signal,
+    });
+    try { await response.body?.cancel(); } catch { /* ignore */ }
+    return response.status === 206 || Boolean(response.headers.get("content-range"));
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function detectServerKind(info) {
@@ -1016,9 +1062,14 @@ export class EmbyClient {
     const isHttpSource = /^https?:\/\//i.test(rawSourcePath);
     let streamUrl;
     let directHeaders;
+    let rangeDiag = null;
     if (isHttpSource) {
       streamUrl = new URL(rawSourcePath);
-      appendToken(streamUrl, account.accessToken, true);
+      // Only attach the Emby access token when the absolute Path actually points
+      // back at this Emby server. For third-party/netdisk hosts, appending our
+      // api_key would leak the account token to an external endpoint.
+      const sameEmbyHost = isEmbyServerHost(streamUrl, server);
+      appendToken(streamUrl, account.accessToken, sameEmbyHost);
       // The Path is the netdisk endpoint, not the Emby server — don't push Emby auth
       // headers onto it (the api_key in the URL is what it honors); keep only the UA.
       directHeaders = [];
@@ -1032,6 +1083,34 @@ export class EmbyClient {
         ["X-Emby-Token", account.accessToken],
         ["Authorization", `MediaBrowser Token="${account.accessToken}"`],
       ];
+
+      // Range/seek fix: if the bare /Videos/{id}/stream path doesn't serve HTTP
+      // Range (reverse proxy buffering → 200 without Content-Range), mpv can't seek
+      // to the MKV tail index and falls into endless resync → HEVC decode garbage /
+      // black screen. The /emby/Videos/... variant is usually passed through with
+      // Range. Probe and switch ONLY when the bare path lacks Range and /emby has it
+      // (some servers 404 on /emby, so never force it blindly).
+      try {
+        const probeHeaders = {
+          "User-Agent": defaultUserAgent(settings, server, line),
+          "X-Emby-Token": account.accessToken,
+          Authorization: `MediaBrowser Token="${account.accessToken}"`,
+        };
+        const bareRange = await probeRangeSupport(streamUrl, probeHeaders);
+        rangeDiag = { bare: bareRange, emby: null, switched: false };
+        if (bareRange === false) {
+          const embyUrl = joinUrl(line.baseUrl, `emby/Videos/${itemId}/stream`);
+          embyUrl.search = streamUrl.search;
+          const embyRange = await probeRangeSupport(embyUrl, probeHeaders);
+          rangeDiag.emby = embyRange;
+          if (embyRange === true) {
+            streamUrl = embyUrl;
+            rangeDiag.switched = true;
+          }
+        }
+      } catch {
+        /* keep the bare URL on any probe error */
+      }
     }
 
     return {
@@ -1048,6 +1127,7 @@ export class EmbyClient {
         directStream: {
           static: true,
           hasApiKey: streamUrl.searchParams.has("api_key"),
+          rangeProbe: rangeDiag,
         },
         line: lineDiagnostics(line),
       },

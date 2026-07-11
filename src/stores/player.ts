@@ -559,6 +559,22 @@ export const usePlayerStore = defineStore("player", () => {
     }
   }
 
+  // Advance the queue on natural end-of-file. Driven by BOTH the mpv-state poll
+  // (snapshot.eof) and the main process's `player:eof` event (standalone Qt player,
+  // where the process exits at EOF so polling can't be relied on). The lastEof latch
+  // makes the two paths idempotent — only the first to fire advances.
+  function maybeAdvanceOnEof() {
+    if (lastEof) return;
+    lastEof = true;
+    if (
+      queueKind.value === "remote" &&
+      queue.value.length > 0 &&
+      queueIndex.value + 1 < queue.value.length
+    ) {
+      void nextTrack();
+    }
+  }
+
   function startPolling() {
     stopPolling();
     pollHandle = window.setInterval(async () => {
@@ -602,16 +618,9 @@ export const usePlayerStore = defineStore("player", () => {
             /* ignore */
           }
 
-          if (snapshot.value.eof && !lastEof) {
-            lastEof = true;
-            if (
-              queueKind.value === "remote" &&
-              queue.value.length > 0 &&
-              queueIndex.value + 1 < queue.value.length
-            ) {
-              void nextTrack();
-            }
-          } else if (!snapshot.value.eof) {
+          if (snapshot.value.eof) {
+            maybeAdvanceOnEof();
+          } else {
             lastEof = false;
           }
         }
@@ -652,6 +661,7 @@ export const usePlayerStore = defineStore("player", () => {
     setDirectQueue,
     nextTrack,
     prevTrack,
+    maybeAdvanceOnEof,
     clearQueue,
     setQueue,
     pause,

@@ -174,6 +174,11 @@ pub struct AppSettings {
     pub danmaku_bold: bool,
     #[serde(default = "default_true")]
     pub danmaku_remember_selection: bool,
+    // User-supplied DanDanPlay-compatible API base (e.g. a self-hosted LogVar
+    // endpoint, token path included). Empty/None disables network danmaku — we
+    // never fall back to a hardcoded server. Full calls are `{base}/api/v2/...`.
+    #[serde(default)]
+    pub danmaku_api_base: Option<String>,
     // Reference parity (HillsLite 设置·外部播放器): explicit external mpv /
     // PotPlayer groups (enable + path; mpv additionally honors the app proxy).
     // The legacy generic external_player_path stays as a fallback.
@@ -328,6 +333,7 @@ impl Default for AppSettings {
             danmaku_bottom_max_rows: default_danmaku_fixed_rows(),
             danmaku_bold: false,
             danmaku_remember_selection: true,
+            danmaku_api_base: None,
             external_mpv_enabled: false,
             external_mpv_path: None,
             external_mpv_use_proxy: false,
