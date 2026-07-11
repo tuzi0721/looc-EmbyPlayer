@@ -37,3 +37,8 @@ runtime-logs/
 
 # OS
 Thumbs.db
+
+# Local-only reference source. LinPlayer is AGPL-3.0 and is used only for
+# behavioral/design study; never include its source or assets in this repository.
+/参考/
+*.lnk
