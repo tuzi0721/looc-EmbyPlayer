@@ -1,9 +1,9 @@
 # Phase 0：基线与可持续交接
 
-> 状态：`in_progress`
+> 状态：`accepted`
 > 负责人/代理：`Codex 019f5194-94d3-7fa0-b42d-98f9bf523215`
 > 创建日期：`2026-07-11`
-> 最后更新：`2026-07-11 23:00 +08:00`
+> 最后更新：`2026-07-12 00:24 +08:00`
 > 前置文档：`无（阶段首份）`
 > 后继文档：`暂无`
 
@@ -72,7 +72,7 @@
 | ID | 严重度 | 问题 | 下一步 |
 | --- | --- | --- | --- |
 | P0-U-001 | 中 | Cargo 不在 PATH | 涉及 Tauri 的阶段查找或安装 Rust 工具链 |
-| P0-U-002 | 中 | 尚未确认 GitHub 认证/推送 | 本阶段提交后运行 `gh auth status` 和 `git push -u origin ...` |
+| P0-U-002 | 已解决 | GitHub CLI 未登录，但 Git Credential Manager 可用 | 分支已成功推送并设置上游 |
 | P0-U-003 | 低 | Vite chunk 超过 500 kB | 后续架构阶段处理 |
 
 ## 7. 下一步
@@ -97,7 +97,7 @@
 
 | SHA | 提交主题 | 已推送 |
 | --- | --- | --- |
-| `b4a10439c5176c66fd9c2b4cf07da8bb24fed5b0` | `chore: checkpoint existing Windows player work` | 否，待本阶段一并推送 |
-| `待提交` | `docs(win-p0): establish Windows roadmap and AI handoff` | 否 |
+| `b4a10439c5176c66fd9c2b4cf07da8bb24fed5b0` | `chore: checkpoint existing Windows player work` | 是 |
+| `459799486d64b4281b99237f09c33d93e1671410` | `docs(win-p0): establish Windows roadmap and AI handoff` | 是 |
 
-当前状态：`in_progress`。文档提交及 GitHub 推送完成后改为 `accepted`。即使会话中断，下一位 AI 可从本文、路线图和 checkpoint 继续。
+当前状态：`accepted`。分支 `codex/windows-security-foundation` 已推送并跟踪 `origin/codex/windows-security-foundation`。即使会话中断，下一位 AI 可从本文、路线图和 checkpoint 继续。
