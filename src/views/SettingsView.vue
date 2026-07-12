@@ -97,8 +97,14 @@ const cloudSummary = computed(() => {
   if (!cloud.loggedIn) return "未登录";
   return `${cloud.user?.username ?? ""}${cloud.isPro ? " · PRO" : ""}`;
 });
-function saveCloudUrl() {
-  cloud.setBaseUrl(cloudUrlDraft.value);
+async function saveCloudUrl() {
+  cloudMsg.value = "";
+  try {
+    await cloud.setBaseUrl(cloudUrlDraft.value);
+  } catch {
+    cloudUrlDraft.value = cloud.baseUrl;
+    cloudMsg.value = cloud.error ?? "云服务地址保存失败";
+  }
 }
 async function cloudSubmitAuth() {
   cloudMsg.value = "";
@@ -136,7 +142,20 @@ async function cloudBackup() {
     cloudBackupBusy.value = false;
   }
 }
-if (cloud.token) void cloud.refreshMe();
+async function cloudLogout() {
+  cloudMsg.value = "";
+  try {
+    await cloud.logout();
+    cloudMsg.value = "已退出登录";
+  } catch {
+    cloudMsg.value = cloud.error ?? "退出失败：云账号 Token 未删除";
+  }
+}
+if (cloud.token) {
+  void cloud.refreshMe().catch(() => {
+    cloudMsg.value = cloud.error ?? "云账号状态刷新失败";
+  });
+}
 
 type ServerLineDraft = {
   id?: string;
@@ -685,7 +704,9 @@ async function exportConfig() {
   backupStatus.value = "";
   try {
     const result = await api.exportConfig();
-    backupStatus.value = result ? `已导出：${result.filePath}` : "已取消";
+    backupStatus.value = result
+      ? `已导出：${result.filePath}${result.credentialsOmitted ? "（不含账号 Token、密码和敏感请求头）" : ""}`
+      : "已取消";
   } catch (error) {
     backupStatus.value = error instanceof Error ? error.message : String(error);
   } finally {
@@ -1941,7 +1962,7 @@ const danmakuSummary = computed(() => {
             </button>
           </SettingRow>
           <SettingRow label="退出登录">
-            <button class="action-btn" @click="cloud.logout()">退出</button>
+            <button class="action-btn" :disabled="cloud.busy" @click="cloudLogout">退出</button>
           </SettingRow>
         </template>
 
@@ -2113,7 +2134,7 @@ const danmakuSummary = computed(() => {
         @toggle="toggleSection('backup')"
       >
         <template v-if="backupAvailable">
-          <SettingRow label="导出配置" description="导出设置、服务器、账号和快捷键">
+          <SettingRow label="导出配置" description="导出当前运行环境支持的设置、服务器、账号和快捷键">
             <button class="action-btn" :disabled="backupBusy !== null" @click="exportConfig">
               <Icon icon="lucide:download" width="15" />
               <span>{{ backupBusy === "export" ? "导出中" : "导出" }}</span>

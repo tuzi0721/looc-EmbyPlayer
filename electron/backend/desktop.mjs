@@ -1,43 +1,11 @@
 import { Menu, Tray, nativeImage, powerSaveBlocker } from "electron";
 
-const PROTOCOL_SCHEME = "rodelplayer";
+import { PROTOCOL_SCHEME, extractProtocolUrls, routeFromProtocolUrl } from "./protocol-routing.mjs";
+
+export { extractProtocolUrls } from "./protocol-routing.mjs";
+
 const TRAY_ICON_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAPElEQVR4nO3OIQEAIAwAwYWiCuFoQB/CIIclAUOcePHuoq2RlQXAPbPvJwEAAAAAAAAAAAAAAPwLqAjgAOTrWnb1NUcCAAAAAElFTkSuQmCC";
-
-function routeFromProtocolUrl(value) {
-  let url;
-  try {
-    url = new URL(value);
-  } catch {
-    return null;
-  }
-  if (url.protocol !== `${PROTOCOL_SCHEME}:`) return null;
-
-  const host = decodeURIComponent(url.hostname || "");
-  const parts = url.pathname
-    .split("/")
-    .filter(Boolean)
-    .map((part) => decodeURIComponent(part));
-  const action = url.searchParams.get("action") || host || parts[0] || "";
-  const queryItemId = url.searchParams.get("itemId") || url.searchParams.get("id");
-  const firstPayload = host && host !== action ? host : parts[0];
-  const secondPayload = parts.length > 1 ? parts[1] : null;
-  const itemId = queryItemId || secondPayload || firstPayload;
-
-  if ((action === "play" || action === "player") && itemId) return `/player/${itemId}`;
-  if ((action === "item" || action === "detail") && itemId) return `/item/${itemId}`;
-  if (action === "downloads" || action === "download") return "/downloads";
-  if (action === "remote") return "/remote";
-  if (action === "settings") return "/settings";
-  if (!host && parts.length > 0) return `/${parts.join("/")}`;
-  return null;
-}
-
-export function extractProtocolUrls(argv = []) {
-  return argv.filter((value) => {
-    return typeof value === "string" && value.toLowerCase().startsWith(`${PROTOCOL_SCHEME}:`);
-  });
-}
 
 export class DesktopIntegration {
   constructor({ app, store, getWindow, emit }) {

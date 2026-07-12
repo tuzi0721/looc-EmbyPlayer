@@ -357,15 +357,24 @@ function saveWebPreviewState() {
   }
 }
 
+function webAccountProfile(account: Account) {
+  const { accessToken: _accessToken, ...profile } = account;
+  return profile;
+}
+
 function webConfigBackup() {
   return {
     schema: "hills-lite-config",
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
+    security: {
+      credentials: "omitted",
+      note: "Account tokens are not included.",
+    },
     data: {
       settings: getWebSettings(),
       servers: clone(webServers),
-      accounts: clone(webAccounts),
+      accountProfiles: webAccounts.map(webAccountProfile),
       activeAccountId: webActiveAccountId,
       globalShortcuts: [],
     },
@@ -444,7 +453,8 @@ function importWebBackupData(parsed: any, mode: "merge" | "replace", filePath: s
   const importedServers = Array.isArray(data.servers)
     ? data.servers.map(createWebServer)
     : [];
-  const importedAccounts = Array.isArray(data.accounts)
+  const includesLegacyAccounts = Array.isArray(data.accounts);
+  const importedAccounts = includesLegacyAccounts
     ? data.accounts.map(normalizeWebAccount).filter((account: Account | null): account is Account => Boolean(account))
     : [];
   const settingsPatch = importedWebSettingsPatch(data.settings);
@@ -459,7 +469,12 @@ function importWebBackupData(parsed: any, mode: "merge" | "replace", filePath: s
         : [],
     };
     webServers = importedServers;
-    webAccounts = importedAccounts;
+    if (includesLegacyAccounts) {
+      webAccounts = importedAccounts;
+    } else {
+      const serverIds = new Set<string>(importedServers.map((server: Server) => server.id));
+      webAccounts = webAccounts.filter((account) => serverIds.has(account.serverId));
+    }
   } else {
     webSettings = {
       ...WEB_DEFAULT_SETTINGS,
@@ -470,7 +485,9 @@ function importWebBackupData(parsed: any, mode: "merge" | "replace", filePath: s
         : webSettings.hiddenServerIds,
     };
     webServers = mergeWebById(webServers, importedServers);
-    webAccounts = mergeWebById(webAccounts, importedAccounts);
+    if (includesLegacyAccounts) {
+      webAccounts = mergeWebById(webAccounts, importedAccounts);
+    }
   }
 
   const activeAccountId = stringFrom(data.activeAccountId) ?? stringFrom(data.active_account_id);
@@ -2162,8 +2179,9 @@ function invokeWebFallback<T>(
       return Promise.resolve({
         filePath,
         servers: backup.data.servers.length,
-        accounts: backup.data.accounts.length,
+        accounts: backup.data.accountProfiles.length,
         shortcuts: backup.data.globalShortcuts.length,
+        credentialsOmitted: true,
       } as T);
     }
     case "import_config":

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, globalShortcut, ipcMain, nativeTheme, protocol, screen, session, shell } from "electron";
+import { app, BrowserWindow, Menu, dialog, globalShortcut, ipcMain, nativeTheme, protocol, safeStorage, screen, session, shell } from "electron";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -11,12 +11,49 @@ import { DownloadManager } from "./backend/downloads.mjs";
 import { DanmakuClient } from "./backend/danmaku.mjs";
 import { DesktopIntegration, extractProtocolUrls } from "./backend/desktop.mjs";
 import { JsonStore, createServer } from "./backend/store.mjs";
+import { SecureCredentialStore } from "./backend/secure-credentials.mjs";
 import { WebDavClient } from "./backend/webdav.mjs";
 import { AlistClient } from "./backend/alist.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
-const devServerUrl = process.env.HILLS_ELECTRON_DEV_SERVER_URL;
+const appIndexPath = path.resolve(rootDir, "dist", "index.html");
+
+function resolveDevServerConfig() {
+  if (app.isPackaged) return null;
+  const candidate = process.env.HILLS_ELECTRON_DEV_SERVER_URL?.trim();
+  if (!candidate) return { url: null, error: null };
+  try {
+    const parsed = new URL(candidate);
+    const hostname = parsed.hostname.toLowerCase();
+    const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      throw new Error("scheme must be http or https");
+    }
+    if (!loopbackHosts.has(hostname)) {
+      throw new Error("host must be 127.0.0.1, localhost, or [::1]");
+    }
+    if (parsed.username || parsed.password) {
+      throw new Error("URL credentials are not allowed");
+    }
+    const effectivePort = Number(parsed.port || (parsed.protocol === "https:" ? 443 : 80));
+    if (!Number.isInteger(effectivePort) || effectivePort < 1 || effectivePort > 65535) {
+      throw new Error("port must be between 1 and 65535");
+    }
+    if (parsed.pathname !== "/" || parsed.search || parsed.hash) {
+      throw new Error("URL must be an origin without path, query, or fragment");
+    }
+    return { url: parsed.origin, error: null };
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    const error = new Error(`invalid HILLS_ELECTRON_DEV_SERVER_URL: ${message}`);
+    console.error("refusing HILLS_ELECTRON_DEV_SERVER_URL; packaged dist fallback is disabled", error.message);
+    return { url: null, error };
+  }
+}
+
+const devServerConfig = resolveDevServerConfig() ?? { url: null, error: null };
+const devServerUrl = devServerConfig.url;
 const writableRootDir = app.isPackaged ? path.dirname(process.execPath) : rootDir;
 // Persist user data in the stable per-user appData dir (e.g. %APPDATA%/Hills Lite),
 // NOT next to the exe. Storing it inside win-unpacked meant every electron-builder
@@ -230,7 +267,8 @@ app.on("open-url", (event, url) => {
   queueProtocolUrl(url);
 });
 
-const store = new JsonStore(userDataDir);
+const secureCredentials = new SecureCredentialStore(userDataDir, safeStorage);
+const store = new JsonStore(userDataDir, { credentialStore: secureCredentials });
 const emby = new EmbyClient(store);
 const danmaku = new DanmakuClient(store, emby);
 const webdav = new WebDavClient();
@@ -248,7 +286,7 @@ desktopIntegration = new DesktopIntegration({
   emit: (event, payload) => emitAppEvent(event, payload),
 });
 const playbackLogPath = path.join(userDataDir, "playback.log");
-const storeReady = store.load().catch((error) => {
+const storeReady = app.whenReady().then(() => store.load()).catch((error) => {
   console.error("failed to initialize Electron state store", error);
 });
 let playQueue = Promise.resolve();
@@ -2035,6 +2073,8 @@ async function runMpvIfRunning(action) {
 }
 
 async function playLocalFilePath(filePath, startMs = null) {
+  await mpv.clearNetworkAccess();
+  currentPlaySession = null;
   if (typeof filePath !== "string" || filePath.trim().length === 0) {
     throw new Error("file path is required");
   }
@@ -2063,7 +2103,32 @@ async function playLocalFilePath(filePath, startMs = null) {
   });
 }
 
-function normalizeWebDavSidecarSubtitles(value) {
+function parseConnectorHttpUrl(value, label) {
+  let parsed;
+  try {
+    parsed = new URL(String(value ?? "").trim());
+  } catch {
+    throw new Error(`${label} is invalid`);
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error(`${label} must use http or https`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error(`${label} must not contain URL credentials`);
+  }
+  parsed.hash = "";
+  return parsed;
+}
+
+function connectorCredentialBaseUrl(value, credentialsPresent, label) {
+  if (!credentialsPresent) return null;
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${label} baseUrl is required when credentials are present`);
+  }
+  return parseConnectorHttpUrl(value, `${label} baseUrl`);
+}
+
+function normalizeConnectorSidecarSubtitles(value, mapUrl = (url) => url) {
   if (!Array.isArray(value)) return [];
   return value
     .map((entry) => {
@@ -2071,16 +2136,15 @@ function normalizeWebDavSidecarSubtitles(value) {
       if (!source) return null;
       let parsed;
       try {
-        parsed = new URL(source);
+        parsed = parseConnectorHttpUrl(source, "sidecar subtitle URL");
       } catch {
         return null;
       }
-      if (!["http:", "https:"].includes(parsed.protocol)) return null;
       const name = typeof entry?.name === "string" && entry.name.trim()
         ? entry.name.trim()
         : path.basename(parsed.pathname);
       return {
-        source: parsed.toString(),
+        source: mapUrl(parsed.toString()),
         name,
       };
     })
@@ -2088,7 +2152,7 @@ function normalizeWebDavSidecarSubtitles(value) {
     .slice(0, 8);
 }
 
-async function addWebDavSidecarSubtitles(subtitles) {
+async function addConnectorSidecarSubtitles(subtitles, sourceLabel) {
   let loaded = 0;
   const loadedFiles = [];
   for (const [index, subtitle] of subtitles.entries()) {
@@ -2102,19 +2166,18 @@ async function addWebDavSidecarSubtitles(subtitles) {
       loaded += 1;
       loadedFiles.push(subtitle.name);
     } catch (error) {
-      console.warn("failed to load WebDAV sidecar subtitle", subtitle.name, error);
+      console.warn(`failed to load ${sourceLabel} sidecar subtitle`, subtitle.name, error);
     }
   }
   return { loaded, loadedFiles };
 }
 
 async function playWebDavFile(payload = {}) {
+  await mpv.clearNetworkAccess();
+  currentPlaySession = null;
   const url = typeof payload.url === "string" ? payload.url.trim() : "";
   if (!url) throw new Error("WebDAV file URL is required");
-  const parsed = new URL(url);
-  if (!["http:", "https:"].includes(parsed.protocol)) {
-    throw new Error("WebDAV file URL must use http or https");
-  }
+  const parsed = parseConnectorHttpUrl(url, "WebDAV file URL");
   let decodedPath = parsed.pathname;
   try {
     decodedPath = decodeURIComponent(parsed.pathname);
@@ -2125,10 +2188,18 @@ async function playWebDavFile(payload = {}) {
     ? payload.title.trim()
     : path.basename(decodedPath);
   const settings = await store.getSettings();
+  const credentialsPresent = Boolean(payload.username || payload.password);
+  const credentialBase = connectorCredentialBaseUrl(
+    payload.baseUrl,
+    credentialsPresent,
+    "WebDAV",
+  );
+  const headers = credentialsPresent ? webdav.headersFor(payload) : [];
   await prepareMpvWindowForEmbeddedPlayback();
   await mpv.load({
     url: parsed.toString(),
-    headers: webdav.headersFor(payload),
+    headers,
+    credentialScope: credentialBase ? { baseUrl: credentialBase.toString() } : null,
     userAgent: payload.userAgent ?? settings.defaultUserAgent ?? null,
     startMs: payload.startMs ?? null,
     autoloadSubtitles: false,
@@ -2137,12 +2208,14 @@ async function playWebDavFile(payload = {}) {
   await applySubtitleStyle(settings).catch((error) => {
     console.warn("failed to apply subtitle style", error);
   });
-  const subtitles = normalizeWebDavSidecarSubtitles(payload.sidecarSubtitles);
-  const subtitleResult = await addWebDavSidecarSubtitles(subtitles).catch((error) => {
+  const subtitles = normalizeConnectorSidecarSubtitles(
+    payload.sidecarSubtitles,
+    credentialsPresent ? (sidecarUrl) => mpv.networkUrlFor(sidecarUrl) : undefined,
+  );
+  const subtitleResult = await addConnectorSidecarSubtitles(subtitles, "WebDAV").catch((error) => {
     console.warn("failed to load WebDAV sidecar subtitles", error);
     return { loaded: 0, loadedFiles: [] };
   });
-  currentPlaySession = null;
   writePlaybackLog("webdav_file_loaded", {
     title,
     url: parsed.toString(),
@@ -2153,12 +2226,11 @@ async function playWebDavFile(payload = {}) {
 }
 
 async function playAlistFile(payload = {}) {
+  await mpv.clearNetworkAccess();
+  currentPlaySession = null;
   const url = typeof payload.url === "string" ? payload.url.trim() : "";
   if (!url) throw new Error("Alist file URL is required");
-  const parsed = new URL(url);
-  if (!["http:", "https:"].includes(parsed.protocol)) {
-    throw new Error("Alist file URL must use http or https");
-  }
+  const parsed = parseConnectorHttpUrl(url, "Alist file URL");
   let decodedPath = parsed.pathname;
   try {
     decodedPath = decodeURIComponent(parsed.pathname);
@@ -2169,10 +2241,18 @@ async function playAlistFile(payload = {}) {
     ? payload.title.trim()
     : path.basename(decodedPath);
   const settings = await store.getSettings();
+  const credentialsPresent = typeof payload.token === "string" && payload.token.trim().length > 0;
+  const credentialBase = connectorCredentialBaseUrl(
+    payload.baseUrl,
+    credentialsPresent,
+    "Alist",
+  );
+  const headers = credentialsPresent ? alist.headersFor(payload) : [];
   await prepareMpvWindowForEmbeddedPlayback();
   await mpv.load({
     url: parsed.toString(),
-    headers: alist.headersFor(payload),
+    headers,
+    credentialScope: credentialBase ? { baseUrl: credentialBase.toString() } : null,
     userAgent: payload.userAgent ?? settings.defaultUserAgent ?? null,
     startMs: payload.startMs ?? null,
     autoloadSubtitles: false,
@@ -2181,12 +2261,14 @@ async function playAlistFile(payload = {}) {
   await applySubtitleStyle(settings).catch((error) => {
     console.warn("failed to apply subtitle style", error);
   });
-  const subtitles = normalizeWebDavSidecarSubtitles(payload.sidecarSubtitles);
-  const subtitleResult = await addWebDavSidecarSubtitles(subtitles).catch((error) => {
+  const subtitles = normalizeConnectorSidecarSubtitles(
+    payload.sidecarSubtitles,
+    credentialsPresent ? (sidecarUrl) => mpv.networkUrlFor(sidecarUrl) : undefined,
+  );
+  const subtitleResult = await addConnectorSidecarSubtitles(subtitles, "Alist").catch((error) => {
     console.warn("failed to load Alist sidecar subtitles", error);
     return { loaded: 0, loadedFiles: [] };
   });
-  currentPlaySession = null;
   writePlaybackLog("alist_file_loaded", {
     title,
     url: parsed.toString(),
@@ -2991,6 +3073,8 @@ async function startHillsPlayerForSource(hillsPath, source, payload) {
 
 async function runPlayRequest(payload) {
   const started = performance.now();
+  await mpv.clearNetworkAccess();
+  currentPlaySession = null;
   const { server, account } = await requireActivePair();
   const hillsPath = resolveHillsPlayerPath();
   // Bring the Qt player window up immediately (idle, no file) so it covers the
@@ -3156,8 +3240,43 @@ function mergeServer(existing, payload) {
   return next;
 }
 
+function rendererSecretKey(value) {
+  if (typeof value !== "string") throw new Error("secure secret key must be a string");
+  const key = value.trim();
+  const allowed =
+    key === "renderer:cloud:token" ||
+    key.startsWith("renderer:webdav:") ||
+    key.startsWith("renderer:alist:");
+  if (!allowed || key.length > 512 || /[\0\r\n]/.test(key)) {
+    throw new Error("secure secret key is not allowed");
+  }
+  return key;
+}
+
 async function handleInvoke(command, args = {}) {
   await storeReady;
+
+  if (command === "get_secure_storage_status") {
+    return secureCredentials.status();
+  }
+
+  if (command === "get_secure_secret") {
+    return secureCredentials.get(rendererSecretKey(args.key));
+  }
+
+  if (command === "set_secure_secret") {
+    const key = rendererSecretKey(args.key);
+    if (typeof args.value !== "string" || args.value.length > 1024 * 1024) {
+      throw new Error("secure secret value is invalid");
+    }
+    await secureCredentials.set(key, args.value);
+    return null;
+  }
+
+  if (command === "delete_secure_secret") {
+    await secureCredentials.delete(rendererSecretKey(args.key));
+    return null;
+  }
 
   if (command === "open_external") {
     const url = typeof args === "string" ? args : args.url;
@@ -3339,8 +3458,9 @@ async function handleInvoke(command, args = {}) {
     return {
       filePath: result.filePath,
       servers: backup.data.servers.length,
-      accounts: backup.data.accounts.length,
+      accounts: backup.data.accountProfiles?.length ?? 0,
       shortcuts: backup.data.globalShortcuts.length,
+      credentialsOmitted: true,
     };
   }
 
@@ -3681,6 +3801,9 @@ async function handleInvoke(command, args = {}) {
   }
 
   if (command === "stop") {
+    await mpv.clearNetworkAccess().catch((error) => {
+      console.warn("failed to clear playback authentication state", error);
+    });
     if (hillsPlayer?.isRunning()) {
       hillsExitExpected = true;
       hillsPlayer.stop();
@@ -3886,6 +4009,8 @@ async function handleInvoke(command, args = {}) {
     return null;
   }
   if (command === "play_local") {
+    await mpv.clearNetworkAccess();
+    currentPlaySession = null;
     await downloads.playLocal(args.payload?.id, args.payload?.startMs ?? null);
     return null;
   }
@@ -4086,6 +4211,24 @@ nativeTheme.on("updated", () => {
   }
 });
 
+function sameResolvedPath(left, right) {
+  const normalize = (value) => {
+    const resolved = path.resolve(value);
+    return process.platform === "win32" ? resolved.toLocaleLowerCase() : resolved;
+  };
+  return normalize(left) === normalize(right);
+}
+
+function isInternalAppUrl(target) {
+  try {
+    const parsed = new URL(target);
+    if (devServerUrl) return parsed.origin === devServerUrl;
+    return parsed.protocol === "file:" && sameResolvedPath(fileURLToPath(parsed), appIndexPath);
+  } catch {
+    return false;
+  }
+}
+
 function createWindow() {
   const initialTheme = currentThemeSync();
   const win = new BrowserWindow({
@@ -4103,12 +4246,12 @@ function createWindow() {
     // -webkit-app-region.
     titleBarStyle: "hidden",
     webPreferences: {
-      preload: path.join(__dirname, "preload.mjs"),
+      preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
-      webSecurity: false,
-      allowRunningInsecureContent: true,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
       // The shell window is HIDDEN while the standalone Qt player is on screen, but
       // its renderer still does real work for that player: it answers the player's
       // 选集/版本/清晰度 panel requests, reports playback progress, and advances the
@@ -4129,15 +4272,6 @@ function createWindow() {
   // frame to a remote origin, nor spawn new Electron windows. Allow only same-
   // origin (dev) / file:// (packaged) navigation; route external http(s) links to
   // the OS browser and deny everything else.
-  const appOrigin = devServerUrl ? new URL(devServerUrl).origin : null;
-  const isInternalUrl = (target) => {
-    try {
-      const parsed = new URL(target);
-      return appOrigin ? parsed.origin === appOrigin : parsed.protocol === "file:";
-    } catch {
-      return false;
-    }
-  };
   const openExternalHttp = (target) => {
     try {
       const scheme = new URL(target).protocol.toLowerCase();
@@ -4146,11 +4280,13 @@ function createWindow() {
       /* ignore */
     }
   };
-  win.webContents.on("will-navigate", (event, target) => {
-    if (isInternalUrl(target)) return;
+  const guardTopLevelNavigation = (event, target) => {
+    if (isInternalAppUrl(target)) return;
     event.preventDefault();
     openExternalHttp(target);
-  });
+  };
+  win.webContents.on("will-navigate", guardTopLevelNavigation);
+  win.webContents.on("will-redirect", guardTopLevelNavigation);
   win.webContents.setWindowOpenHandler(({ url }) => {
     openExternalHttp(url);
     return { action: "deny" };
@@ -4208,7 +4344,7 @@ function createWindow() {
       win.webContents.openDevTools({ mode: "detach" });
     }
   } else {
-    void win.loadFile(path.join(rootDir, "dist", "index.html"));
+    void win.loadFile(appIndexPath);
   }
 }
 
@@ -4218,14 +4354,12 @@ function createWindow() {
 // coming from any other window/frame (e.g. a popup or an embedded child frame).
 function isTrustedSender(event) {
   try {
+    const window = getMainAppWindow();
+    const sender = event?.sender;
     const frame = event?.senderFrame;
-    const url = frame?.url;
-    if (!url) return false;
-    const parsed = new URL(url);
-    if (devServerUrl) {
-      return parsed.origin === new URL(devServerUrl).origin;
-    }
-    return parsed.protocol === "file:";
+    if (!window || window.isDestroyed() || sender !== window.webContents) return false;
+    if (!frame || frame !== sender.mainFrame || !frame.url) return false;
+    return isInternalAppUrl(frame.url);
   } catch {
     return false;
   }
@@ -4259,6 +4393,12 @@ ipcMain.handle("hills:invoke", async (event, command, args = {}) => {
 });
 
 app.whenReady().then(async () => {
+  await storeReady;
+  if (devServerConfig.error) {
+    dialog.showErrorBox("Invalid development server URL", devServerConfig.error.message);
+    app.quit();
+    return;
+  }
   protocol.handle("hills-image", handleImageProtocolRequest);
   createWindow();
   screen.on("display-added", refreshSecondaryDisplayBlackout);

@@ -392,11 +392,14 @@ async function autoImportWebDavDanmaku(entry: DirectQueueEntry | null) {
   }
   danmakuLoading.value = true;
   try {
+    const credentialBaseUrl = entry.baseUrl?.trim();
+    if (!credentialBaseUrl) throw new Error("连接器弹幕缺少 credentialBaseUrl");
     const result = await api.importDanmakuXml({
       url: entry.sidecarDanmaku.url,
       username: entry.username ?? null,
       password: entry.password ?? null,
       token: entry.sourceKind === "alist" ? entry.token ?? null : null,
+      credentialBaseUrl,
     });
     if ((result.comments ?? []).length > 0) {
       applyDanmakuResult(result);

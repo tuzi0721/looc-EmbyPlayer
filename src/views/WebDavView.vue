@@ -5,7 +5,7 @@ import { Icon } from "@iconify/vue";
 
 import { api, type WebDavEntry, type WebDavListing } from "@/api";
 import { usePlayerStore, type DirectQueueEntry } from "@/stores/player";
-import { useWebDavStore } from "@/stores/webdav";
+import { useWebDavStore, type WebDavCredentialMode } from "@/stores/webdav";
 import { writeTextToClipboard } from "@/utils/clipboard";
 import { connectorPathLabel, connectorTitle, hasConnectorPath } from "@/utils/fileConnectorPaths";
 
@@ -22,6 +22,8 @@ const baseUrlDraft = ref("");
 const usernameDraft = ref("");
 const passwordDraft = ref("");
 const rememberPassword = ref(false);
+let syncingCredentialDraft = false;
+let credentialDraftDirty = false;
 const listing = ref<WebDavListing | null>(null);
 const loading = ref(false);
 const playingUrl = ref<string | null>(null);
@@ -185,17 +187,33 @@ function parentPath(path: string): string {
   return parts.length > 0 ? `${parts.join("/")}/` : "";
 }
 
+function syncCredentialDraft(password?: string | null) {
+  syncingCredentialDraft = true;
+  passwordDraft.value = password ?? "";
+  rememberPassword.value = Boolean(password);
+  credentialDraftDirty = false;
+  syncingCredentialDraft = false;
+}
+
+watch(
+  [passwordDraft, rememberPassword],
+  () => {
+    if (!syncingCredentialDraft) credentialDraftDirty = true;
+  },
+  { flush: "sync" },
+);
+
 function fillConnection(id: string | null) {
   const connection = id ? webdav.connections.find((entry) => entry.id === id) : null;
   selectedConnectionId.value = connection?.id ?? null;
   nameDraft.value = connection?.name ?? "";
   baseUrlDraft.value = connection?.baseUrl ?? "";
   usernameDraft.value = connection?.username ?? "";
-  passwordDraft.value = connection?.password ?? "";
-  rememberPassword.value = Boolean(connection?.password);
+  syncCredentialDraft(connection?.password);
 }
 
-function selectConnection(id: string) {
+async function selectConnection(id: string) {
+  await webdav.initialize();
   const connection = webdav.connections.find((entry) => entry.id === id);
   fillConnection(id);
   searchText.value = "";
@@ -214,8 +232,7 @@ function newConnection() {
   nameDraft.value = "";
   baseUrlDraft.value = "";
   usernameDraft.value = "";
-  passwordDraft.value = "";
-  rememberPassword.value = false;
+  syncCredentialDraft(null);
   listing.value = null;
   errorText.value = null;
   searchText.value = "";
@@ -246,7 +263,30 @@ async function connectAndLoad(path = currentPath.value) {
   loading.value = true;
   errorText.value = null;
   try {
-    const connection = webdav.upsert({
+    await webdav.initialize();
+    const existing = selectedConnectionId.value
+      ? webdav.connections.find((entry) => entry.id === selectedConnectionId.value) ?? null
+      : null;
+    if (existing && !credentialDraftDirty) {
+      const status = webdav.credentialStatus(existing.id);
+      if (status === "read-error" || status === "unavailable") {
+        throw new Error(
+          webdav.credentialError(existing.id) ??
+            "安全凭据暂时无法读取；原凭据未更改，请重试。",
+        );
+      }
+      syncCredentialDraft(existing.password);
+    }
+    const credentialMode: WebDavCredentialMode = existing
+      ? credentialDraftDirty
+        ? rememberPassword.value && passwordDraft.value
+          ? "replace"
+          : "clear"
+        : "preserve"
+      : rememberPassword.value && passwordDraft.value
+        ? "replace"
+        : "clear";
+    const connection = await webdav.upsert({
       id: selectedConnectionId.value,
       name: nameDraft.value,
       baseUrl: baseUrlDraft.value,
@@ -254,13 +294,18 @@ async function connectAndLoad(path = currentPath.value) {
       password: passwordDraft.value,
       lastPath: path,
       rememberPassword: rememberPassword.value,
+      credentialMode,
     });
+    const requestPassword =
+      credentialMode === "preserve"
+        ? connection.password ?? null
+        : passwordDraft.value || null;
     selectedConnectionId.value = connection.id;
     listing.value = await api.listWebDavFolder({
       baseUrl: connection.baseUrl,
       path,
       username: usernameDraft.value || null,
-      password: passwordDraft.value || null,
+      password: requestPassword,
     });
     webdav.touch(connection.id, listing.value.path);
     router
@@ -320,6 +365,7 @@ async function playEntry(entry: WebDavEntry) {
   try {
     const queue = playableItems.value.map((item): DirectQueueEntry => ({
       url: item.url,
+      baseUrl: baseUrlDraft.value,
       title: item.name,
       sourceLabel: "WebDAV",
       username: usernameDraft.value || null,
@@ -329,15 +375,9 @@ async function playEntry(entry: WebDavEntry) {
     }));
     const startIndex = Math.max(0, queue.findIndex((item) => item.url === entry.url));
     player.setDirectQueue(queue, startIndex);
-    await player.playWebDavFile({
-      url: entry.url,
-      title: entry.name,
-      sourceLabel: "WebDAV",
-      username: usernameDraft.value || null,
-      password: passwordDraft.value || null,
-      sidecarSubtitles: entry.sidecarSubtitles ?? [],
-      sidecarDanmaku: entry.sidecarDanmaku ?? null,
-    });
+    const selectedEntry = queue[startIndex];
+    if (!selectedEntry) throw new Error("WebDAV 队列中未找到要播放的文件");
+    await player.playWebDavFile(selectedEntry);
     router
       .push({
         name: "player",
@@ -355,16 +395,22 @@ async function playEntry(entry: WebDavEntry) {
   }
 }
 
-function forgetConnection(id: string) {
-  webdav.remove(id);
-  if (selectedConnectionId.value === id) newConnection();
+async function forgetConnection(id: string) {
+  try {
+    await webdav.remove(id);
+    if (selectedConnectionId.value === id) newConnection();
+  } catch (error) {
+    errorText.value = error instanceof Error ? error.message : String(error);
+  }
 }
 
 watch(
   () => route.query.connection,
-  (value) => {
+  async (value) => {
     const id = typeof value === "string" ? value : null;
-    if (id && id !== selectedConnectionId.value) fillConnection(id);
+    if (!id) return;
+    await webdav.initialize();
+    if (route.query.connection === id) fillConnection(id);
   },
   { immediate: true },
 );
@@ -379,19 +425,24 @@ watch(currentPath, (path, previous) => {
 
 onBeforeUnmount(() => clearPathCopyStatus());
 
-onMounted(() => {
-  const hasConnectionQuery = typeof route.query.connection === "string" && route.query.connection.length > 0;
+onMounted(async () => {
+  await webdav.initialize();
+  const routeConnectionId =
+    typeof route.query.connection === "string" && route.query.connection.length > 0
+      ? route.query.connection
+      : null;
+  if (routeConnectionId) fillConnection(routeConnectionId);
   if (!selectedConnectionId.value && webdav.recentConnections.length > 0) {
     const connection = webdav.recentConnections[0]!;
     fillConnection(connection.id);
-    if (!hasConnectionQuery) {
+    if (!routeConnectionId) {
       const path = connection.lastPath ?? "";
       router.replace({ name: "webdav", query: { connection: connection.id, path } }).catch(() => {});
       if (canLoad.value) void connectAndLoad(path);
       return;
     }
   }
-  if (hasConnectionQuery && canLoad.value) {
+  if (routeConnectionId && canLoad.value) {
     void connectAndLoad(currentPath.value);
   }
 });

@@ -4,7 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { Icon } from "@iconify/vue";
 
 import { api, type AlistEntry, type AlistListing } from "@/api";
-import { useAlistStore } from "@/stores/alist";
+import { useAlistStore, type AlistCredentialMode } from "@/stores/alist";
 import { usePlayerStore, type DirectQueueEntry } from "@/stores/player";
 import { writeTextToClipboard } from "@/utils/clipboard";
 import { connectorPathLabel, connectorTitle, hasConnectorPath } from "@/utils/fileConnectorPaths";
@@ -22,6 +22,8 @@ const baseUrlDraft = ref("");
 const tokenDraft = ref("");
 const pathPasswordDraft = ref("");
 const rememberToken = ref(false);
+let syncingCredentialDraft = false;
+let credentialDraftDirty = false;
 const listing = ref<AlistListing | null>(null);
 const loading = ref(false);
 const playingPath = ref<string | null>(null);
@@ -185,17 +187,33 @@ function parentPath(path: string): string {
   return parts.length > 0 ? `${parts.join("/")}/` : "";
 }
 
+function syncCredentialDraft(token?: string | null, pathPassword?: string | null) {
+  syncingCredentialDraft = true;
+  tokenDraft.value = token ?? "";
+  pathPasswordDraft.value = pathPassword ?? "";
+  rememberToken.value = Boolean(token || pathPassword);
+  credentialDraftDirty = false;
+  syncingCredentialDraft = false;
+}
+
+watch(
+  [tokenDraft, pathPasswordDraft, rememberToken],
+  () => {
+    if (!syncingCredentialDraft) credentialDraftDirty = true;
+  },
+  { flush: "sync" },
+);
+
 function fillConnection(id: string | null) {
   const connection = id ? alist.connections.find((entry) => entry.id === id) : null;
   selectedConnectionId.value = connection?.id ?? null;
   nameDraft.value = connection?.name ?? "";
   baseUrlDraft.value = connection?.baseUrl ?? "";
-  tokenDraft.value = connection?.token ?? "";
-  pathPasswordDraft.value = connection?.pathPassword ?? "";
-  rememberToken.value = Boolean(connection?.token || connection?.pathPassword);
+  syncCredentialDraft(connection?.token, connection?.pathPassword);
 }
 
-function selectConnection(id: string) {
+async function selectConnection(id: string) {
+  await alist.initialize();
   const connection = alist.connections.find((entry) => entry.id === id);
   fillConnection(id);
   searchText.value = "";
@@ -213,9 +231,7 @@ function newConnection() {
   selectedConnectionId.value = null;
   nameDraft.value = "";
   baseUrlDraft.value = "";
-  tokenDraft.value = "";
-  pathPasswordDraft.value = "";
-  rememberToken.value = false;
+  syncCredentialDraft(null, null);
   listing.value = null;
   errorText.value = null;
   searchText.value = "";
@@ -246,7 +262,30 @@ async function connectAndLoad(path = currentPath.value, refresh = false) {
   loading.value = true;
   errorText.value = null;
   try {
-    const connection = alist.upsert({
+    await alist.initialize();
+    const existing = selectedConnectionId.value
+      ? alist.connections.find((entry) => entry.id === selectedConnectionId.value) ?? null
+      : null;
+    if (existing && !credentialDraftDirty) {
+      const status = alist.credentialStatus(existing.id);
+      if (status === "read-error" || status === "unavailable") {
+        throw new Error(
+          alist.credentialError(existing.id) ??
+            "安全凭据暂时无法读取；原凭据未更改，请重试。",
+        );
+      }
+      syncCredentialDraft(existing.token, existing.pathPassword);
+    }
+    const credentialMode: AlistCredentialMode = existing
+      ? credentialDraftDirty
+        ? rememberToken.value && (tokenDraft.value || pathPasswordDraft.value)
+          ? "replace"
+          : "clear"
+        : "preserve"
+      : rememberToken.value && (tokenDraft.value || pathPasswordDraft.value)
+        ? "replace"
+        : "clear";
+    const connection = await alist.upsert({
       id: selectedConnectionId.value,
       name: nameDraft.value,
       baseUrl: baseUrlDraft.value,
@@ -254,13 +293,22 @@ async function connectAndLoad(path = currentPath.value, refresh = false) {
       pathPassword: pathPasswordDraft.value,
       lastPath: path,
       rememberToken: rememberToken.value,
+      credentialMode,
     });
+    const requestToken =
+      credentialMode === "preserve"
+        ? connection.token ?? null
+        : tokenDraft.value || null;
+    const requestPathPassword =
+      credentialMode === "preserve"
+        ? connection.pathPassword ?? null
+        : pathPasswordDraft.value || null;
     selectedConnectionId.value = connection.id;
     listing.value = await api.listAlistFolder({
       baseUrl: connection.baseUrl,
       path,
-      token: tokenDraft.value || null,
-      pathPassword: pathPasswordDraft.value || null,
+      token: requestToken,
+      pathPassword: requestPathPassword,
       refresh,
     });
     alist.touch(connection.id, listing.value.path);
@@ -357,16 +405,22 @@ async function playEntry(entry: AlistEntry) {
   }
 }
 
-function forgetConnection(id: string) {
-  alist.remove(id);
-  if (selectedConnectionId.value === id) newConnection();
+async function forgetConnection(id: string) {
+  try {
+    await alist.remove(id);
+    if (selectedConnectionId.value === id) newConnection();
+  } catch (error) {
+    errorText.value = error instanceof Error ? error.message : String(error);
+  }
 }
 
 watch(
   () => route.query.connection,
-  (value) => {
+  async (value) => {
     const id = typeof value === "string" ? value : null;
-    if (id && id !== selectedConnectionId.value) fillConnection(id);
+    if (!id) return;
+    await alist.initialize();
+    if (route.query.connection === id) fillConnection(id);
   },
   { immediate: true },
 );
@@ -381,19 +435,24 @@ watch(currentPath, (path, previous) => {
 
 onBeforeUnmount(() => clearPathCopyStatus());
 
-onMounted(() => {
-  const hasConnectionQuery = typeof route.query.connection === "string" && route.query.connection.length > 0;
+onMounted(async () => {
+  await alist.initialize();
+  const routeConnectionId =
+    typeof route.query.connection === "string" && route.query.connection.length > 0
+      ? route.query.connection
+      : null;
+  if (routeConnectionId) fillConnection(routeConnectionId);
   if (!selectedConnectionId.value && alist.recentConnections.length > 0) {
     const connection = alist.recentConnections[0]!;
     fillConnection(connection.id);
-    if (!hasConnectionQuery) {
+    if (!routeConnectionId) {
       const path = connection.lastPath ?? "";
       router.replace({ name: "alist", query: { connection: connection.id, path } }).catch(() => {});
       if (canLoad.value) void connectAndLoad(path);
       return;
     }
   }
-  if (hasConnectionQuery && canLoad.value) {
+  if (routeConnectionId && canLoad.value) {
     void connectAndLoad(currentPath.value);
   }
 });

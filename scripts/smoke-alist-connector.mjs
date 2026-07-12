@@ -118,6 +118,7 @@ try {
   const imported = await danmaku.importXml({
     url: `http://127.0.0.1:${server.address().port}/raw/Episode%201.danmaku.xml`,
     token: expectedAuth,
+    credentialBaseUrl: baseUrl,
   });
   assert(imported.comments.length === 1, "Alist XML danmaku should load with token auth");
 

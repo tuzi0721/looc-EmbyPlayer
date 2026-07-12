@@ -8,8 +8,10 @@
   "main": "electron/main.mjs",
   "scripts": {
     "dev": "vite",
-    "build": "npm run check:local-decode && npm run check:no-planned-ui && vue-tsc --noEmit && vite build",
+    "build": "npm run check:secure-credentials && npm run check:electron-security && npm run check:local-decode && npm run check:no-planned-ui && vue-tsc --noEmit && vite build",
     "check:electron-commands": "node scripts/check-electron-command-coverage.mjs",
+    "check:secure-credentials": "node scripts/check-secure-credentials.mjs",
+    "check:electron-security": "node scripts/check-electron-security.mjs",
     "check:local-decode": "node scripts/check-local-decode-guard.mjs",
     "check:no-planned-ui": "node scripts/check-no-planned-ui.mjs",
     "check:workspace": "node scripts/check-workspace-hygiene.mjs",

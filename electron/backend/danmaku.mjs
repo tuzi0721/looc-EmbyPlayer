@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { sameHttpOrigin } from "./url-security.mjs";
+
 const DANMAKU_USER_AGENT = "Hills Lite/0.1.0 (danmaku)";
 
 const PROVIDERS = [
@@ -96,6 +98,61 @@ function basicAuthorization(username, password) {
 function tokenAuthorization(token) {
   const value = typeof token === "string" ? token.trim() : "";
   return value || null;
+}
+
+function credentialBaseOrigin(value, credentialsPresent) {
+  if (!credentialsPresent) return null;
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error("credentialBaseUrl is required when connector credentials are present");
+  }
+  let parsed;
+  try {
+    parsed = new URL(value.trim());
+  } catch {
+    throw new Error("credentialBaseUrl is invalid");
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("credentialBaseUrl must use http or https");
+  }
+  return parsed;
+}
+
+async function fetchScopedXml(url, payload, timeoutMs) {
+  const authorization = basicAuthorization(payload.username, payload.password);
+  const token = tokenAuthorization(payload.token);
+  const credentialBase = credentialBaseOrigin(payload.credentialBaseUrl, Boolean(authorization || token));
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs ?? 15000));
+  let target = url;
+  try {
+    for (let redirectCount = 0; redirectCount <= 8; redirectCount += 1) {
+      const headers = { Accept: "application/xml,text/xml,*/*" };
+      if (credentialBase && sameHttpOrigin(target, credentialBase)) {
+        if (authorization) headers.Authorization = authorization;
+        else if (token) headers.Authorization = token;
+      }
+      const response = await fetch(target, {
+        method: "GET",
+        headers,
+        redirect: "manual",
+        signal: controller.signal,
+      });
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.get("location");
+        if (!location) return response;
+        await response.body?.cancel().catch(() => {});
+        target = new URL(location, target);
+        if (!["http:", "https:"].includes(target.protocol)) {
+          throw new Error("danmaku XML redirect must use http or https");
+        }
+        continue;
+      }
+      return response;
+    }
+    throw new Error("danmaku XML redirect limit exceeded");
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function parseComment(raw) {
@@ -211,19 +268,8 @@ export class DanmakuClient {
     if (!["http:", "https:"].includes(url.protocol)) {
       throw new Error("danmaku XML URL must use http or https");
     }
-    const authorization = basicAuthorization(payload.username, payload.password);
-    const token = tokenAuthorization(payload.token);
-    const headers = {
-      Accept: "application/xml,text/xml,*/*",
-    };
-    if (authorization) headers.Authorization = authorization;
-    else if (token) headers.Authorization = token;
     const settings = await this.store.getSettings();
-    const response = await fetch(url, {
-      method: "GET",
-      headers,
-      signal: AbortSignal.timeout(Math.max(1000, settings.requestTimeoutMs ?? 15000)),
-    });
+    const response = await fetchScopedXml(url, payload, settings.requestTimeoutMs);
     if (!response.ok) {
       throw new Error(`danmaku XML fetch failed: HTTP ${response.status}`);
     }

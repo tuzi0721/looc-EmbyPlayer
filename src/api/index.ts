@@ -107,11 +107,18 @@ export interface ConfigTransferSummary {
   servers: number;
   accounts: number;
   shortcuts: number;
+  credentialsOmitted?: boolean;
 }
 
 export interface CacheUsage {
   totalBytes: number;
   entries: { label: string; path: string; bytes: number }[];
+}
+
+export interface SecureStorageStatus {
+  available: boolean;
+  backend: string;
+  reason?: string | null;
 }
 
 export interface DetectServerLineReport {
@@ -216,6 +223,24 @@ export interface AlistEntry {
   sidecarSubtitles?: WebDavSidecarSubtitle[];
   sidecarDanmaku?: WebDavSidecarDanmaku | null;
 }
+
+export type DanmakuXmlImportPayload =
+  | {
+      filePath: string;
+      url?: never;
+      username?: never;
+      password?: never;
+      token?: never;
+      credentialBaseUrl?: never;
+    }
+  | {
+      url: string;
+      filePath?: never;
+      username?: string | null;
+      password?: string | null;
+      token?: string | null;
+      credentialBaseUrl: string;
+    };
 
 export interface AlistListing {
   rootUrl: string;
@@ -452,6 +477,16 @@ export const api = {
     attachedMpvWindowHandle?: string | null;
   }>("get_embed_state"),
 
+  // Renderer credential storage (Electron only; callers must runtime-gate these commands).
+  getSecureStorageStatus: () =>
+    invoke<SecureStorageStatus>("get_secure_storage_status"),
+  getSecureSecret: (key: string) =>
+    invoke<string | null>("get_secure_secret", { key }),
+  setSecureSecret: (key: string, value: string) =>
+    invoke<null>("set_secure_secret", { key, value }),
+  deleteSecureSecret: (key: string) =>
+    invoke<null>("delete_secure_secret", { key }),
+
   // Settings
   getSettings: () => invoke<AppSettings>("get_settings"),
   updateSettings: (patch: Partial<AppSettings>) =>
@@ -469,13 +504,7 @@ export const api = {
     invoke<DanmakuProviderInfo[]>("list_danmaku_providers"),
   fetchDanmaku: (itemId: string, provider?: string) =>
     invoke<DanmakuResult | null>("fetch_danmaku", { itemId, provider }),
-  importDanmakuXml: (payload: {
-    filePath?: string;
-    url?: string;
-    username?: string | null;
-    password?: string | null;
-    token?: string | null;
-  }) =>
+  importDanmakuXml: (payload: DanmakuXmlImportPayload) =>
     invoke<DanmakuResult>("import_danmaku_xml", { payload }),
 
   // Downloads
@@ -520,6 +549,7 @@ export const api = {
   }) => invoke<AlistFileResolution>("resolve_alist_file", { payload }),
   playWebDavFile: (payload: {
     url: string;
+    baseUrl: string;
     title?: string | null;
     username?: string | null;
     password?: string | null;
@@ -530,6 +560,7 @@ export const api = {
   }) => invoke<void>("play_webdav_file", { payload }),
   playAlistFile: (payload: {
     url: string;
+    baseUrl: string;
     title?: string | null;
     token?: string | null;
     userAgent?: string | null;

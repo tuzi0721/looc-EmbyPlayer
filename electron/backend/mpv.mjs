@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
+import http from "node:http";
+import https from "node:https";
 import net from "node:net";
 import path from "node:path";
 
@@ -184,10 +186,529 @@ function defaultSnapshot() {
   };
 }
 
+const PLAYBACK_PROXY_HOST = "127.0.0.1";
+const PLAYBACK_PROXY_ROUTE = "/v1/";
+const MAX_PLAYLIST_BYTES = 8 * 1024 * 1024;
+const REDIRECT_STATUS_CODES = new Set([301, 302, 303, 307, 308]);
+const FORWARDED_REQUEST_HEADERS = new Set([
+  "accept",
+  "accept-language",
+  "cache-control",
+  "if-modified-since",
+  "if-none-match",
+  "if-range",
+  "pragma",
+  "range",
+]);
+const BLOCKED_RESPONSE_HEADERS = new Set([
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "set-cookie",
+  "set-cookie2",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+]);
+const BLOCKED_CREDENTIAL_HEADERS = new Set([
+  "connection",
+  "content-length",
+  "cookie",
+  "host",
+  "proxy-authorization",
+  "range",
+  "transfer-encoding",
+]);
+
+function ensureHttpUrl(value, label = "playback URL") {
+  let parsed;
+  try {
+    parsed = value instanceof URL ? new URL(value.toString()) : new URL(String(value ?? "").trim());
+  } catch {
+    throw new Error(`${label} is invalid`);
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error(`${label} must use http or https`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error(`${label} must not contain URL credentials`);
+  }
+  parsed.hash = "";
+  return parsed;
+}
+
+function normalizeCredentialHeaders(value) {
+  if (!Array.isArray(value)) return [];
+  const normalized = [];
+  for (const entry of value) {
+    if (!Array.isArray(entry) || entry.length < 2) continue;
+    const name = String(entry[0] ?? "").trim();
+    const headerValue = String(entry[1] ?? "");
+    const lower = name.toLowerCase();
+    if (!name || !/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name)) {
+      throw new Error("connector credential header name is invalid");
+    }
+    if (BLOCKED_CREDENTIAL_HEADERS.has(lower)) {
+      throw new Error(`connector credential header is not allowed: ${name}`);
+    }
+    if (/[\r\n]/.test(headerValue)) {
+      throw new Error(`connector credential header contains a newline: ${name}`);
+    }
+    if (headerValue.length === 0) continue;
+    normalized.push([name, headerValue]);
+  }
+  return normalized;
+}
+
+function filteredResponseHeaders(headers, { playlist = false } = {}) {
+  const result = {};
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    const lower = name.toLowerCase();
+    if (value == null || BLOCKED_RESPONSE_HEADERS.has(lower)) continue;
+    if (playlist && ["accept-ranges", "content-length", "content-range"].includes(lower)) continue;
+    result[name] = value;
+  }
+  return result;
+}
+
+function playlistKind(targetUrl, headers) {
+  const contentType = String(headers?.["content-type"] ?? "").toLowerCase();
+  const pathname = targetUrl.pathname.toLowerCase();
+  if (
+    pathname.endsWith(".m3u8") ||
+    contentType.includes("application/vnd.apple.mpegurl") ||
+    contentType.includes("application/x-mpegurl") ||
+    contentType.includes("audio/mpegurl")
+  ) {
+    return "hls";
+  }
+  if (pathname.endsWith(".mpd") || contentType.includes("application/dash+xml")) {
+    return "dash";
+  }
+  return null;
+}
+
+function maskUrlTemplates(value) {
+  const source = String(value ?? "");
+  const placeholders = [];
+  let prefix = "__HILLS_PROXY_TEMPLATE_";
+  while (source.includes(prefix)) prefix = `_${prefix}`;
+  const masked = source.replace(/\{\$[A-Za-z0-9_-]+\}|\$[^$\r\n]+\$/g, (match) => {
+    const marker = `${prefix}${placeholders.length}__`;
+    placeholders.push([marker, match]);
+    return marker;
+  });
+  return {
+    masked,
+    restore(text) {
+      let restored = String(text);
+      for (const [marker, original] of placeholders) {
+        restored = restored.split(marker).join(original);
+      }
+      return restored;
+    },
+  };
+}
+
+function decodeXmlUrl(value) {
+  return String(value ?? "")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+function encodeXmlUrl(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function rewriteHlsPlaylist(text, baseUrl, rewriteReference) {
+  return String(text)
+    .split(/\r?\n/)
+    .map((line) => {
+      if (!line) return line;
+      if (!line.startsWith("#")) return rewriteReference(line, baseUrl);
+      return line.replace(/\bURI=(["'])(.*?)\1/gi, (_match, quote, reference) => (
+        `URI=${quote}${rewriteReference(reference, baseUrl)}${quote}`
+      ));
+    })
+    .join(String(text).includes("\r\n") ? "\r\n" : "\n");
+}
+
+function rewriteDashPlaylist(text, baseUrl, rewriteReference) {
+  const rewriteXmlReference = (value) => encodeXmlUrl(
+    rewriteReference(decodeXmlUrl(value), baseUrl),
+  );
+  return String(text)
+    .replace(
+      /<BaseURL(\s[^>]*)?>([\s\S]*?)<\/BaseURL>/gi,
+      (_match, attributes = "", value) => {
+        const leading = value.match(/^\s*/)?.[0] ?? "";
+        const trailing = value.match(/\s*$/)?.[0] ?? "";
+        const reference = value.slice(leading.length, value.length - trailing.length);
+        return `<BaseURL${attributes}>${leading}${rewriteXmlReference(reference)}${trailing}</BaseURL>`;
+      },
+    )
+    .replace(
+      /\b(media|initialization|sourceURL|index|href|url)=(["'])(.*?)\2/gi,
+      (_match, name, quote, value) => (
+        `${name}=${quote}${rewriteXmlReference(value)}${quote}`
+      ),
+    );
+}
+
+async function readLimitedBody(stream, limit = MAX_PLAYLIST_BYTES) {
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of stream) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buffer.length;
+    if (total > limit) throw new Error(`playlist exceeds ${limit} bytes`);
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks, total);
+}
+
+function sendProxyError(response, status, message) {
+  if (response.headersSent) {
+    response.destroy();
+    return;
+  }
+  const body = Buffer.from(String(message ?? "playback proxy error"), "utf8");
+  response.writeHead(status, {
+    "Cache-Control": "no-store",
+    "Content-Length": String(body.length),
+    "Content-Type": "text/plain; charset=utf-8",
+  });
+  response.end(body);
+}
+
+/**
+ * Loopback-only credential boundary for connector playback.
+ *
+ * mpv receives only an opaque local URL and no connector Authorization header.
+ * Every upstream request (including redirects and playlist children) is mapped
+ * back through this server, which attaches credentials only when the target
+ * origin exactly matches credentialBaseUrl.
+ */
+export class ScopedPlaybackProxy {
+  constructor(options = {}) {
+    this.host = options.host ?? PLAYBACK_PROXY_HOST;
+    this.requestTimeoutMs = Math.max(1000, Number(options.requestTimeoutMs ?? 30_000));
+    this.server = null;
+    this.origin = null;
+    this.activeSession = null;
+    this.activeRequests = new Set();
+    this.starting = null;
+  }
+
+  get hasActiveSession() {
+    return Boolean(this.activeSession);
+  }
+
+  async ensureStarted() {
+    if (this.server?.listening && this.origin) return;
+    if (!this.starting) {
+      this.starting = new Promise((resolve, reject) => {
+        const server = http.createServer((request, response) => {
+          void this.handleRequest(request, response);
+        });
+        server.on("clientError", (_error, socket) => {
+          socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+        });
+        server.once("error", reject);
+        server.listen(0, this.host, () => {
+          server.off("error", reject);
+          const address = server.address();
+          if (!address || typeof address === "string") {
+            server.close();
+            reject(new Error("playback proxy failed to bind a loopback port"));
+            return;
+          }
+          this.server = server;
+          this.origin = `http://${this.host}:${address.port}`;
+          resolve();
+        });
+      }).finally(() => {
+        this.starting = null;
+      });
+    }
+    await this.starting;
+  }
+
+  async openSession({ url, credentialBaseUrl, headers, userAgent = null }) {
+    const target = ensureHttpUrl(url);
+    const credentialHeaders = normalizeCredentialHeaders(headers);
+    if (credentialHeaders.length === 0) {
+      throw new Error("credential proxy requires at least one connector credential header");
+    }
+    const credentialBase = ensureHttpUrl(credentialBaseUrl, "credentialBaseUrl");
+    await this.ensureStarted();
+    this.clearSession();
+    const token = randomBytes(32).toString("base64url");
+    const normalizedUserAgent =
+      typeof userAgent === "string" && userAgent.trim() && !/[\r\n]/.test(userAgent)
+        ? userAgent.trim()
+        : null;
+    this.activeSession = {
+      token,
+      credentialOrigin: credentialBase.origin,
+      credentialHeaders,
+      userAgent: normalizedUserAgent,
+    };
+    return this.urlFor(target);
+  }
+
+  clearSession() {
+    this.activeSession = null;
+    for (const active of this.activeRequests) {
+      active.upstream.destroy(new Error("playback credential session was replaced"));
+      if (!active.response.writableEnded) active.response.destroy();
+    }
+    this.activeRequests.clear();
+  }
+
+  async shutdown() {
+    this.clearSession();
+    const server = this.server;
+    this.server = null;
+    this.origin = null;
+    if (!server) return;
+    if (typeof server.closeAllConnections === "function") server.closeAllConnections();
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+
+  urlFor(value) {
+    const session = this.activeSession;
+    if (!session || !this.origin) {
+      throw new Error("playback credential session is not active");
+    }
+    const target = ensureHttpUrl(value);
+    const scheme = target.protocol.slice(0, -1);
+    const authority = Buffer.from(target.host, "utf8").toString("base64url");
+    return `${this.origin}${PLAYBACK_PROXY_ROUTE}${session.token}/${scheme}/${authority}${target.pathname}${target.search}`;
+  }
+
+  rewriteReference(reference, baseUrl) {
+    const original = String(reference ?? "");
+    const leading = original.match(/^\s*/)?.[0] ?? "";
+    const trailing = original.match(/\s*$/)?.[0] ?? "";
+    const value = original.slice(leading.length, original.length - trailing.length);
+    if (!value || /^(?:data|blob|urn|skd):/i.test(value)) return original;
+    try {
+      const template = maskUrlTemplates(value);
+      const resolved = ensureHttpUrl(new URL(template.masked, baseUrl));
+      return `${leading}${template.restore(this.urlFor(resolved))}${trailing}`;
+    } catch {
+      if (/^(?:https?:)?\/\//i.test(value) || value.startsWith("/")) {
+        throw new Error("playlist contains an invalid HTTP resource URL");
+      }
+      return original;
+    }
+  }
+
+  parseTarget(requestUrl) {
+    if (!this.origin) throw new Error("playback proxy is not listening");
+    const local = new URL(requestUrl, this.origin);
+    const match = /^\/v1\/([^/]+)\/(http|https)\/([^/]+)(\/.*)?$/.exec(local.pathname);
+    if (!match) throw new Error("playback proxy route is invalid");
+    const [, token, scheme, encodedAuthority, suffix = "/"] = match;
+    const session = this.activeSession;
+    if (!session || token !== session.token) {
+      const error = new Error("playback credential session expired");
+      error.statusCode = 410;
+      throw error;
+    }
+    let authority;
+    try {
+      authority = Buffer.from(encodedAuthority, "base64url").toString("utf8");
+    } catch {
+      throw new Error("playback proxy authority is invalid");
+    }
+    if (!authority || /[\s/@]/.test(authority)) {
+      throw new Error("playback proxy authority is invalid");
+    }
+    return ensureHttpUrl(`${scheme}://${authority}${suffix}${local.search}`);
+  }
+
+  requestHeaders(request, target, session) {
+    const headers = {};
+    for (const [name, value] of Object.entries(request.headers ?? {})) {
+      const lower = name.toLowerCase();
+      if (!FORWARDED_REQUEST_HEADERS.has(lower) || value == null) continue;
+      headers[name] = value;
+    }
+    headers["Accept-Encoding"] = "identity";
+    const incomingUserAgent = request.headers?.["user-agent"];
+    const userAgent = session.userAgent || (
+      typeof incomingUserAgent === "string" && !/[\r\n]/.test(incomingUserAgent)
+        ? incomingUserAgent
+        : null
+    );
+    if (userAgent) headers["User-Agent"] = userAgent;
+    if (target.origin === session.credentialOrigin) {
+      for (const [name, value] of session.credentialHeaders) headers[name] = value;
+    }
+    return headers;
+  }
+
+  async handleRequest(request, response) {
+    try {
+      const remoteAddress = request.socket?.remoteAddress;
+      if (remoteAddress !== this.host && remoteAddress !== `::ffff:${this.host}`) {
+        sendProxyError(response, 403, "playback proxy accepts loopback clients only");
+        return;
+      }
+      const expectedHost = this.origin ? new URL(this.origin).host : "";
+      if (request.headers.host !== expectedHost) {
+        sendProxyError(response, 403, "playback proxy Host header is invalid");
+        return;
+      }
+      if (!["GET", "HEAD"].includes(request.method ?? "")) {
+        response.setHeader("Allow", "GET, HEAD");
+        sendProxyError(response, 405, "playback proxy method is not allowed");
+        return;
+      }
+      const target = this.parseTarget(request.url ?? "/");
+      const session = this.activeSession;
+      if (!session) {
+        sendProxyError(response, 410, "playback credential session expired");
+        return;
+      }
+      await this.forwardRequest(request, response, target, session);
+    } catch (error) {
+      sendProxyError(
+        response,
+        Number(error?.statusCode) || 400,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  forwardRequest(request, response, target, session) {
+    return new Promise((resolve) => {
+      const transport = target.protocol === "https:" ? https : http;
+      const upstream = transport.request(
+        target,
+        {
+          method: request.method,
+          headers: this.requestHeaders(request, target, session),
+        },
+        (upstreamResponse) => {
+          void this.handleUpstreamResponse(
+            request,
+            response,
+            target,
+            upstream,
+            upstreamResponse,
+          ).finally(resolve);
+        },
+      );
+      const active = { upstream, response };
+      this.activeRequests.add(active);
+      const cleanup = () => this.activeRequests.delete(active);
+      upstream.once("close", cleanup);
+      upstream.once("error", (error) => {
+        cleanup();
+        sendProxyError(response, 502, `upstream playback request failed: ${error.message}`);
+        resolve();
+      });
+      upstream.setTimeout(this.requestTimeoutMs, () => {
+        upstream.destroy(new Error("upstream playback request timed out"));
+      });
+      request.once("aborted", () => upstream.destroy());
+      response.once("close", () => {
+        if (!response.writableEnded) upstream.destroy();
+      });
+      upstream.end();
+    });
+  }
+
+  async handleUpstreamResponse(request, response, target, upstream, upstreamResponse) {
+    const status = upstreamResponse.statusCode ?? 502;
+    const location = upstreamResponse.headers.location;
+    if (REDIRECT_STATUS_CODES.has(status) && location) {
+      let redirectTarget;
+      try {
+        redirectTarget = ensureHttpUrl(new URL(location, target), "redirect URL");
+      } catch (error) {
+        upstreamResponse.resume();
+        sendProxyError(response, 502, error instanceof Error ? error.message : String(error));
+        return;
+      }
+      const headers = filteredResponseHeaders(upstreamResponse.headers);
+      headers.location = this.urlFor(redirectTarget);
+      response.writeHead(status, headers);
+      if (request.method === "HEAD") {
+        upstreamResponse.resume();
+        response.end();
+      } else {
+        upstreamResponse.pipe(response);
+      }
+      return;
+    }
+
+    const kind = playlistKind(target, upstreamResponse.headers);
+    if (kind) {
+      if (request.method === "HEAD") {
+        upstreamResponse.resume();
+        response.writeHead(status, filteredResponseHeaders(upstreamResponse.headers, { playlist: true }));
+        response.end();
+        return;
+      }
+      if (status === 206 || upstreamResponse.headers["content-range"]) {
+        upstreamResponse.resume();
+        sendProxyError(response, 502, "partial playlist responses are not supported");
+        return;
+      }
+      const contentEncoding = String(upstreamResponse.headers["content-encoding"] ?? "identity").toLowerCase();
+      if (contentEncoding !== "identity") {
+        upstreamResponse.resume();
+        sendProxyError(response, 502, "compressed playlists are not supported by the credential proxy");
+        return;
+      }
+      try {
+        const body = await readLimitedBody(upstreamResponse);
+        const source = body.toString("utf8");
+        const rewrite = (reference, base) => this.rewriteReference(reference, base);
+        const rewritten = kind === "hls"
+          ? rewriteHlsPlaylist(source, target, rewrite)
+          : rewriteDashPlaylist(source, target, rewrite);
+        const output = Buffer.from(rewritten, "utf8");
+        const headers = filteredResponseHeaders(upstreamResponse.headers, { playlist: true });
+        headers["content-length"] = String(output.length);
+        response.writeHead(status, headers);
+        response.end(output);
+      } catch (error) {
+        upstream.destroy();
+        sendProxyError(response, 502, error instanceof Error ? error.message : String(error));
+      }
+      return;
+    }
+
+    response.writeHead(status, filteredResponseHeaders(upstreamResponse.headers));
+    if (request.method === "HEAD") {
+      upstreamResponse.resume();
+      response.end();
+      return;
+    }
+    upstreamResponse.pipe(response);
+  }
+}
+
 export class MpvController {
   constructor(store, options = {}) {
     this.store = store;
     this.logDir = options.logDir ?? null;
+    this.playbackProxy = options.playbackProxy ?? new ScopedPlaybackProxy(options.playbackProxyOptions);
     this.child = null;
     this.socket = null;
     this.buffer = "";
@@ -478,24 +999,59 @@ export class MpvController {
     return response.data;
   }
 
-  async load({ url, headers = [], userAgent = null, startMs = null, autoloadSubtitles = true }) {
+  async clearNetworkAccess({ resetMpvHeaders = true } = {}) {
+    this.playbackProxy.clearSession();
+    if (resetMpvHeaders && this.isRunning()) {
+      await this.setProperty("http-header-fields", [], { start: false });
+    }
+  }
+
+  networkUrlFor(url) {
+    return this.playbackProxy.hasActiveSession ? this.playbackProxy.urlFor(url) : url;
+  }
+
+  async load({
+    url,
+    headers = [],
+    userAgent = null,
+    startMs = null,
+    autoloadSubtitles = true,
+    credentialScope = null,
+  }) {
     await this.ensureStarted();
+    await this.clearNetworkAccess();
     await this.setProperty("sub-auto", autoloadSubtitles ? "fuzzy" : "no");
     if (userAgent) await this.setProperty("user-agent", userAgent);
     await this.applyOverlayWindowRect().catch(() => {});
-    const headerFields = (Array.isArray(headers) ? headers : [])
+    let loadUrl = url;
+    let mpvHeaders = headers;
+    if (credentialScope) {
+      loadUrl = await this.playbackProxy.openSession({
+        url,
+        credentialBaseUrl: credentialScope.baseUrl,
+        headers,
+        userAgent,
+      });
+      mpvHeaders = [];
+    }
+    const headerFields = (Array.isArray(mpvHeaders) ? mpvHeaders : [])
       .filter(([key, value]) => key && value != null && value !== "")
       .map(([key, value]) => `${key}: ${String(value).replace(/[\r\n]+/g, " ")}`);
     await this.setProperty("http-header-fields", headerFields);
     if (startMs != null) {
       await this.setProperty("start", `${Math.max(0, Number(startMs)) / 1000}`);
     }
-    const response = await this.command(["loadfile", url, "replace"]);
-    return {
-      accepted: true,
-      requestId: response.request_id ?? null,
-      error: response.error ?? null,
-    };
+    try {
+      const response = await this.command(["loadfile", loadUrl, "replace"]);
+      return {
+        accepted: true,
+        requestId: response.request_id ?? null,
+        error: response.error ?? null,
+      };
+    } catch (error) {
+      await this.clearNetworkAccess().catch(() => {});
+      throw error;
+    }
   }
 
   async snapshot() {
@@ -649,6 +1205,7 @@ export class MpvController {
   }
 
   async shutdown({ quitTimeoutMs = 500, killTimeoutMs = 900 } = {}) {
+    await this.playbackProxy.shutdown().catch(() => {});
     for (const item of this.pending.values()) {
       clearTimeout(item.timer);
       item.reject(new Error("mpv shutdown"));

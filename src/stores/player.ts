@@ -85,6 +85,21 @@ export const usePlayerStore = defineStore("player", () => {
     return filePath.split(/[\\/]/).filter(Boolean).pop() ?? filePath;
   }
 
+  function requireConnectorBaseUrl(value: string | null | undefined, label: string): string {
+    const raw = value?.trim();
+    if (!raw) throw new Error(`${label} 缺少站点 URL，已拒绝发送凭据`);
+    let parsed: URL;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      throw new Error(`${label} 站点 URL 无效，已拒绝发送凭据`);
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error(`${label} 站点 URL 必须使用 http 或 https`);
+    }
+    return parsed.toString();
+  }
+
   async function playFile(payload: {
     filePath: string;
     startMs?: number | null;
@@ -112,13 +127,15 @@ export const usePlayerStore = defineStore("player", () => {
     url: string;
     title?: string | null;
     sourceLabel?: string | null;
+    baseUrl?: string | null;
     username?: string | null;
     password?: string | null;
     sidecarSubtitles?: WebDavSidecarSubtitle[];
     sidecarDanmaku?: WebDavSidecarDanmaku | null;
     startMs?: number | null;
   }) {
-    await api.playWebDavFile(payload);
+    const baseUrl = requireConnectorBaseUrl(payload.baseUrl, "WebDAV");
+    await api.playWebDavFile({ ...payload, baseUrl });
     const keepsDirectQueue =
       queueKind.value === "direct" && queue.value[queueIndex.value] === payload.url;
     itemId.value = null;
@@ -140,12 +157,14 @@ export const usePlayerStore = defineStore("player", () => {
     url: string;
     title?: string | null;
     sourceLabel?: string | null;
+    baseUrl?: string | null;
     token?: string | null;
     sidecarSubtitles?: WebDavSidecarSubtitle[];
     sidecarDanmaku?: WebDavSidecarDanmaku | null;
     startMs?: number | null;
   }) {
-    await api.playAlistFile(payload);
+    const baseUrl = requireConnectorBaseUrl(payload.baseUrl, "Alist");
+    await api.playAlistFile({ ...payload, baseUrl });
     const keepsDirectQueue =
       queueKind.value === "direct" && queue.value[queueIndex.value] === payload.url;
     itemId.value = null;
@@ -445,6 +464,8 @@ export const usePlayerStore = defineStore("player", () => {
       directUrl.value = null;
       directTitle.value = null;
       directSourceLabel.value = null;
+      if (queueKind.value === "direct") clearQueue();
+      else directQueue.value = [];
     }
     if (stoppedReport) {
       void api.reportPlaybackStopped(stoppedReport).catch(() => {});
