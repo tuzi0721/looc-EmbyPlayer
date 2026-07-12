@@ -8,7 +8,7 @@
   "main": "electron/main.mjs",
   "scripts": {
     "dev": "vite",
-    "build": "npm run check:secure-credentials && npm run check:electron-security && npm run check:network-policy && npm run check:playback-recovery && npm run check:local-decode && npm run check:no-planned-ui && vue-tsc --noEmit && vite build",
+    "build": "npm run check:secure-credentials && npm run check:electron-security && npm run check:network-policy && npm run check:playback-recovery && npm run check:phase3-sources && npm run check:local-decode && npm run check:no-planned-ui && vue-tsc --noEmit && vite build",
     "check:electron-commands": "node scripts/check-electron-command-coverage.mjs",
     "check:secure-credentials": "node scripts/check-secure-credentials.mjs",
     "check:electron-security": "node scripts/check-electron-security.mjs",
@@ -16,6 +16,7 @@
     "check:no-planned-ui": "node scripts/check-no-planned-ui.mjs",
     "check:network-policy": "node scripts/check-network-policy.mjs",
     "check:playback-recovery": "node scripts/check-playback-recovery.mjs",
+    "check:phase3-sources": "node scripts/check-phase3-sources.mjs",
     "check:workspace": "node scripts/check-workspace-hygiene.mjs",
     "check:electron-dist": "node scripts/check-electron-dist.mjs",
     "check:electron-package": "node scripts/check-electron-package.mjs",
