@@ -21,8 +21,8 @@ export async function parseJson(response, options = {}) {
 
   if (!text.trim()) return null;
 
-  // Optional content-type check.
-  if (options.acceptContentType !== null) {
+  // Content-type check is opt-in: only validate when a specific type is requested.
+  if (options.acceptContentType != null) {
     const contentType = response.headers.get("content-type") ?? "";
     if (!contentType.includes("json") && !contentType.includes("javascript")) {
       const error = new Error(
