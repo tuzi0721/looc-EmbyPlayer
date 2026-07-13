@@ -16,6 +16,7 @@ import { WebDavClient } from "./backend/webdav.mjs";
 import { AlistClient } from "./backend/alist.mjs";
 import { CancelRegistry } from "./backend/network/cancel-registry.mjs";
 import { SessionCoordinator } from "./backend/playback/session-coordinator.mjs";
+import { RecoveryMachine, EventType, ActionType } from "./backend/playback/recovery-machine.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -273,6 +274,7 @@ const secureCredentials = new SecureCredentialStore(userDataDir, safeStorage);
 const store = new JsonStore(userDataDir, { credentialStore: secureCredentials });
 const cancelRegistry = new CancelRegistry();
 const playSessionCoordinator = new SessionCoordinator();
+const recoveryMachine = new RecoveryMachine();
 const emby = new EmbyClient(store);
 const danmaku = new DanmakuClient(store, emby);
 const webdav = new WebDavClient();
@@ -1940,6 +1942,7 @@ function cleanupRuntime(reason = "quit") {
   if (runtimeCleanupPromise) return runtimeCleanupPromise;
   runtimeCleanupPromise = (async () => {
     writePlaybackLog("runtime_cleanup", { reason });
+    recoveryMachine.handle(EventType.EXTERNAL_CANCEL);
     desktopIntegration?.markQuitting();
     desktopIntegration?.clearNowPlaying();
     desktopIntegration?.stopPowerSaveBlocker();
@@ -3175,8 +3178,35 @@ async function runPlayRequest(payload) {
         tracks: snapshot.tracks,
       },
     });
+    // Feed LOAD_SUCCESS to the recovery machine.
+    const recoveryResult = recoveryMachine.handle(EventType.LOAD_SUCCESS, {
+      positionMs: payload.startMs ?? 0,
+      paused: false,
+    });
+    if (recoveryResult.action === ActionType.REPORT_PLAYING) {
+      writePlaybackLog("recovery_machine", {
+        state: recoveryResult.state,
+        event: "load_success",
+      });
+    }
     return source;
   } catch (error) {
+    // Feed LOAD_FAILURE to the recovery machine.
+    const recoveryResult = recoveryMachine.handle(EventType.LOAD_FAILURE, {
+      error: error?.message ?? String(error),
+    });
+    writePlaybackLog("recovery_machine", {
+      state: recoveryResult.state,
+      event: "load_failure",
+      action: recoveryResult.action,
+      error: error?.message ?? String(error),
+    });
+    // If the machine suggests a recovery action, log it.
+    if (recoveryResult.action !== ActionType.REPORT_FAILED &&
+        recoveryResult.action !== ActionType.NONE) {
+      const status = recoveryMachine.userStatus();
+      if (status) emitAppEvent("player:recovery", { status, action: recoveryResult.action });
+    }
     writePlaybackLog("play_request_failed", {
       itemId: payload.itemId,
       elapsedMs: Math.round(performance.now() - started),
@@ -3806,6 +3836,7 @@ async function handleInvoke(command, args = {}) {
   }
 
   if (command === "stop") {
+    recoveryMachine.handle(EventType.USER_STOP);
     await mpv.clearNetworkAccess().catch((error) => {
       console.warn("failed to clear playback authentication state", error);
     });
