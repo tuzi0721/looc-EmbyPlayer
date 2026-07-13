@@ -1,3 +1,5 @@
+import { networkRequest, policy, FAST_READ } from "./network/index.mjs";
+
 const videoExtensions = new Set([
   "mp4",
   "mkv",
@@ -220,12 +222,31 @@ function authHeaders(payload = {}) {
 }
 
 async function fetchWithTimeout(url, init, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const requestPolicy = policy(FAST_READ, {
+    connectTimeoutMs: Math.min(timeoutMs ?? 15_000, 10_000),
+    responseTimeoutMs: timeoutMs ?? 15_000,
+    totalTimeoutMs: (timeoutMs ?? 15_000) * 3,
+    maxAttempts: 3,
+  });
+  const method = init?.method ?? "GET";
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
+    const result = await networkRequest(url.toString(), {
+      method,
+      headers: init?.headers ?? {},
+      body: init?.body,
+      policy: requestPolicy,
+      parse: method === "POST" ? "json" : "text",
+      context: "alist_request",
+    });
+    return new Response(
+      method === "POST" ? JSON.stringify(result.data) : result.data,
+      {
+        status: result.status,
+        headers: result.response.headers,
+      },
+    );
+  } catch (error) {
+    throw error;
   }
 }
 

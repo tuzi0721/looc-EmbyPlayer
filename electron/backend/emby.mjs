@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { networkRequest, NetworkError, FAST_READ, WRITE, policy } from "./network/index.mjs";
 
 const DEVICE_ID = "hills-lite-electron-001";
 const CLIENT_NAME = "Hills Lite";
@@ -480,20 +481,22 @@ function defaultUserAgent(settings, server, line) {
 // /Videos/{id}/stream path, mpv can't seek → endless "Corrupt file detected,
 // resync" → HEVC garbage / black screen.
 async function probeRangeSupport(url, headers, timeoutMs = 8000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, {
+    const result = await networkRequest(url.toString(), {
       method: "GET",
       headers: { ...headers, Range: "bytes=0-1" },
-      signal: controller.signal,
+      policy: policy(FAST_READ, {
+        connectTimeoutMs: Math.min(timeoutMs, 5_000),
+        responseTimeoutMs: timeoutMs,
+        totalTimeoutMs: timeoutMs * 2,
+        maxAttempts: 1,
+      }),
+      parse: "none",
+      context: "probe_range",
     });
-    try { await response.body?.cancel(); } catch { /* ignore */ }
-    return response.status === 206 || Boolean(response.headers.get("content-range"));
+    return result.status === 206 || Boolean(result.response.headers.get("content-range"));
   } catch {
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -532,24 +535,34 @@ function buildHeaders(settings, server, line, token = null) {
 }
 
 async function requestJson(url, init, context, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let response;
-  try {
-    response = await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
+  const method = (init?.method ?? "GET").toUpperCase();
+  const isRead = method === "GET" || method === "HEAD";
+  const basePolicy = isRead ? FAST_READ : WRITE;
+  const requestPolicy = policy(basePolicy, {
+    connectTimeoutMs: Math.min(timeoutMs ?? 15000, 10_000),
+    responseTimeoutMs: timeoutMs ?? 15_000,
+    totalTimeoutMs: (timeoutMs ?? 15_000) * (isRead ? 3 : 1),
+  });
 
-  const body = await response.text();
-  if (!response.ok) {
-    throw new Error(`${context}: HTTP ${response.status} from ${url}; body preview: ${bodyPreview(body)}`);
-  }
-  if (!body.trim()) return null;
   try {
-    return JSON.parse(body);
+    const result = await networkRequest(url.toString(), {
+      method,
+      headers: init?.headers,
+      body: init?.body,
+      policy: requestPolicy,
+      context: context ?? "emby_request",
+      parse: "json",
+    });
+    return result.data;
   } catch (error) {
-    throw new Error(`${context}: failed to parse JSON from ${url}: ${error}; body preview: ${bodyPreview(body)}`);
+    // Re-throw as a plain Error with context prefix for backward compatibility.
+    if (error instanceof NetworkError) {
+      const detail = error.httpStatus
+        ? `HTTP ${error.httpStatus}`
+        : error.code;
+      throw new Error(`${context ?? "request"}: ${detail} from ${url}; ${error.message}`);
+    }
+    throw new Error(`${context ?? "request"}: ${error.message}`);
   }
 }
 

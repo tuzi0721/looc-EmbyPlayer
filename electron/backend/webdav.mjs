@@ -1,3 +1,5 @@
+import { networkRequest, policy, FAST_READ } from "./network/index.mjs";
+
 const videoExtensions = new Set([
   "mp4",
   "mkv",
@@ -323,12 +325,25 @@ function parseMultistatus(xml, rootUrl, requestUrl) {
 }
 
 async function fetchWithTimeout(url, init, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const requestPolicy = policy(FAST_READ, {
+    connectTimeoutMs: Math.min(timeoutMs ?? 15_000, 10_000),
+    responseTimeoutMs: timeoutMs ?? 15_000,
+    totalTimeoutMs: (timeoutMs ?? 15_000) * 3,
+    maxAttempts: 3,
+  });
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
+    const result = await networkRequest(url.toString(), {
+      ...init,
+      policy: requestPolicy,
+      parse: "text",
+      context: "webdav_request",
+    });
+    return new Response(result.data, {
+      status: result.status,
+      headers: result.response.headers,
+    });
+  } catch (error) {
+    throw error;
   }
 }
 

@@ -41,6 +41,11 @@ export interface OpenFileDialogOptions {
 
 interface HillsLiteBridge {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
+  invokeCancellable<T>(
+    command: string,
+    args?: Record<string, unknown>,
+    options?: { signal?: AbortSignal },
+  ): Promise<T>;
   listen<T>(
     event: string,
     handler: (event: PlatformEvent<T>) => void,
@@ -63,6 +68,18 @@ export function installTauriCompatBridge(): void {
   window.hillsLite = {
     async invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
       const tauri = await import("@tauri-apps/api/core");
+      return tauri.invoke<T>(command, args);
+    },
+    async invokeCancellable<T>(
+      command: string,
+      args?: Record<string, unknown>,
+      options?: { signal?: AbortSignal },
+    ): Promise<T> {
+      const tauri = await import("@tauri-apps/api/core");
+      const signal = options?.signal;
+      if (signal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
       return tauri.invoke<T>(command, args);
     },
     async listen<T>(
@@ -2214,6 +2231,31 @@ export async function invoke<T>(
     return invokeWebFallback<T>(command, args);
   }
 
+  const tauri = await import("@tauri-apps/api/core");
+  return tauri.invoke<T>(command, args);
+}
+
+export async function invokeCancellable<T>(
+  command: string,
+  args?: Record<string, unknown>,
+  options?: { signal?: AbortSignal },
+): Promise<T> {
+  if (window.hillsLite) {
+    return window.hillsLite.invokeCancellable<T>(command, args, options);
+  }
+
+  if (!hasTauriRuntime()) {
+    const signal = options?.signal;
+    if (signal?.aborted) {
+      throw new DOMException("Aborted", "AbortError");
+    }
+    return invokeWebFallback<T>(command, args);
+  }
+
+  const signal = options?.signal;
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
   const tauri = await import("@tauri-apps/api/core");
   return tauri.invoke<T>(command, args);
 }

@@ -14,6 +14,8 @@ import { JsonStore, createServer } from "./backend/store.mjs";
 import { SecureCredentialStore } from "./backend/secure-credentials.mjs";
 import { WebDavClient } from "./backend/webdav.mjs";
 import { AlistClient } from "./backend/alist.mjs";
+import { CancelRegistry } from "./backend/network/cancel-registry.mjs";
+import { SessionCoordinator } from "./backend/playback/session-coordinator.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -269,6 +271,8 @@ app.on("open-url", (event, url) => {
 
 const secureCredentials = new SecureCredentialStore(userDataDir, safeStorage);
 const store = new JsonStore(userDataDir, { credentialStore: secureCredentials });
+const cancelRegistry = new CancelRegistry();
+const playSessionCoordinator = new SessionCoordinator();
 const emby = new EmbyClient(store);
 const danmaku = new DanmakuClient(store, emby);
 const webdav = new WebDavClient();
@@ -289,7 +293,6 @@ const playbackLogPath = path.join(userDataDir, "playback.log");
 const storeReady = app.whenReady().then(() => store.load()).catch((error) => {
   console.error("failed to initialize Electron state store", error);
 });
-let playQueue = Promise.resolve();
 let pendingPlay = null;
 let pendingPlayKey = null;
 let currentPlaySession = null;
@@ -3196,26 +3199,28 @@ function enqueuePlayRequest(payload) {
   const key = playRequestKey(payload);
   if (pendingPlay && pendingPlayKey === key) return pendingPlay;
 
-  const request = playQueue.catch(() => null).then(() => runPlayRequest(payload));
-  pendingPlay = request;
+  const request = playSessionCoordinator.supersede(
+    key,
+    async () => {
+      pendingPlay = await runPlayRequest(payload);
+      pendingPlayKey = key;
+      return pendingPlay;
+    },
+  );
   request.then(
     () => {
-      if (pendingPlay === request) {
+      if (pendingPlayKey === key) {
         pendingPlay = null;
         pendingPlayKey = null;
       }
     },
     () => {
-      if (pendingPlay === request) {
+      if (pendingPlayKey === key) {
         pendingPlay = null;
         pendingPlayKey = null;
       }
     },
   );
-  if (pendingPlay === request) {
-    pendingPlayKey = key;
-  }
-  playQueue = request.catch(() => null);
   return request;
 }
 
@@ -4335,6 +4340,7 @@ function createWindow() {
   });
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
+    cancelRegistry.cancelAllForSender(win.webContents?.id ?? -1);
     cleanupRuntime("window-closed");
   });
 
@@ -4390,6 +4396,25 @@ ipcMain.handle("hills:dialog:open", async (event, options = {}) => {
 ipcMain.handle("hills:invoke", async (event, command, args = {}) => {
   if (!isTrustedSender(event)) throw new Error("untrusted IPC sender");
   return handleInvoke(command, args);
+});
+
+ipcMain.handle("hills:invoke:cancellable", async (event, requestId, command, args = {}) => {
+  if (!isTrustedSender(event)) throw new Error("untrusted IPC sender");
+  const senderId = event.sender.id;
+  const { signal } = cancelRegistry.register({ senderId, command });
+  try {
+    const result = await handleInvoke(command, { ...args, _cancelSignal: signal });
+    cancelRegistry.complete(requestId);
+    return result;
+  } catch (error) {
+    cancelRegistry.complete(requestId);
+    throw error;
+  }
+});
+
+ipcMain.handle("hills:invoke:cancel", async (event, requestId) => {
+  if (!isTrustedSender(event)) throw new Error("untrusted IPC sender");
+  return cancelRegistry.cancel(requestId, event.sender.id);
 });
 
 app.whenReady().then(async () => {
